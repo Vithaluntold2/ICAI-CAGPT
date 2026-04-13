@@ -1103,30 +1103,61 @@
       btn.addEventListener('click', () => { saveTester(inp.value); overlay.remove(); render(); });
     }
 
+    // ════════════════════════════════════════════════════════════
+    // API SYNC  (falls back to localStorage when API unreachable)
+    // ════════════════════════════════════════════════════════════
+    const API_BASE = '/api/guide';
+
+    async function apiPost(path, body) {
+      const res = await fetch(API_BASE + path, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error('API ' + res.status);
+      return res.json();
+    }
+
+    async function apiGet(path) {
+      const res = await fetch(API_BASE + path);
+      if (!res.ok) throw new Error('API ' + res.status);
+      return res.json();
+    }
+
     function setTestResult(testId, result) {
       const status = result === 'pending' ? 'pending' : result;
       if (!testData[testId]) testData[testId] = {};
       testData[testId].status = status;
       testData[testId].tester = currentTester;
       testData[testId].updatedAt = new Date().toISOString();
-      saveTestData();
+      testData[testId].notes = testData[testId].notes || '';
+      saveTestData();  // save locally first for instant UI
       updateTestUI(testId, status);
       updateTestDashboard();
       renderActiveTestersSidebar();
       renderTesterBar();
+      // Async push to server
+      apiPost('/results', { testId, tester: currentTester, status, notes: testData[testId].notes })
+        .then(() => { syncOnline = true; renderTesterBar(); })
+        .catch(() => { syncOnline = false; renderTesterBar(); });
     }
 
     function setTestNote(testId, note) {
       if (!testData[testId]) testData[testId] = {};
       testData[testId].notes = note;
       saveTestData();
+      // Push updated note + current status to server
+      apiPost('/results', { testId, tester: currentTester, status: testData[testId].status || 'pending', notes: note })
+        .catch(() => {});
     }
 
     function saveTestData() {
       safeStorageSet('cagpt_e2e_data', JSON.stringify(testData));
       syncOnline = storageAvailable;
     }
+
     function loadTestData() {
+      // Load from localStorage (instant)
       try {
         const saved = safeStorageGet('cagpt_e2e_data', '');
         testData = saved ? JSON.parse(saved) : {};
@@ -1134,6 +1165,25 @@
         testData = {};
       }
       syncOnline = storageAvailable;
+      // Then fetch from server and merge (server wins for status, keeps latest updatedAt)
+      apiGet('/results')
+        .then(remote => {
+          let changed = false;
+          for (const [id, r] of Object.entries(remote)) {
+            const local = testData[id];
+            if (!local || new Date(r.updatedAt) >= new Date(local.updatedAt || 0)) {
+              testData[id] = { status: r.status, tester: r.tester, notes: r.notes, updatedAt: r.updatedAt };
+              changed = true;
+            }
+          }
+          if (changed) {
+            saveTestData();
+            render();
+          }
+          syncOnline = true;
+          renderTesterBar();
+        })
+        .catch(() => { syncOnline = false; renderTesterBar(); });
     }
 
     function toggleCard(el) {
@@ -1280,10 +1330,16 @@
     }
 
     function resetAllTests() {
-      if (!confirm('Reset all test results? This cannot be undone.')) return;
+      if (!confirm('Reset all test results? This will clear all testers\' results on the server too.')) return;
+      // Reset all known test IDs for the current tester on server
+      const ids = Object.keys(testData);
       testData = {};
       saveTestData();
       render();
+      // Push "pending" for every test the current tester had recorded
+      Promise.all(ids.map(id =>
+        apiPost('/results', { testId: id, tester: currentTester, status: 'pending', notes: '' }).catch(() => {})
+      )).then(() => { syncOnline = true; renderTesterBar(); });
     }
 
 

@@ -281,6 +281,32 @@ app.use((req, res, next) => {
 (async () => {
   // Initialize session table FIRST (cleanup old artifacts and create table)
   await initializeSessionTable();
+
+  // Ensure guide_test_results table exists (created on first deploy via raw SQL)
+  if (process.env.DATABASE_URL) {
+    const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+    try {
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS "guide_test_results" (
+          "id" varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+          "test_id" text NOT NULL,
+          "tester" text NOT NULL,
+          "status" text NOT NULL DEFAULT 'pending',
+          "notes" text DEFAULT '',
+          "updated_at" timestamp NOT NULL DEFAULT now(),
+          "created_at" timestamp NOT NULL DEFAULT now(),
+          CONSTRAINT "guide_test_results_test_id_tester_idx" UNIQUE ("test_id", "tester")
+        )
+      `);
+      await pool.query(`CREATE INDEX IF NOT EXISTS "guide_test_results_test_id_idx" ON "guide_test_results" ("test_id")`);
+      await pool.query(`CREATE INDEX IF NOT EXISTS "guide_test_results_tester_idx" ON "guide_test_results" ("tester")`);
+      console.log('[Startup] ✓ guide_test_results table ready');
+    } catch (err: any) {
+      console.error('[Startup] guide_test_results table init error:', err.message);
+    } finally {
+      await pool.end();
+    }
+  }
   
   // Now create the session store (table already exists)
   sessionStore = createSessionStore();

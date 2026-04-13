@@ -22,6 +22,7 @@ import contextRoutes from "./routes/context";
 import voiceRoutes from "./routes/voiceRoutes";
 import roundtableRoutes from "./routes/roundtableRoutes";
 import searchRoutes from "./routes/searchRoutes";
+import guideRoutes from "./routes/guideRoutes";
 // test-mindmap routes loaded dynamically in development only
 import { 
   setupSecurityMiddleware,
@@ -217,6 +218,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   
   // Register CA GPT Search routes — AI-powered search engine
   app.use('/api/search', searchRoutes);
+
+  // Register Guide test result routes — persistent multi-tester tracking
+  app.use('/api/guide', guideRoutes);
   
   // Authentication routes (with rate limiting)
   app.post("/api/auth/register", authRateLimiter, async (req, res) => {

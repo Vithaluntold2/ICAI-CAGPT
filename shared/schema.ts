@@ -572,6 +572,21 @@ export const sentimentTrends = pgTable("sentiment_trends", {
   userIdDateIdx: index("sentiment_trends_user_id_date_idx").on(table.userId, table.date),
 }));
 
+// Guide test results — persistent multi-tester tracking for cagpt-guide.html
+export const guideTestResults = pgTable("guide_test_results", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  testId: text("test_id").notNull(),       // e.g. "conv-01"
+  tester: text("tester").notNull(),         // testers display name (free text)
+  status: text("status").notNull().default("pending"), // 'pass' | 'fail' | 'pending'
+  notes: text("notes").default(""),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  testIdIdx: index("guide_test_results_test_id_idx").on(table.testId),
+  testerIdx: index("guide_test_results_tester_idx").on(table.tester),
+  testIdTesterIdx: uniqueIndex("guide_test_results_test_id_tester_idx").on(table.testId, table.tester),
+}));
+
 const passwordSchema = z.string()
   .min(8, "Password must be at least 8 characters")
   .max(128, "Password must not exceed 128 characters");

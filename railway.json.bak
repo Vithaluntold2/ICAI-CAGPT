@@ -1,0 +1,5 @@
+{
+  "_note": "This project is deployed on AWS (ECS/EC2). See Dockerfile and aws-ecs-task.json for deployment configuration.",
+  "_railway": "Railway config preserved for reference only — not used in production."
+}
+

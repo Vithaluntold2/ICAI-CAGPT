@@ -1,0 +1,40 @@
+# Docker ignore file — keeps image lean for AWS ECR/ECS
+
+node_modules
+dist
+.git
+.gitignore
+*.log
+*.md
+!README.md
+.env
+.env.*
+!.env.example
+railway.json
+railway-upload.log
+uploads/*
+local.db
+*.db
+*.sqlite
+test-*.xlsx
+demo_*.xlsx
+
+# Dev scripts
+scripts/railway-*.sh
+scripts/check-*.ts
+scripts/diagnose-*.js
+
+# Test files
+tests/
+*.test.ts
+vitest.config.ts
+package.test.json
+
+# Docs
+docs/
+project-docs/
+brand_guideline_images/
+
+# OS
+.DS_Store
+Thumbs.db

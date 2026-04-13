@@ -1,0 +1,1322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CA GPT — Module Guide &amp; Test Runner</title>
+  <script>
+    // Local no-op icon renderer fallback to avoid external dependency failures
+    window.lucide = window.lucide || { createIcons: function() {} };
+  </script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --brand-50: #e8f0fe; --brand-100: #c5d9fc; --brand-200: #9ebef9;
+      --brand-300: #76a3f6; --brand-400: #5a8ef3; --brand-500: #004B87;
+      --brand-600: #003d6f; --brand-700: #003058; --brand-800: #002340;
+      --brand-900: #001729;
+      --gold-50: #fef9e7; --gold-100: #fcefc2; --gold-200: #f9df85;
+      --gold-400: #d4a843; --gold-500: #b8860b; --gold-600: #946c09;
+      --gray-50: #f8f9fa; --gray-100: #f1f3f5; --gray-200: #e9ecef;
+      --gray-300: #dee2e6; --gray-400: #adb5bd; --gray-500: #868e96;
+      --gray-600: #495057; --gray-700: #343a40; --gray-800: #212529;
+      --gray-900: #111827;
+    }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background: #fff; color: var(--gray-700); line-height: 1.5; font-size: 13px; }
+
+    /* HEADER */
+    .site-header {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 200;
+      height: 56px; background: var(--brand-500);
+      display: flex; align-items: center; padding: 0 24px; gap: 12px;
+      box-shadow: 0 2px 8px rgba(0,0,0,.1);
+    }
+    .logo-mark {
+      width: 34px; height: 34px; background: white; border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 800; font-size: 14px; color: var(--brand-500);
+    }
+    .logo-text { font-weight: 700; font-size: 17px; color: white; letter-spacing: -.3px; }
+    .header-sep { width: 1px; height: 24px; background: rgba(255,255,255,.25); margin: 0 4px; }
+    .header-title { font-size: 13px; color: rgba(255,255,255,.8); font-weight: 500; }
+
+    /* SIDEBAR */
+    .sidebar {
+      position: fixed; top: 56px; left: 0; bottom: 0; width: 250px;
+      background: #fff; border-right: 1px solid var(--gray-200);
+      overflow-y: auto; padding: 16px 0; z-index: 100;
+    }
+    .sidebar-label {
+      font-size: 10px; text-transform: uppercase; letter-spacing: 1px;
+      color: var(--gray-400); padding: 0 16px 8px; font-weight: 600;
+    }
+    .sidebar a {
+      display: flex; align-items: center; gap: 8px;
+      padding: 8px 16px; font-size: 12px; color: var(--gray-600);
+      text-decoration: none; font-weight: 500; border-left: 3px solid transparent;
+      transition: all .15s;
+    }
+    .sidebar a:hover { background: var(--gray-50); color: var(--brand-600); }
+    .sidebar a.active { background: var(--brand-50); color: var(--brand-700); border-left-color: var(--brand-500); font-weight: 600; }
+    .sidebar a .s-icon { width: 16px; height: 16px; flex-shrink: 0; }
+    .mod-count {
+      margin-left: auto; font-size: 10px; font-weight: 700;
+      background: var(--gray-100); color: var(--gray-500);
+      padding: 1px 7px; border-radius: 10px;
+    }
+    .sidebar a.active .mod-count { background: var(--brand-200); color: var(--brand-700); }
+
+    /* MAIN */
+    .main { margin-left: 250px; margin-top: 56px; padding: 0 0 80px; min-height: 100vh; }
+    @media (max-width: 850px) { .sidebar { display: none; } .main { margin-left: 0; } }
+
+    /* CATEGORY SECTION */
+    .category-section { display: none; }
+    .category-section.active { display: block; }
+    .cat-header {
+      position: sticky; top: 56px; z-index: 50; background: #fff;
+      border-bottom: 1px solid var(--gray-200); padding: 16px 28px 0;
+    }
+    .cat-title-row { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+    .cat-title-row i { width: 20px; height: 20px; color: var(--brand-500); }
+    .cat-title { font-size: 18px; font-weight: 700; color: var(--gray-800); }
+    .cat-desc { font-size: 12px; color: var(--gray-500); max-width: 700px; margin-bottom: 12px; }
+
+    /* MODULE TABS */
+    .module-tabs { display: flex; flex-wrap: wrap; gap: 2px; }
+    .module-tab {
+      padding: 8px 14px; font-size: 12px; color: var(--gray-500);
+      background: transparent; border: none; border-bottom: 2px solid transparent;
+      cursor: pointer; font-weight: 500; display: flex; align-items: center; gap: 6px;
+      transition: all .15s;
+    }
+    .module-tab:hover { color: var(--brand-600); background: var(--brand-50); }
+    .module-tab.active { color: var(--brand-700); border-bottom-color: var(--brand-500); font-weight: 600; }
+    .module-tab i { width: 14px; height: 14px; }
+
+    /* MODULE PANE */
+    .module-pane { display: none; padding: 24px 28px; }
+    .module-pane.active { display: block; }
+    .mod-hero { margin-bottom: 20px; }
+    .mod-hero-title { font-size: 20px; font-weight: 700; color: var(--gray-800); display: flex; align-items: center; gap: 10px; }
+    .mod-hero-title i { width: 22px; height: 22px; color: var(--brand-500); }
+    .mod-hero-route { font-size: 11px; color: var(--gray-400); margin-top: 2px; font-family: monospace; }
+    .mod-hero-desc { font-size: 13px; color: var(--gray-600); margin-top: 8px; line-height: 1.6; max-width: 800px; }
+
+    /* CARDS */
+    .card {
+      background: #fff; border: 1px solid var(--gray-200); border-radius: 10px;
+      margin-bottom: 14px; overflow: hidden;
+    }
+    .card-header {
+      padding: 12px 16px; display: flex; align-items: center; gap: 8px;
+      font-size: 13px; font-weight: 600; color: var(--gray-700);
+      cursor: pointer; -webkit-user-select: none; user-select: none;
+    }
+    .card-header:hover { background: var(--gray-50); }
+    .card-header i { width: 16px; height: 16px; color: var(--brand-500); }
+    .card-header .chev { margin-left: auto; width: 14px; height: 14px; color: var(--gray-400); transition: transform .2s; }
+    .card.collapsible .card-body { display: none; }
+    .card.collapsible.card-open .card-body { display: block; }
+    .card.collapsible.card-open .chev { transform: rotate(180deg); }
+    .card-body { padding: 0 16px 16px; }
+    .card-body ul { list-style: none; padding: 0; }
+    .card-body ul li { padding: 4px 0; font-size: 12px; color: var(--gray-600); display: flex; align-items: flex-start; gap: 6px; }
+    .card-body ul li::before { content: '→'; color: var(--brand-400); font-weight: 700; flex-shrink: 0; }
+
+    /* TOGGLE BUTTON */
+    .toggle-all-btn {
+      font-size: 11px; padding: 4px 12px; background: var(--gray-50); border: 1px solid var(--gray-200);
+      border-radius: 6px; color: var(--gray-500); cursor: pointer; font-weight: 500; margin-bottom: 12px;
+    }
+    .toggle-all-btn:hover { background: var(--gray-100); }
+
+    /* COMPONENT GRID */
+    .comp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    @media (max-width: 850px) { .comp-grid { grid-template-columns: 1fr; } }
+    .comp-card {
+      background: var(--gray-50); border: 1px solid var(--gray-200); border-radius: 8px; padding: 12px;
+    }
+    .comp-card .cc-name { font-size: 12px; font-weight: 700; color: var(--gray-800); margin-bottom: 4px; }
+    .comp-card .cc-purpose { font-size: 11px; color: var(--gray-500); line-height: 1.5; }
+
+    /* SECTION GRID */
+    .section-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+    .section-chip {
+      display: flex; align-items: flex-start; gap: 8px;
+      padding: 10px 14px; border-radius: 8px;
+      background: var(--gray-50); border: 1px solid var(--gray-200);
+    }
+    .section-chip .sc-icon { width: 28px; height: 28px; border-radius: 6px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+    .section-chip .sc-icon i { width: 14px; height: 14px; }
+    .section-chip .sc-text { font-size: 12px; font-weight: 600; color: var(--gray-700); }
+    .section-chip .sc-detail { font-size: 10px; color: var(--gray-400); margin-top: 1px; }
+
+    /* STATUS BADGE */
+    .status-badge {
+      display: inline-flex; align-items: center; gap: 4px;
+      font-size: 10px; padding: 2px 8px; border-radius: 10px; font-weight: 600;
+    }
+    .status-badge.live { background: var(--brand-50); color: var(--brand-700); }
+
+    /* AGENT TABLE */
+    .agent-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 8px; }
+    .agent-table th {
+      background: var(--gray-50); font-weight: 600; text-align: left;
+      padding: 7px 12px; border-bottom: 1px solid var(--gray-200); color: var(--gray-600);
+      font-size: 11px; text-transform: uppercase; letter-spacing: .4px;
+    }
+    .agent-table td { padding: 6px 12px; border-bottom: 1px solid var(--gray-100); color: var(--gray-600); }
+    .agent-table tr:hover td { background: var(--brand-50); }
+
+    /* SUBTABS & ACTIONS */
+    .subtabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+    .subtab {
+      font-size: 12px; padding: 5px 12px; border-radius: 6px;
+      background: var(--gray-50); border: 1px solid var(--gray-200);
+      color: var(--gray-600); display: flex; align-items: center; gap: 5px;
+    }
+    .subtab .st-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--brand-400); }
+    .actions-wrap { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    .action-chip {
+      font-size: 11px; padding: 3px 10px; border-radius: 5px;
+      background: var(--gray-50); border: 1px solid var(--gray-200); color: var(--gray-600); font-weight: 500;
+    }
+
+    /* OUTPUT PANE INFO */
+    .output-info {
+      background: linear-gradient(135deg, var(--brand-50) 0%, #e8f4f8 100%);
+      border: 1px solid var(--brand-200); border-radius: 10px; padding: 14px 18px; margin-top: 12px;
+    }
+    .output-info .oi-label { font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--brand-600); margin-bottom: 6px; }
+    .output-info .oi-text { font-size: 12px; color: var(--brand-700); line-height: 1.6; }
+
+    /* TEST RUNNER */
+    .test-dashboard {
+      background: linear-gradient(135deg, var(--brand-50) 0%, #e8f4f8 100%);
+      border: 1px solid var(--brand-200); border-radius: 12px; padding: 20px 24px; margin-bottom: 20px;
+    }
+    .test-dashboard h4 {
+      margin: 0 0 14px 0; font-size: 15px; color: var(--brand-800);
+      display: flex; align-items: center; gap: 8px;
+    }
+    .test-dashboard h4 i { width: 18px; height: 18px; }
+    .td-stats { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; }
+    .td-stat {
+      background: white; border-radius: 10px; padding: 12px 20px;
+      min-width: 120px; text-align: center; border: 1px solid var(--gray-200);
+      box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    }
+    .td-stat-value { font-size: 28px; font-weight: 700; line-height: 1.1; }
+    .td-stat-value.pass { color: #059669; }
+    .td-stat-value.fail { color: #dc2626; }
+    .td-stat-value.pending { color: #6b7280; }
+    .td-stat-value.total { color: var(--brand-700); }
+    .td-stat-label {
+      font-size: 11px; color: var(--gray-500); text-transform: uppercase;
+      letter-spacing: .5px; margin-top: 4px; font-weight: 600;
+    }
+    .td-progress-bar { height: 8px; background: var(--gray-100); border-radius: 4px; overflow: hidden; margin-bottom: 10px; }
+    .td-progress-fill { height: 100%; border-radius: 4px; transition: width 0.4s ease; }
+    .td-progress-pass { background: #059669; }
+    .td-progress-fail { background: #dc2626; }
+    .td-modules-progress {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px;
+    }
+    .td-mod-item {
+      background: white; border-radius: 8px; padding: 10px 14px;
+      border: 1px solid var(--gray-200); display: flex; align-items: center; gap: 10px;
+    }
+    .td-mod-ring {
+      width: 40px; height: 40px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 12px; font-weight: 700; flex-shrink: 0;
+    }
+    .td-mod-info { flex: 1; min-width: 0; }
+    .td-mod-name { font-size: 12px; font-weight: 600; color: var(--gray-700); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .td-mod-detail { font-size: 11px; color: var(--gray-400); }
+    .td-reset-btn {
+      margin-top: 14px; background: white; border: 1px solid var(--gray-300);
+      border-radius: 6px; padding: 6px 16px; font-size: 12px; color: var(--gray-600);
+      cursor: pointer; font-weight: 500; transition: all 0.15s;
+    }
+    .td-reset-btn:hover { background: #fef2f2; border-color: #fca5a5; color: #dc2626; }
+
+    /* TEST CASE */
+    .test-section { margin-top: 16px; }
+    .test-section > h4 { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; font-size: 14px; color: var(--brand-800); }
+    .test-section > h4 i { width: 16px; height: 16px; }
+    .test-case {
+      background: white; border: 1px solid var(--gray-200); border-radius: 10px;
+      margin-bottom: 12px; overflow: hidden; transition: border-color 0.2s;
+    }
+    .test-case.passed { border-left: 4px solid #059669; }
+    .test-case.failed { border-left: 4px solid #dc2626; }
+    .test-case.pending { border-left: 4px solid var(--gray-300); }
+    .tc-header { padding: 12px 16px; display: flex; align-items: center; gap: 10px; cursor: pointer; -webkit-user-select: none; user-select: none; }
+    .tc-header:hover { background: var(--gray-50); }
+    .tc-num {
+      width: 26px; height: 26px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 12px; font-weight: 700; flex-shrink: 0;
+      background: var(--gray-100); color: var(--gray-500);
+    }
+    .test-case.passed .tc-num { background: #d1fae5; color: #059669; }
+    .test-case.failed .tc-num { background: #fee2e2; color: #dc2626; }
+    .tc-title { flex: 1; font-size: 13px; font-weight: 600; color: var(--gray-700); }
+    .tc-status-badge { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; padding: 3px 8px; border-radius: 4px; }
+    .tc-status-badge.pass { background: #d1fae5; color: #059669; }
+    .tc-status-badge.fail { background: #fee2e2; color: #dc2626; }
+    .tc-status-badge.pending { background: var(--gray-100); color: var(--gray-400); }
+    .tc-chevron { width: 16px; height: 16px; color: var(--gray-400); transition: transform 0.2s; }
+    .test-case.expanded .tc-chevron { transform: rotate(180deg); }
+    .tc-body { display: none; padding: 0 16px 16px 52px; }
+    .test-case.expanded .tc-body { display: block; }
+    .tc-steps { list-style: none; padding: 0; margin: 0 0 12px 0; }
+    .tc-steps li { position: relative; padding: 6px 0 6px 22px; font-size: 12px; color: var(--gray-600); line-height: 1.5; }
+    .tc-steps li::before { content: attr(data-step); position: absolute; left: 0; top: 6px; font-size: 10px; font-weight: 700; color: var(--brand-500); width: 16px; }
+    .tc-expected {
+      background: var(--brand-50); border-radius: 6px; padding: 10px 14px;
+      font-size: 12px; color: var(--brand-700); margin-bottom: 12px;
+      border-left: 3px solid var(--brand-400);
+    }
+    .tc-expected-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; color: var(--brand-500); margin-bottom: 4px; }
+    .tc-actions { display: flex; gap: 8px; }
+    .tc-btn { padding: 6px 18px; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; border: 1.5px solid; transition: all 0.15s; }
+    .tc-btn-pass { background: #d1fae5; border-color: #059669; color: #059669; }
+    .tc-btn-pass:hover, .tc-btn-pass.active { background: #059669; color: white; }
+    .tc-btn-fail { background: #fee2e2; border-color: #dc2626; color: #dc2626; }
+    .tc-btn-fail:hover, .tc-btn-fail.active { background: #dc2626; color: white; }
+    .tc-btn-reset { background: white; border-color: var(--gray-300); color: var(--gray-500); }
+    .tc-btn-reset:hover { background: var(--gray-50); }
+    .tc-notes { margin-top: 10px; }
+    .tc-notes textarea {
+      width: 100%; border: 1px solid var(--gray-200); border-radius: 6px;
+      padding: 8px 10px; font-size: 12px; font-family: inherit; resize: vertical;
+      min-height: 40px; color: var(--gray-600);
+    }
+    .tc-notes textarea:focus { outline: none; border-color: var(--brand-400); box-shadow: 0 0 0 2px rgba(0,75,135,0.1); }
+    .tc-notes-label { font-size: 10px; font-weight: 600; color: var(--gray-400); text-transform: uppercase; letter-spacing: .4px; margin-bottom: 4px; }
+
+    /* TESTER BAR */
+    .tester-bar {
+      position: fixed; bottom: 0; left: 250px; right: 0; z-index: 100;
+      background: #fff; border-top: 1px solid var(--gray-200);
+      padding: 8px 24px; display: flex; align-items: center; gap: 12px;
+      box-shadow: 0 -2px 6px rgba(0,0,0,.04); font-size: 12px;
+    }
+    @media (max-width: 850px) { .tester-bar { left: 0; } }
+    .tester-bar-label { font-weight: 600; color: var(--gray-600); display: flex; align-items: center; gap: 6px; }
+    .tester-bar-label i { width: 14px; height: 14px; color: var(--brand-500); }
+    .tester-bar-name {
+      background: var(--brand-50); color: var(--brand-700);
+      font-weight: 700; padding: 3px 12px; border-radius: 12px; font-size: 12px;
+      cursor: pointer; border: 1px solid var(--brand-200); transition: all 0.15s;
+    }
+    .tester-bar-name:hover { background: var(--brand-100); }
+    .tester-bar-sync { margin-left: auto; display: flex; align-items: center; gap: 6px; color: var(--gray-400); font-size: 11px; }
+    .sync-dot { width: 7px; height: 7px; border-radius: 50%; background: #059669; animation: pulse-dot 2s infinite; }
+    .sync-dot.offline { background: #dc2626; animation: none; }
+    @keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+    /* TESTER BADGES */
+    .tc-tester-badge {
+      display: inline-flex; align-items: center; gap: 4px; font-size: 10px;
+      font-weight: 600; padding: 2px 8px; border-radius: 10px;
+      background: var(--gray-100); color: var(--gray-500);
+    }
+    .tc-tester-badge.self { background: var(--brand-50); color: var(--brand-700); border: 1px solid var(--brand-200); }
+    .tc-time-ago { font-size: 10px; color: var(--gray-400); }
+
+    /* IDENTITY MODAL */
+    .identity-overlay {
+      position: fixed; top: 0; right: 0; bottom: 0; left: 0;
+      inset: 0; z-index: 999; background: rgba(0,0,0,.45);
+      display: flex; align-items: center; justify-content: center; -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px);
+    }
+    .identity-modal {
+      background: white; border-radius: 16px; padding: 32px 36px;
+      width: 360px; max-width: 90vw; box-shadow: 0 20px 60px rgba(0,0,0,.15); text-align: center;
+    }
+    .identity-modal h3 { font-size: 18px; font-weight: 700; color: var(--gray-900); margin-bottom: 6px; }
+    .identity-modal p { font-size: 13px; color: var(--gray-500); margin-bottom: 20px; line-height: 1.5; }
+    .identity-modal input {
+      width: 100%; padding: 10px 14px; border: 1.5px solid var(--gray-200);
+      border-radius: 8px; font-size: 14px; font-family: inherit; color: var(--gray-800);
+      margin-bottom: 14px; transition: border-color 0.15s;
+    }
+    .identity-modal input:focus { outline: none; border-color: var(--brand-400); box-shadow: 0 0 0 3px rgba(0,75,135,0.12); }
+    .identity-modal button {
+      width: 100%; padding: 10px 20px; border: none; border-radius: 8px;
+      background: var(--brand-500); color: white; font-size: 14px; font-weight: 600;
+      cursor: pointer; transition: background 0.15s;
+    }
+    .identity-modal button:hover { background: var(--brand-600); }
+    .identity-modal button:disabled { background: var(--gray-200); color: var(--gray-400); cursor: not-allowed; }
+
+    /* ACTIVE TESTERS */
+    .active-testers-label { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--gray-400); padding: 12px 0 6px; font-weight: 600; }
+    .at-person { display: flex; align-items: center; gap: 8px; padding: 5px 0; font-size: 12px; color: var(--gray-600); }
+    .at-avatar {
+      width: 22px; height: 22px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 10px; font-weight: 700; color: white; flex-shrink: 0;
+    }
+    .at-count { margin-left: auto; font-size: 10px; font-weight: 700; color: var(--gray-400); }
+
+    /* PRINT */
+    @media print {
+      .sidebar { display: none; } .main { margin-left: 0; }
+      .site-header { position: static; } .cat-header { position: static; }
+      .category-section { display: block !important; page-break-before: always; }
+      .module-pane { display: block !important; page-break-inside: avoid; }
+      .module-tabs { display: none; }
+      .test-dashboard { break-inside: avoid; } .test-case { break-inside: avoid; }
+      .tester-bar { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- HEADER -->
+  <header class="site-header">
+    <div class="logo-mark"><span>CA</span></div>
+    <span class="logo-text">CA GPT</span>
+    <div class="header-sep"></div>
+    <span class="header-title">Module Guide &amp; Test Runner</span>
+  </header>
+
+  <!-- SIDEBAR -->
+  <nav class="sidebar" id="sidebar"></nav>
+
+  <!-- MAIN -->
+  <div class="main" id="main"></div>
+
+  <!-- JS Error Log -->
+  <div id="js-error-log" style="display:none;position:fixed;bottom:80px;right:20px;max-width:400px;background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;padding:12px;font-size:11px;color:#b91c1c;z-index:9999;"></div>
+  <script>
+    window.onerror = function(msg, src, line, col) {
+      var el = document.getElementById('js-error-log');
+      if (el) { el.style.display = 'block'; el.innerHTML += '<b>Error:</b> ' + msg + '<br><b>Line:</b> ' + line + ':' + col + '<br><br>'; }
+      return false;
+    };
+  </script>
+
+  <script>
+    // ════════════════════════════════════════════════════════════
+    // DATA
+    // ════════════════════════════════════════════════════════════
+    const CATEGORIES = [
+      { id: 'chat_interface', name: 'Chat Interface & Layout', desc: 'Main chat layout, message display, conversation sidebar, mode selector ribbon, and core UI components', lucide: 'layout-dashboard' },
+      { id: 'standard_mode', name: 'Standard Chat Mode', desc: 'Default conversational Q&A mode with interview-first behaviour, document attachment, and contextual follow-up', lucide: 'message-square' },
+      { id: 'deep_research', name: 'Deep Research Mode', desc: '8-agent research pipeline: regulation search, case law analysis, cross-referencing, citation generation, and source validation', lucide: 'sparkles' },
+      { id: 'checklist_mode', name: 'Checklist Mode', desc: 'Structured compliance checklists with multi-level nesting, interactive checkboxes, and progress tracking', lucide: 'list-checks' },
+      { id: 'workflow_mode', name: 'Workflow Mode', desc: '5-agent workflow visualization pipeline producing Mermaid flowcharts for regulatory and audit processes', lucide: 'network' },
+      { id: 'audit_plan', name: 'Audit Planning Mode', desc: '14-agent audit planning suite covering scope, risk, materiality, sampling, evidence, team, timeline, and procedures', lucide: 'file-bar-chart' },
+      { id: 'calculation_mode', name: 'Financial Calculation Mode', desc: '5-agent financial calculation engine with Excel formula output — NPV, IRR, tax, depreciation, ROI, break-even', lucide: 'calculator' },
+      { id: 'roundtable_mode', name: 'Roundtable Mode', desc: '6-agent multi-expert collaborative discussion with expert assembly, moderation, consensus, and action synthesis', lucide: 'users' },
+      { id: 'scenario_simulator', name: 'Scenario Simulator', desc: '12-agent scenario modelling: design, tax impact, projections, sensitivity, compliance, and optimisation (separate page)', lucide: 'trending-up' },
+      { id: 'deliverable_composer', name: 'Deliverable Composer', desc: '45-agent professional document generation: audit reports, tax memos, compliance checklists, advisory letters, presentations (separate page)', lucide: 'file-edit' },
+      { id: 'forensic_intelligence', name: 'Forensic Intelligence', desc: '8-agent forensic analysis: pattern detection, anomaly identification, timeline reconstruction, evidence compilation (separate page)', lucide: 'search' },
+    ];
+
+    const MODULES = [
+
+      // ═══════════════════════════════════════════════════════
+      // CATEGORY: CHAT INTERFACE & LAYOUT
+      // ═══════════════════════════════════════════════════════
+
+      { id: 'chat_layout', name: 'Chat Layout', cat: 'chat_interface', icon: 'layout',
+        desc: 'The main CA GPT chat page is a resizable two-panel layout. The left panel holds the conversation messages (user and assistant), while the right panel is the collapsible Output Pane. A fixed header at the top shows the ICAI CA India logo, conversation title, and settings. The Mode Dock Ribbon sits between the header and the message area, letting you switch between the 7 in-chat modes.',
+        components: [
+          { name: 'Site Header (ChatHeader)', purpose: 'Fixed top bar showing the ICAI CA India logo, current conversation title (auto-generated or editable), settings gear icon, and user profile avatar. Clicking the title opens the title editor.' },
+          { name: 'Mode Dock Ribbon', purpose: 'Collapsible horizontal ribbon with 7 mode buttons: Standard, Research, Checklist, Workflow, Audit, Calculate, Roundtable. Collapsed view shows the active mode badge. Clicking expands to show all buttons. Selecting a mode changes the chat behaviour and collapses the ribbon.' },
+          { name: 'Message Area (ScrollArea)', purpose: 'Scrollable container for all user and assistant messages. Messages render Markdown with KaTeX math formulas, GFM tables, and code syntax highlighting. User messages have a user avatar; assistant messages have the CA bot avatar with a loading spinner during streaming.' },
+          { name: 'Output Pane', purpose: 'Right-side collapsible panel that displays structured output: Markdown, checklists, workflow diagrams, spreadsheets, or charts. Has three states: collapsed, expanded, and fullscreen. Toolbar includes Copy, Export (PDF/DOCX/PPTX/XLSX/CSV/TXT), Excel download, and fullscreen toggle.' },
+          { name: 'Chat Input Area', purpose: 'Bottom-docked text area with multi-line support, file upload button (Paperclip icon for PDFs, docs, spreadsheets), voice mode toggle (microphone icon for speech-to-text), and Send button. A dynamic status message shows below the input (e.g., "Researching sources...", "Calculating...").' },
+        ],
+        sections: [
+          { name: 'Header Bar', icon: 'panel-top', detail: 'Fixed 56px top bar with logo, title, and controls', status: 'live' },
+          { name: 'Mode Selector', icon: 'toggle-left', detail: 'Glass-morphism ribbon with coloured mode badges', status: 'live' },
+          { name: 'Message Area', icon: 'message-square', detail: 'Scrollable chat with Markdown + KaTeX rendering', status: 'live' },
+          { name: 'Output Pane', icon: 'panel-right', detail: 'Resizable right panel for structured output', status: 'live' },
+          { name: 'Input Bar', icon: 'text-cursor-input', detail: 'Multi-line input with file upload and voice', status: 'live' },
+        ],
+        tests: [
+          { id: 'layout-01', name: 'Verify header displays correctly', steps: ['Open CA GPT in browser', 'Verify the ICAI CA India logo appears in the top-left', 'Verify "CA GPT" or conversation title shows beside the logo', 'Check settings icon is visible on the right side'], expected: 'Header is fixed at top, logo renders, title is readable, settings icon clickable.' },
+          { id: 'layout-02', name: 'Mode Dock Ribbon expand/collapse', steps: ['Open any chat conversation', 'Click the Mode Dock Ribbon to expand it', 'Verify all 7 mode buttons appear: Standard, Research, Checklist, Workflow, Audit, Calculate, Roundtable', 'Click a different mode button', 'Verify the ribbon collapses and the selected mode is active'], expected: 'Ribbon expands on click showing all modes. Selecting a mode collapses the ribbon. Active mode badge colour matches the mode (blue for Research, green for Checklist, etc.).' },
+          { id: 'layout-03', name: 'Output Pane toggle and fullscreen', steps: ['Send a query in Workflow mode to generate a diagram', 'Verify the Output Pane opens on the right side', 'Click the fullscreen button on the Output Pane', 'Verify it fills the entire screen', 'Press Escape to exit fullscreen', 'Verify the pane returns to its normal width'], expected: 'Output Pane toggles between collapsed, expanded, and fullscreen. Content persists across state changes. Escape key exits fullscreen.' },
+          { id: 'layout-04', name: 'File upload via chat input', steps: ['Click the Paperclip icon in the chat input area', 'Select a PDF file from your device', 'Verify the file name appears as an attachment indicator', 'Type a question about the file and press Send', 'Verify the AI response references the file content'], expected: 'File picker opens on click. Uploaded file shows name badge. AI response incorporates content from the attached file.' },
+          { id: 'layout-05', name: 'Voice input toggle', steps: ['Click the microphone icon in the chat input area', 'Speak a question clearly', 'Verify the transcribed text appears in the input area', 'Press Send or stop recording', 'Verify the question is submitted and AI responds'], expected: 'Microphone activates speech-to-text. Transcription populates the input. Submission works normally.' },
+          { id: 'layout-06', name: 'Conversation sidebar navigation', steps: ['Open the sidebar (hamburger/menu icon if collapsed)', 'Verify the list of conversations appears', 'Click "New Chat" button', 'Verify a new empty conversation opens', 'Click on a previous conversation', 'Verify the messages load from that conversation'], expected: 'Sidebar shows all conversations sorted by recency. New Chat creates an empty session. Clicking a past conversation loads its history.' },
+        ],
+      },
+
+      { id: 'output_pane', name: 'Output Pane', cat: 'chat_interface', icon: 'panel-right',
+        desc: 'The Output Pane is the right-side panel that displays structured AI output beyond the chat stream. Depending on the active mode, it renders different content types: Markdown documents, interactive checklists, Mermaid flowchart diagrams, Excel-like spreadsheets, or data visualisations (charts). It offers Copy, Export (6 formats), Excel download, and fullscreen capabilities.',
+        components: [
+          { name: 'Markdown Renderer', purpose: 'Renders rich text with KaTeX math formulas ($...$ and $$...$$), GFM tables, fenced code blocks with syntax highlighting, headings, and lists. Used in Standard, Deep Research, Audit Planning, and Roundtable modes.' },
+          { name: 'Checklist Renderer', purpose: 'Displays multi-level checkbox items with nesting. Each item is toggleable. A progress bar at the top shows completion percentage. Used in Checklist mode output.' },
+          { name: 'Workflow Renderer (Mermaid)', purpose: 'Parses Mermaid flowchart syntax from the AI response and renders it as an interactive diagram with node shapes (rectangle, diamond, cylinder, rounded). Used in Workflow mode.' },
+          { name: 'Spreadsheet Viewer', purpose: 'Displays an Excel-like grid with editable cells, column headers, and formula support. Has a "Download as XLSX" button that exports with actual Excel formulas. Used in Calculation mode.' },
+          { name: 'Visualisation Renderer', purpose: 'Renders data charts using Recharts library: Bar, Line, Area, Pie, Scatter. Accepts JSON data arrays. Used when the AI response includes chart data.' },
+          { name: 'Export Toolbar', purpose: 'Buttons for: Copy to clipboard, Export as PDF/DOCX/PPTX/XLSX/CSV/TXT (dropdown), Download Excel (green icon, appears when mode=calculation), Fullscreen toggle.' },
+        ],
+        sections: [
+          { name: 'Content Area', icon: 'file-text', detail: 'Dynamic renderer switching between markdown, checklist, workflow, spreadsheet, or chart based on content type', status: 'live' },
+          { name: 'Toolbar', icon: 'wrench', detail: 'Copy, Export dropdown (6 formats), Excel download, Fullscreen/Chat toggle', status: 'live' },
+          { name: 'Collapse/Expand', icon: 'panel-right-close', detail: 'Three states: collapsed (icon only), expanded (side panel), fullscreen (entire viewport)', status: 'live' },
+        ],
+        tests: [
+          { id: 'opane-01', name: 'Output Pane renders Markdown correctly', steps: ['Set mode to Deep Research', 'Ask: "Explain the applicability of Section 44AD for professionals"', 'Wait for the full response', 'Check the Output Pane for the research report', 'Verify headings, bullet points, bold text, and any tables render properly'], expected: 'Output Pane shows formatted Markdown with proper heading hierarchy, styled bullet points, bold/italic text, and aligned tables. No raw Markdown syntax visible.' },
+          { id: 'opane-02', name: 'Excel download in Calculation mode', steps: ['Switch to Calculate mode', 'Ask: "Calculate NPV for cash flows of 50000, 60000, 70000, 80000 at 12% discount rate with initial investment of 150000"', 'Wait for the response to complete', 'Verify the green Excel download icon appears in the Output Pane toolbar', 'Click the Excel download button', 'Open the downloaded .xlsx file'], expected: 'Excel file downloads. File contains the input data, formulas (=NPV(...)), and computed values. Formulas are actual Excel formulas, not hardcoded numbers.' },
+          { id: 'opane-03', name: 'Mermaid flowchart in Workflow mode', steps: ['Switch to Workflow mode', 'Ask: "Show the GST return filing process flowchart"', 'Wait for the response', 'Verify the Output Pane renders a Mermaid diagram', 'Check that nodes have correct shapes (rectangles for processes, diamonds for decisions)'], expected: 'Mermaid diagram renders with correctly shaped nodes, directional arrows, and readable labels. Diagram is not cut off or overlapping.' },
+          { id: 'opane-04', name: 'Checklist rendering and interaction', steps: ['Switch to Checklist mode', 'Ask: "Create a statutory audit checklist for a private limited company"', 'Wait for the checklist to appear in the Output Pane', 'Click on several checkbox items to toggle them', 'Verify the progress bar updates'], expected: 'Checklist appears with nested items and checkboxes. Toggling works. Progress bar updates to reflect checked items.' },
+          { id: 'opane-05', name: 'Copy and Export functionality', steps: ['Generate any structured output in the Output Pane', 'Click the Copy button in the toolbar', 'Paste into a text editor and verify content', 'Click the Export dropdown', 'Select PDF format and verify download', 'Select DOCX format and verify download'], expected: 'Copy puts formatted text on clipboard. PDF export downloads a styled document. DOCX exports with headings and formatting preserved.' },
+          { id: 'opane-06', name: 'KaTeX inline math rendering', steps: ['In Standard mode, ask: "Explain the formula for compound interest"', 'Wait for the response', 'Check whether inline math expressions (e.g., $A = P(1 + r/n)^{nt}$) render as formatted math', 'Verify math symbols like subscripts, superscripts, and fractions display correctly (not raw LaTeX)'], expected: 'Inline math expressions render as typeset formulas using KaTeX. Variables appear in italics, exponents are raised, fractions display as stacked numerator/denominator. No raw dollar-sign-wrapped LaTeX visible.' },
+          { id: 'opane-07', name: 'KaTeX block math rendering', steps: ['Ask: "Show the formula for WACC calculation with all components"', 'Wait for the full response', 'Verify block math equations (wrapped in $$...$$) render as centred, larger formulas', 'Check that Greek letters (e.g., beta), summation symbols, and multi-line formulas display correctly'], expected: 'Block equations render centred on their own line at a larger size. Formula like $$WACC = \\frac{E}{V} \\times Re + \\frac{D}{V} \\times Rd \\times (1 - Tc)$$ displays with proper fractions, multiplication dots, and variable formatting.' },
+          { id: 'opane-08', name: 'Math formulas inside Markdown tables', steps: ['In Research mode, ask: "Compare straight-line and WDV depreciation methods with their formulas"', 'Wait for the response to render in the Output Pane', 'Check if any tables in the response contain math expressions', 'Verify the math renders correctly inside table cells (not broken layout)'], expected: 'Tables display cleanly with math expressions rendered inside cells. For example: SLM formula $D = (C - S) / N$ and WDV formula $D = C \\times r$ render inside table cells without overflowing or breaking the table structure.' },
+          { id: 'opane-09', name: 'Complex financial math notation', steps: ['Ask: "Explain the Gordon Growth Model and CAPM formulas with full mathematical notation"', 'Verify the response uses proper math notation for: summations, fractions, Greek letters (alpha, beta, sigma)', 'Check that the Output Pane renders these as typeset formulas'], expected: 'CAPM formula renders as $E(R_i) = R_f + \\beta_i (E(R_m) - R_f)$ with subscripts and Greek beta. Gordon model renders as $P_0 = \\frac{D_1}{k_e - g}$ with proper stacked fraction. All symbols typeset, not plain text.' },
+        ],
+      },
+
+      { id: 'conversation_mgmt', name: 'Conversation Management', cat: 'chat_interface', icon: 'messages-square',
+        desc: 'Conversations are managed via the left sidebar. Each conversation has an auto-generated title (chronicle-style, e.g., "Company Incorporation Guide" instead of raw user text). Users can pin important conversations, share them, and delete old ones. The system supports conversation memory — for long conversations (>12 messages), the AI retrieves topic-relevant context from earlier turns rather than dumping the entire raw history.',
+        components: [
+          { name: 'Conversation Sidebar', purpose: 'Left slide-out panel listing all conversations. Shows title, relative timestamp, and pin/share/delete icons. "New Chat" button at the top creates a fresh conversation. Pinned items sort to the top.' },
+          { name: 'Title Generator', purpose: 'After the first exchange, the system AI generates a concise subject heading (e.g., "GST Input Credit Reversal"). Titles are chronicle-style, not raw user text truncation.' },
+          { name: 'Conversation Memory', purpose: 'For long conversations (>12 messages), the system uses topic-based keyword matching to retrieve the most relevant earlier context instead of sending the entire raw history. Topics include: tax, audit, accounting, company-law, financial-reporting, compliance, costing, corporate-finance, banking, payroll.' },
+        ],
+        sections: [
+          { name: 'Sidebar List', icon: 'list', detail: 'Scrollable conversation entries with title, time, and action icons', status: 'live' },
+          { name: 'Auto-Title', icon: 'heading', detail: 'AI-generated chronicle-style titles after first exchange', status: 'live' },
+          { name: 'Memory System', icon: 'brain', detail: 'Topic-based retrieval for conversations exceeding 12 messages', status: 'live' },
+        ],
+        tests: [
+          { id: 'conv-01', name: 'Auto-generated conversation title', steps: ['Start a new chat', 'Ask: "What are the provisions for TDS on salary under Section 192?"', 'Wait for the AI response', 'Check the conversation title in the sidebar', 'Verify it is NOT just "What are the provisions..."'], expected: 'Conversation title is a concise subject heading like "TDS on Salary - Section 192" or similar. Not a raw truncation of the user message.' },
+          { id: 'conv-02', name: 'Pin and unpin conversation', steps: ['Open the conversation sidebar', 'Click the pin icon on a conversation', 'Verify it moves to the top of the list under "Pinned"', 'Click the pin icon again to unpin', 'Verify it returns to the normal sorted position'], expected: 'Pinning moves the conversation to the Pinned section. Unpinning returns it to the default chronological sort.' },
+          { id: 'conv-03', name: 'Conversation memory on long chats', steps: ['Open an existing conversation with 15+ messages', 'Ask a follow-up question that refers to something discussed early in the conversation', 'Verify the AI response correctly references the earlier context', 'Check that the response is contextually accurate'], expected: 'AI maintains context from earlier turns even in long conversations. Responses reference relevant earlier points without hallucination.' },
+          { id: 'conv-04', name: 'Delete a conversation', steps: ['Open the conversation sidebar', 'Click the delete (trash) icon on a conversation', 'Confirm the deletion dialog', 'Verify the conversation is removed from the list', 'Verify the current view switches to another conversation or new chat'], expected: 'Conversation is permanently removed. Sidebar updates immediately. No ghost entries remain.' },
+          { id: 'conv-05', name: 'Manual conversation title edit', steps: ['Open an existing conversation', 'Click the conversation title in the header or sidebar rename action', 'Change the title to "GST Annual Return Review"', 'Save the edited title', 'Reload the conversation list'], expected: 'Edited title replaces the auto-generated title everywhere the conversation appears. The new title persists after reload and is not overwritten until explicitly changed again.' },
+          { id: 'conv-06', name: 'Share conversation preserves content only for recipients with access', steps: ['Open a completed conversation', 'Click the share action', 'Copy the generated share link', 'Open the link in a second browser session with valid access', 'Verify the shared conversation opens with the same messages and title'], expected: 'Shared conversation opens in read-only or controlled access mode with the same message history, title, and structured outputs. Unauthorized access is blocked or prompts for authentication instead of exposing the conversation.' },
+        ],
+      },
+
+      // ═══════════════════════════════════════════════════════
+      // CATEGORY: STANDARD CHAT MODE
+      // ═══════════════════════════════════════════════════════
+
+      { id: 'standard_chat', name: 'Standard Chat', cat: 'standard_mode', icon: 'message-square',
+        desc: 'The default general-purpose CA advisory mode. When a user asks a question, the system first conducts an interview — asking 2-3 clarifying questions to understand the specific context (jurisdiction, entity type, financial year, etc.) before providing a comprehensive answer. Responses are professional, plain text (no emoji), and cite relevant sections of Indian law. The interview-first approach ensures precise, jurisdiction-specific advice.',
+        components: [
+          { name: 'Interview Prompt', purpose: 'Before answering, the AI asks 2-3 targeted clarifying questions. For example: "Which financial year does this relate to?", "Is this for an individual or a company?", "Which state for GST registration?". Labels are clean (e.g., "Advisory", "Tax Planning") with no emojis.' },
+          { name: 'Comprehensive Response', purpose: 'After clarification, the AI provides a detailed answer with legal section references, practical guidance, and step-by-step instructions. Responses follow plain text formatting — no JSON, no emoji, no object dumps.' },
+          { name: 'File Attachment Support', purpose: 'Users can attach PDFs, Excel files, or documents. The AI analyses the content and provides advice based on the document contents.' },
+          { name: 'Markdown Output', purpose: 'Responses render with proper headings, bold text, numbered lists, and code blocks (for section references). Output Pane shows the same content in a wider, more readable format.' },
+        ],
+        sections: [
+          { name: 'Interview Phase', icon: 'help-circle', detail: '2-3 clarifying questions with clean labels, no emojis, context-specific', status: 'live' },
+          { name: 'Response Phase', icon: 'file-text', detail: 'Professional advisory with section references and practical guidance', status: 'live' },
+          { name: 'Document Analysis', icon: 'paperclip', detail: 'PDF, Excel, and document attachment with content extraction', status: 'live' },
+        ],
+        tests: [
+          { id: 'std-01', name: 'Interview-first behaviour', steps: ['Start a new conversation in Standard mode', 'Ask: "How do I register a company in India?"', 'Verify the AI asks 2-3 clarifying questions before answering', 'Answer the clarifying questions', 'Verify the AI then provides a comprehensive response'], expected: 'AI does NOT immediately answer. It first asks clarifying questions (e.g., "What type of company — Private Limited, LLP, OPC?", "Which state for incorporation?"). After answers, it provides detailed guidance with MCA/Companies Act references.' },
+          { id: 'std-02', name: 'No emojis in responses', steps: ['Ask any question in Standard mode', 'Receive the clarifying questions', 'Check the response for emojis', 'Answer the questions and check the full response for emojis'], expected: 'No emojis appear anywhere in the interview questions or the final response. Labels are plain text like "Advisory" or "Tax Planning".' },
+          { id: 'std-03', name: 'Tax advisory with section citations', steps: ['Ask: "What is the TDS rate on professional fees for FY 2024-25?"', 'Complete the interview if prompted', 'Verify the response cites Section 194J of the Income Tax Act', 'Verify the TDS rate mentioned is correct (10% for professional fees)'], expected: 'Response includes Section 194J reference, correct rate (10%), threshold (Rs 30,000), and practical guidance on deduction and deposit timelines.' },
+          { id: 'std-04', name: 'Document attachment analysis', steps: ['Attach a PDF file (e.g., a balance sheet or tax computation)', 'Ask: "Review this document and highlight any issues"', 'Verify the AI processes the attachment', 'Verify the response references specific items from the document'], expected: 'AI reads the PDF content, identifies specific line items or figures from the document, and provides relevant commentary. Response is not generic — it specifically references the uploaded content.' },
+          { id: 'std-05', name: 'Follow-up question context retention', steps: ['Ask: "Explain Section 80C deductions"', 'Complete the interview', 'After the response, ask: "What about Section 80D?"', 'Verify the follow-up response acknowledges the prior context'], expected: 'AI understands Section 80D is a follow-up to the 80C discussion. It may reference the prior discussion or contrast the two sections.' },
+          { id: 'std-06', name: 'Multi-jurisdiction awareness', steps: ['Ask: "How is GST charged on inter-state supply?"', 'When asked for clarification, specify "Between Maharashtra and Karnataka, for goods"', 'Verify response specifies IGST applicability'], expected: 'Response correctly identifies IGST (not CGST+SGST) for inter-state supply, references Section 5 of IGST Act, and mentions place of supply rules.' },
+          { id: 'std-07', name: 'Section citation accuracy and format', steps: ['Ask: "What are the conditions for claiming input tax credit under GST?"', 'Complete the interview', 'Verify the response cites Section 16 of CGST Act, 2017', 'Verify sub-sections are referenced (e.g., Section 16(2)(a), 16(2)(b))', 'Cross-check at least 2 cited sections against the actual CGST Act'], expected: 'Response cites Section 16(1) for eligibility, Section 16(2)(a)-(d) for conditions (tax invoice, receipt of goods, tax paid to government, return filed). Sub-section references are precise — not just "Section 16". Each condition maps to the correct sub-clause.' },
+          { id: 'std-08', name: 'Circular and notification references', steps: ['Ask: "What is the latest position on ITC reversal for exempt supplies?"', 'Complete the interview', 'Verify the response references Rule 42/43 of CGST Rules', 'Check if any CBIC Circulars or Notifications are cited by number', 'Verify the cited circular/notification numbers exist (cross-check online)'], expected: 'Response references Rule 42 (proportional ITC reversal for inputs) and Rule 43 (capital goods). At least one CBIC Circular number is cited (e.g., Circular No. 170/02/2022-GST). Notification numbers include gazette reference format.' },
+          { id: 'std-09', name: 'Cross-Act reference linking', steps: ['Ask: "Explain the tax treatment when a company distributes dividend to shareholders"', 'Complete the interview', 'Verify the response references BOTH the Income Tax Act AND the Companies Act', 'Check for Section 115-O (old regime), Section 2(22) (deemed dividend), and Companies Act Section 123'], expected: 'Response bridges two Acts: Income Tax Act (Section 2(22) deemed dividend, abolition of DDT post-2020, Section 194 TDS on dividend) AND Companies Act, 2013 (Section 123 declaration of dividend, Section 124 unpaid dividend). Cross-Act connections are clearly articulated.' },
+          { id: 'std-10', name: 'Math in tax computation response', steps: ['Ask: "Calculate my advance tax liability if total estimated income is Rs 12,00,000 and TDS already deducted is Rs 80,000"', 'Complete the interview (specify individual, new regime)', 'Verify the response provides instalments with due dates (15 Jun, 15 Sep, 15 Dec, 15 Mar)', 'Check if any math formulas are rendered using KaTeX notation'], expected: 'Response shows 4 advance tax instalments: 15% by Jun 15, 45% by Sep 15, 75% by Dec 15, 100% by Mar 15. Computation uses mathematical notation where appropriate (e.g., $Tax\\_Payable - TDS = Advance\\_Tax$). Instalment percentages and due dates are accurate per Section 211.' },
+          { id: 'std-11', name: 'ICAI Standards of Auditing references', steps: ['Ask: "What are the auditor\'s responsibilities regarding related party transactions?"', 'Complete the interview', 'Verify the response references SA 550 (Related Parties)', 'Check for references to AS 18 / Ind AS 24 (Related Party Disclosures)', 'Verify auditor procedure requirements are cited'], expected: 'Response references SA 550 for audit procedures on related parties, AS 18/Ind AS 24 for disclosure requirements, and Section 188 of Companies Act for related party approvals. Specific auditor responsibilities from SA 550 are listed: identifying, assessing risk, evaluating disclosures.' },
+        ],
+      },
+
+      // ═══════════════════════════════════════════════════════
+      // CATEGORY: DEEP RESEARCH MODE
+      // ═══════════════════════════════════════════════════════
+
+      { id: 'deep_research_mode', name: 'Deep Research', cat: 'deep_research', icon: 'sparkles',
+        desc: 'An 8-agent research pipeline that provides comprehensive legal and tax research with source validation, cross-referencing, and multi-format citations. The agents work in sequence: Research Coordinator orchestrates, Regulation Searcher finds regulatory texts, Case Law Analyzer reviews precedents, Tax Code Navigator indexes sections, Cross-Reference Builder links related provisions, Source Validator checks reliability, Citation Generator formats references, and Summary Generator synthesises the findings.',
+        agents: [
+          { name: 'Research Coordinator', capability: 'coordination, planning', purpose: 'Orchestrates the multi-stream research workflow' },
+          { name: 'Regulation Searcher', capability: 'search, retrieval', purpose: 'Searches regulatory databases (Income Tax Act, GST Act, Companies Act, SEBI, FASB)' },
+          { name: 'Case Law Analyzer', capability: 'analysis, reasoning', purpose: 'Analyses court judgments, tribunal orders, and legal precedents' },
+          { name: 'Tax Code Navigator', capability: 'navigation, indexing', purpose: 'Indexes and navigates specific tax code sections and rules' },
+          { name: 'Cross-Reference Builder', capability: 'linking, mapping', purpose: 'Builds relationships between different regulations, circulars, and notifications' },
+          { name: 'Source Validator', capability: 'validation, quality', purpose: 'Validates source reliability — prefers gov.in, court databases, and regulatory bodies' },
+          { name: 'Citation Generator', capability: 'citation, formatting', purpose: 'Generates multi-format citations (Bluebook, APA, etc.)' },
+          { name: 'Summary Generator', capability: 'summarisation, synthesis', purpose: 'Creates comprehensive research summaries with key findings and recommendations' },
+        ],
+        components: [
+          { name: 'Research Report (Output Pane)', purpose: 'The Output Pane displays a structured research report with: Executive Summary, Regulatory Framework, Case Law Analysis, Cross-References, and Recommendations sections. Formatted as Markdown with heading hierarchy.' },
+          { name: 'Citation Block', purpose: 'Each regulatory or case law reference includes a formatted citation. Users can see the source, section number, and relevant extract.' },
+          { name: 'Source Reliability Indicators', purpose: 'Sources are tagged with reliability level (government gazette, court order, circular, commentary). Primary sources are prioritised.' },
+        ],
+        sections: [
+          { name: 'Research Pipeline', icon: 'git-branch', detail: '8 agents execute sequentially with dependency chain', status: 'live' },
+          { name: 'Output Report', icon: 'file-text', detail: 'Structured Markdown report in Output Pane with citations', status: 'live' },
+          { name: 'Source Validation', icon: 'shield-check', detail: 'Reliability scoring of sources (gov.in, courts, commentaries)', status: 'live' },
+        ],
+        tests: [
+          { id: 'res-01', name: 'Deep research produces structured report', steps: ['Switch to Research mode using the Mode Dock Ribbon', 'Ask: "Research the legal framework for cryptocurrency taxation in India"', 'Wait for the full response to complete (may take 15-30 seconds)', 'Check the Output Pane for the research report'], expected: 'Output Pane shows a structured research report with headings: regulatory framework, relevant sections (Section 115BBH, Section 194S), case law references, and recommendations. Report is multi-paragraph and comprehensive.' },
+          { id: 'res-02', name: 'Case law citations in research', steps: ['In Research mode, ask: "What are the landmark Supreme Court cases on disallowance under Section 14A?"', 'Wait for the full response', 'Verify the response cites specific case names', 'Check that citations include case name, court, and year'], expected: 'Response includes specific case references (e.g., Maxopp Investment Ltd v CIT, CIT v Rajendra Prasad Moody). Citations follow legal citation format with case name, court, year, and key ruling.' },
+          { id: 'res-03', name: 'Cross-referencing regulatory provisions', steps: ['Ask: "Research the interplay between Section 40(a)(ia) and Section 201 of the Income Tax Act"', 'Wait for the research to complete', 'Verify the response links the two sections together', 'Check for references to relevant circulars and notifications'], expected: 'Report explicitly connects Section 40(a)(ia) TDS disallowance with Section 201 failure to deduct/pay provisions. Cross-references relevant CBDT circulars and any tribunal orders addressing the interplay.' },
+          { id: 'res-04', name: 'Research depth and source quality', steps: ['Ask: "Research the applicability of Ind AS 116 (Leases) for small companies"', 'Review the research report', 'Check the number of distinct sources cited', 'Verify at least one primary source (ICAI guidance, MCA notification) is referenced'], expected: 'Report cites at least 3-5 distinct sources. Primary sources include ICAI guidance notes, MCA notifications, and Ind AS text. Report distinguishes mandatory vs. voluntary adoption for small companies.' },
+          { id: 'res-05', name: 'Research on GST with latest amendments', steps: ['Ask: "Research the latest changes to GST rate structure for restaurant services"', 'Verify the response includes notification numbers', 'Check that the response mentions the relevant GST Council meeting decisions'], expected: 'Response includes specific notification numbers, GST Council meeting references, effective dates, and current applicable rates. Distinguishes between restaurants in and outside specified premises.' },
+          { id: 'res-06', name: 'Multi-format citation output', steps: ['In Research mode, ask: "Research the legal framework for LLP taxation and cite all sources"', 'Wait for the full response', 'Verify citations include: Act name, section number, sub-section', 'Check if any case law is cited with case name, court, year, and reporter', 'Verify at least one citation follows formal legal citation format'], expected: 'Citations follow proper format: "Section 9 of the Indian Partnership Act, 1932" (statute), "CIT v. XYZ [2020] 425 ITR 123 (SC)" (case law), "Circular No. 10/2019 dated 22.05.2019" (administrative). Multiple citation styles present. Reporter volume numbers included for case law.' },
+          { id: 'res-07', name: 'CBDT Circular and judicial precedent chain', steps: ['Ask: "Research the CBDT circulars on Section 68 (unexplained cash credits) and relevant tribunal decisions"', 'Wait for the research report', 'Verify at least 2 CBDT circular numbers are cited', 'Verify at least 2 ITAT/High Court/Supreme Court decisions are cited', 'Check that the report shows how judicial views evolved over time'], expected: 'Report cites specific CBDT Circulars (e.g., Circular No. 19/2019) with dates. Case law chain shows evolution: multiple tribunal decisions, High Court rulings, and any Supreme Court pronouncements. Chronological progression of judicial interpretation is visible.' },
+          { id: 'res-08', name: 'International treaty and DTAA citations', steps: ['Ask: "Research the India-Singapore DTAA provisions on capital gains from shares"', 'Wait for the research report', 'Verify the report cites specific DTAA Articles (e.g., Article 13)', 'Check for references to the 2005 Protocol amendments', 'Verify references to LOB (Limitation on Benefits) clause'], expected: 'Report references India-Singapore DTAA Article 13 (Capital Gains), the Third Protocol (2005) introducing LOB clause, and grandfathering provisions for pre-2017 investments. Notification No. SO 2786(E) or equivalent cited. Connects to domestic provisions under Section 90/90A of Income Tax Act.' },
+          { id: 'res-09', name: 'ICAI Guidance Notes and AS/Ind AS citations', steps: ['Ask: "Research the accounting treatment for revenue from contracts with customers under Ind AS 115"', 'Verify the response cites Ind AS 115 paragraph numbers', 'Check for references to ICAI Guidance Notes or Implementation Guides', 'Verify the 5-step revenue recognition model is explained with paragraph references'], expected: 'Report cites Ind AS 115 with specific paragraph numbers (e.g., para 9 for contract identification, para 22 for performance obligations). References ICAI FAQs or Implementation Guidance. 5-step model: (1) identify contract, (2) identify performance obligations, (3) determine transaction price, (4) allocate price, (5) recognise revenue — each linked to specific Ind AS paragraphs.' },
+          { id: 'res-10', name: 'Source reliability hierarchy in research', steps: ['Ask: "Research whether Section 14A disallowance applies when there is no exempt income"', 'Wait for the full response', 'Check if the report distinguishes between primary sources (statutes, Supreme Court) and secondary sources (commentaries, articles)', 'Verify the Supreme Court decision in Maxopp Investment is cited as authoritative'], expected: 'Report clearly hierarchises sources: (1) Supreme Court decisions as binding precedent, (2) High Court decisions with jurisdictional note, (3) ITAT decisions as persuasive, (4) CBDT circulars as administrative guidance. Maxopp Investment Ltd v CIT (2018) is cited as the landmark authority. Conflicting views between different High Courts are noted.' },
+        ],
+      },
+
+      // ═══════════════════════════════════════════════════════
+      // CATEGORY: CHECKLIST MODE
+      // ═══════════════════════════════════════════════════════
+
+      { id: 'checklist_builder', name: 'Checklist Builder', cat: 'checklist_mode', icon: 'list-checks',
+        desc: 'Generates structured compliance and procedural checklists with multi-level nesting. The Output Pane renders an interactive checklist where users can tick off completed items and track progress via a percentage bar. Checklists are organised by category with hierarchical sub-items. Particularly useful for statutory audit checklists, compliance calendars, and filing requirements.',
+        components: [
+          { name: 'Checklist Output (Output Pane)', purpose: 'Renders the generated checklist with interactive checkboxes. Multi-level nesting allows categories (e.g., "Company Law Compliance") with sub-items (e.g., "File Annual Return — Form MGT-7"). Progress bar at top tracks checked items.' },
+          { name: 'Progress Tracker', purpose: 'Shows a visual progress bar (0-100%) based on how many checklist items the user has ticked. Updates in real-time as checkboxes are toggled.' },
+          { name: 'Hierarchical Items', purpose: 'Checklists support 2-3 levels of nesting: Category → Item → Sub-item. Items can have descriptions explaining the requirement and deadline.' },
+        ],
+        sections: [
+          { name: 'Checklist Generation', icon: 'list-checks', detail: 'AI generates hierarchical checklist from the query context', status: 'live' },
+          { name: 'Interactive Checkboxes', icon: 'check-square', detail: 'Toggle items on/off with persistent state during session', status: 'live' },
+          { name: 'Progress Display', icon: 'bar-chart', detail: 'Real-time percentage bar tracking completion', status: 'live' },
+        ],
+        tests: [
+          { id: 'chk-01', name: 'Generate a statutory audit checklist', steps: ['Switch to Checklist mode', 'Ask: "Create a statutory audit checklist for a private limited company under the Companies Act, 2013"', 'Wait for the checklist to appear in the Output Pane', 'Verify it has categories like "Opening Procedures", "Verification of Assets", "Revenue Testing"', 'Verify items have descriptions'], expected: 'Output Pane shows a structured checklist with at least 5 major categories, each with 3-10 sub-items. Items reference relevant sections (e.g., Section 143, SA 500). Checkboxes are interactive.' },
+          { id: 'chk-02', name: 'Checklist progress tracking', steps: ['Generate any checklist in Checklist mode', 'Note the initial progress bar shows 0%', 'Click on 5 checkbox items to mark them complete', 'Verify the progress bar updates to reflect the checked items', 'Uncheck 2 items and verify the progress decreases'], expected: 'Progress bar updates in real-time. Percentage is accurate based on checked vs total items. Unchecking decreases the percentage.' },
+          { id: 'chk-03', name: 'GST compliance checklist', steps: ['Ask: "Generate a monthly GST compliance checklist for a regular taxpayer"', 'Verify the checklist includes GSTR-1, GSTR-3B, and reconciliation items', 'Check that due dates are mentioned for each filing'], expected: 'Checklist covers GSTR-1 (11th of following month), GSTR-3B (20th), and includes items for input tax credit reconciliation, e-way bill verification, and reverse charge compliance.' },
+          { id: 'chk-04', name: 'Nested hierarchy display', steps: ['Generate a compliance checklist for "Annual ROC filings for a company"', 'Verify the checklist has at least 2 levels of nesting', 'Check that parent categories can be expanded/collapsed', 'Verify sub-items are properly indented'], expected: 'Checklist shows clear hierarchy: e.g., "Annual Filings" → "Form MGT-7 (Annual Return)" → sub-items like "Verify share transfer details", "Confirm registered office". Indentation is visually clear.' },
+          { id: 'chk-05', name: 'Export checklist as document', steps: ['Generate a checklist in the Output Pane', 'Click the Export button in the Output Pane toolbar', 'Export as PDF', 'Export as DOCX', 'Verify both files contain the checklist content'], expected: 'PDF and DOCX exports contain the full checklist with hierarchy preserved. Checkbox items are listed with check/uncheck indicators.' },
+          { id: 'chk-06', name: 'Checklist state survives navigation and refresh', steps: ['Generate a checklist and mark several items complete', 'Navigate to another mode or category', 'Return to the same checklist view', 'Refresh the page if persistence is expected', 'Verify the completion state and percentage remain correct'], expected: 'Checked items remain checked for the active session, and progress percentage remains accurate after navigation. If persistence is implemented, refresh restores the same checklist state rather than resetting silently.' },
+          { id: 'chk-07', name: 'Checklist includes legal references and due dates consistently', steps: ['Ask: "Create an annual compliance checklist for a private limited company"', 'Review at least 10 checklist items', 'Verify each major filing item includes a due date or period', 'Verify key items cite the relevant form, section, or rule'], expected: 'Major compliance items include concrete references such as Form AOC-4, Form MGT-7, AGM due date, board meeting intervals, and applicable Companies Act sections or rule references. The checklist reads like a compliance document, not a generic task list.' },
+        ],
+      },
+
+      // ═══════════════════════════════════════════════════════
+      // CATEGORY: WORKFLOW MODE
+      // ═══════════════════════════════════════════════════════
+
+      { id: 'workflow_viz', name: 'Workflow Visualisation', cat: 'workflow_mode', icon: 'network',
+        desc: 'A 5-agent pipeline that converts text descriptions into visual flowcharts. The Workflow Parser analyses the text, Node Generator creates nodes with types (process, decision, document, start/end), Edge Generator creates connections, Layout Optimiser prevents overlaps, and Workflow Validator checks logical completeness. Output is a Mermaid diagram rendered in the Output Pane.',
+        agents: [
+          { name: 'Workflow Parser', capability: 'parsing, structure-analysis', purpose: 'Parses text descriptions into structured flowchart elements' },
+          { name: 'Node Generator', capability: 'generation, enrichment', purpose: 'Creates nodes with properties (type, label, category)' },
+          { name: 'Edge Generator', capability: 'generation, linking', purpose: 'Generates directed connections between nodes with conditional labels' },
+          { name: 'Layout Optimiser', capability: 'optimisation, layout', purpose: 'Auto-positions nodes to prevent overlaps and crossings' },
+          { name: 'Workflow Validator', capability: 'validation, completeness', purpose: 'Validates workflow logic: every path has an end, no orphan nodes' },
+        ],
+        components: [
+          { name: 'Mermaid Diagram (Output Pane)', purpose: 'Renders the generated flowchart using Mermaid.js. Nodes use correct shapes: rectangles for processes, diamonds for decisions, cylinders for documents, rounded rectangles for start/end.' },
+          { name: 'Node Labels', purpose: 'Each node has a descriptive label. Decision nodes have Yes/No branches. Document nodes reference specific forms or filings.' },
+        ],
+        sections: [
+          { name: 'Agent Pipeline', icon: 'git-branch', detail: '5 agents in sequence: parse → nodes → edges → layout → validate', status: 'live' },
+          { name: 'Mermaid Render', icon: 'network', detail: 'Interactive diagram in Output Pane with correct node shapes', status: 'live' },
+        ],
+        tests: [
+          { id: 'wf-01', name: 'Generate GST return filing flowchart', steps: ['Switch to Workflow mode', 'Ask: "Show the process flowchart for filing GSTR-3B return"', 'Wait for the diagram to render in the Output Pane', 'Verify the diagram has start and end nodes', 'Verify decision nodes (diamonds) for "Are there any errors?" type checks'], expected: 'Mermaid diagram shows a complete flowchart with: Start → Login to GST portal → Fill GSTR-3B details → Verify → Decision (errors?) → Submit → Digital signature → End. Decision nodes use diamond shape.' },
+          { id: 'wf-02', name: 'Company incorporation workflow', steps: ['Ask: "Create a flowchart for incorporating a private limited company in India"', 'Verify the diagram includes steps like DSC, DIN, name approval, MoA/AoA, SPICe+ form', 'Check that the workflow is sequential with correct dependencies'], expected: 'Diagram shows: Start → Obtain DSC → Apply for DIN → Name reservation → Draft MoA/AoA → File SPICe+ → MCA approval → Certificate of Incorporation → End. Steps are in correct order.' },
+          { id: 'wf-03', name: 'Complex workflow with multiple decision points', steps: ['Ask: "Create a flowchart for TDS compliance including deduction, deposit, and return filing with late payment scenarios"', 'Verify the diagram has at least 2 decision nodes', 'Verify branches for on-time vs late payment'], expected: 'Diagram includes decision nodes for "Deducted on time?", "Deposited within due date?". Late branches show interest calculation (Section 201(1A)) and penalty paths. Multiple paths converge at the TDS return filing step.' },
+          { id: 'wf-04', name: 'Audit process workflow', steps: ['Ask: "Show the flowchart for a complete statutory audit process from engagement to report"', 'Verify the diagram covers: engagement acceptance, planning, fieldwork, reporting', 'Check that the flow is comprehensive (10+ nodes)'], expected: 'Diagram has 10+ nodes covering: Engagement letter → Risk assessment → Audit planning → Materiality → Fieldwork → Testing → Documentation → Review → Draft report → Management representation → Final audit report.' },
+          { id: 'wf-05', name: 'Workflow export capability', steps: ['Generate any workflow diagram in the Output Pane', 'Click the Export button', 'Export as PDF', 'Verify the PDF contains the rendered diagram'], expected: 'PDF export includes the Mermaid diagram as a visual image. Labels are readable. Diagram is not clipped or overlapping page boundaries.' },
+          { id: 'wf-06', name: 'Decision branch labels remain readable in dense diagrams', steps: ['Ask: "Generate a workflow for GST assessment with notices, replies, hearings, and appeals"', 'Inspect all decision branches in the rendered diagram', 'Verify labels like Yes/No, Accepted/Rejected, Appeal/No Appeal are visible', 'Check that branch text does not overlap nearby nodes'], expected: 'Decision branch labels remain legible even in dense workflows. Arrows, labels, and nodes have enough separation that the process can be followed without ambiguity.' },
+          { id: 'wf-07', name: 'Long workflow handles scrolling and viewport correctly', steps: ['Ask for a long workflow with at least 15 steps', 'Verify the diagram remains fully accessible within the Output Pane', 'Scroll vertically and horizontally if needed', 'Check that no nodes are cut off at container boundaries'], expected: 'Large workflows remain navigable inside the Output Pane. Users can scroll or resize as needed, and no part of the Mermaid output is permanently clipped or inaccessible.' },
+        ],
+      },
+
+      // ═══════════════════════════════════════════════════════
+      // CATEGORY: AUDIT PLANNING MODE
+      // ═══════════════════════════════════════════════════════
+
+      { id: 'audit_planning', name: 'Audit Planning', cat: 'audit_plan', icon: 'file-bar-chart',
+        desc: 'A comprehensive 14-agent audit planning suite. Agents cover the entire planning lifecycle: Scope Definer sets audit objectives, Risk Assessor identifies and prioritises risks, Materiality Calculator computes thresholds, Control Evaluator assesses internal controls, Sampling Planner designs statistical samples, Evidence Planner specifies audit evidence, Team Allocator assigns resources, Timeline Planner creates schedules, Budget Estimator computes fees, Procedure Designer creates audit programmes, Testing Strategy Designer plans detailed tests, Documentation Planner sets documentation standards, Communication Planner manages stakeholders, and Audit Plan Finaliser compiles the complete plan.',
+        agents: [
+          { name: 'Scope Definer', capability: 'scope-definition', purpose: 'Defines audit scope, objectives, and boundaries' },
+          { name: 'Risk Assessor', capability: 'risk-analysis', purpose: 'Identifies and prioritises audit risks (inherent, control, detection)' },
+          { name: 'Materiality Calculator', capability: 'calculation', purpose: 'Computes overall and performance materiality thresholds' },
+          { name: 'Control Evaluator', capability: 'control-assessment', purpose: 'Evaluates design and operating effectiveness of internal controls' },
+          { name: 'Sampling Planner', capability: 'sampling', purpose: 'Designs statistical and non-statistical sampling approaches' },
+          { name: 'Evidence Planner', capability: 'evidence-planning', purpose: 'Specifies evidence needed for each financial statement assertion' },
+          { name: 'Team Allocator', capability: 'resource-planning', purpose: 'Allocates audit team members based on competence and risk areas' },
+          { name: 'Timeline Planner', capability: 'scheduling', purpose: 'Creates audit timeline with milestones and deadlines' },
+          { name: 'Budget Estimator', capability: 'costing', purpose: 'Estimates audit fees and resource hours by area' },
+          { name: 'Procedure Designer', capability: 'procedure-design', purpose: 'Designs specific substantive and compliance audit procedures' },
+          { name: 'Testing Strategy Designer', capability: 'strategy', purpose: 'Plans detailed testing strategies (test of controls, substantive)' },
+          { name: 'Documentation Planner', capability: 'documentation', purpose: 'Plans working paper requirements per SA documentation standards' },
+          { name: 'Communication Planner', capability: 'stakeholder-management', purpose: 'Plans communication with TCWG, management, and predecessors' },
+          { name: 'Audit Plan Finaliser', capability: 'synthesis', purpose: 'Compiles all outputs into a complete, coherent audit plan document' },
+        ],
+        components: [
+          { name: 'Audit Plan Document (Output Pane)', purpose: 'The Output Pane displays the comprehensive audit plan as a structured Markdown document with sections: Scope & Objectives, Risk Assessment, Materiality, Internal Controls, Audit Procedures, Sampling Plan, Team Allocation, Timeline, Budget, and Communication Plan.' },
+          { name: 'Risk Assessment Matrix', purpose: 'A formatted table showing identified risks, likelihood, impact, risk level (High/Medium/Low), and planned response procedure.' },
+          { name: 'Materiality Schedule', purpose: 'Shows the materiality calculation methodology (e.g., 1% of total revenue, 5% of profit before tax) with overall and performance materiality figures.' },
+        ],
+        sections: [
+          { name: '14-Agent Pipeline', icon: 'git-branch', detail: 'Sequential and parallel agent execution across all audit planning areas', status: 'live' },
+          { name: 'Comprehensive Plan', icon: 'file-text', detail: 'Full audit plan document with 10+ sections in Output Pane', status: 'live' },
+          { name: 'Risk Matrix', icon: 'alert-triangle', detail: 'Risk identification and assessment table with impact/likelihood', status: 'live' },
+        ],
+        tests: [
+          { id: 'aud-01', name: 'Generate complete audit plan', steps: ['Switch to Audit mode', 'Ask: "Create an audit plan for a manufacturing company with annual revenue of Rs 50 crores, listed on BSE"', 'Wait for the full response (may take 20-40 seconds due to 14 agents)', 'Check the Output Pane for the audit plan document'], expected: 'Output Pane shows a comprehensive audit plan with sections covering: Scope (listed company, manufacturing), Risk Assessment (at least 5 risks identified), Materiality (calculated from revenue/PBT), Sampling approach, Team allocation, Timeline, and Budget estimate. Each section is substantive, not placeholder text.' },
+          { id: 'aud-02', name: 'Risk assessment with prioritisation', steps: ['Ask: "Prepare a risk assessment for auditing a real estate company that recognises revenue on percentage of completion method"', 'Verify the response identifies revenue recognition as a high-risk area', 'Check that the risk matrix includes likelihood and impact ratings'], expected: 'Revenue recognition (% completion) is flagged as HIGH risk. Other risks include: project cost estimation, WIP valuation, customer advances. Risk matrix shows L/M/H ratings for each risk with planned audit procedures.' },
+          { id: 'aud-03', name: 'Materiality calculation', steps: ['Ask: "Calculate audit materiality for a company with total revenue Rs 200 crores, PBT Rs 15 crores, total assets Rs 180 crores"', 'Verify the response shows the materiality calculation methodology', 'Check that both overall and performance materiality are computed'], expected: 'Response shows materiality benchmarks (e.g., 1% of revenue = Rs 2 Cr, 5% of PBT = Rs 75 lakhs, 1% of total assets = Rs 1.8 Cr). Selects appropriate benchmark with justification. Performance materiality at 60-75% of overall. Trivial threshold at 3-5% of overall.' },
+          { id: 'aud-04', name: 'Audit procedures for specific area', steps: ['Ask: "Design audit procedures for testing trade receivables of a pharmaceutical distribution company"', 'Verify the response includes both substantive and compliance procedures', 'Check for specific procedures like circularisation, ageing analysis, subsequent receipts'], expected: 'Response includes: External confirmation/circularisation, ageing analysis, allowance for doubtful debts review, subsequent receipts testing, cut-off testing, related party receivables check, credit note testing. References relevant SAs (SA 505 for confirmations).' },
+          { id: 'aud-05', name: 'Team allocation and timeline', steps: ['Ask: "Suggest team allocation and audit timeline for a bank audit with branches in 5 cities"', 'Verify team structure includes partner, manager, seniors, and articles', 'Verify timeline covers pre-audit, interim, final, and reporting phases'], expected: 'Team includes: Engagement Partner, Audit Manager, 2 Senior Auditors, 4 Audit Articles. Timeline shows 4 phases with branch visit schedule. Branch allocation considers risk and size. Total estimated hours are reasonable.' },
+          { id: 'aud-06', name: 'Audit plan cites relevant Standards on Auditing', steps: ['Ask for an audit plan covering inventory, receivables, revenue, and going concern', 'Review the resulting document', 'Verify specific Standards on Auditing are cited for major procedures', 'Check that citations align with the topic they support'], expected: 'Audit plan references relevant standards such as SA 315 for risk assessment, SA 320 for materiality, SA 330 for responses to assessed risks, SA 500 for audit evidence, SA 505 for confirmations, and SA 570 for going concern. Citations are tied to the correct planning sections.' },
+          { id: 'aud-07', name: 'Sampling plan distinguishes statistical and judgmental methods', steps: ['Ask: "Design an audit sampling plan for revenue and inventory testing"', 'Inspect the sampling section of the audit plan', 'Verify the response distinguishes statistical sampling from judgmental sampling', 'Check that sample size drivers or selection criteria are explained'], expected: 'Sampling plan explains when statistical, stratified, MUS, or judgmental sampling is appropriate. It references risk, population size, expected deviation, and materiality as drivers of sample design rather than giving a generic statement to sample records.' },
+        ],
+      },
+
+      // ═══════════════════════════════════════════════════════
+      // CATEGORY: FINANCIAL CALCULATION MODE
+      // ═══════════════════════════════════════════════════════
+
+      { id: 'financial_calc', name: 'Financial Calculations', cat: 'calculation_mode', icon: 'calculator',
+        desc: 'A 5-agent financial calculation engine. CRITICAL RULE: All calculations output Excel formulas — the AI NEVER computes numeric values itself. The NPV Calculator handles NPV/IRR, Tax Liability Calculator computes Indian tax (old/new regime), Depreciation Scheduler generates schedules (SL, WDV, MACRS), ROI Calculator computes investment returns, and Break-Even Analyser determines break-even points. Output includes a downloadable Excel file with working formulas.',
+        agents: [
+          { name: 'NPV Calculator', capability: 'NPV, IRR, break-even', purpose: 'Calculates Net Present Value and Internal Rate of Return with Excel formulas' },
+          { name: 'Tax Liability Calculator', capability: 'tax computation', purpose: 'Computes tax liability under Indian old and new regime using Excel formulas' },
+          { name: 'Depreciation Scheduler', capability: 'depreciation', purpose: 'Generates depreciation schedules (Straight Line, Written Down Value, MACRS)' },
+          { name: 'ROI Calculator', capability: 'investment analysis', purpose: 'Calculates return on investment, payback period, and profitability index' },
+          { name: 'Break-Even Analyser', capability: 'cost analysis', purpose: 'Determines break-even points for different cost structures and scenarios' },
+        ],
+        components: [
+          { name: 'Spreadsheet Output (Output Pane)', purpose: 'The Output Pane renders an Excel-like grid with input data in cells and formulas visible. Users can see both the formula and the computed value. "Download as XLSX" provides an Excel file with actual working formulas.' },
+          { name: 'Excel Download Button', purpose: 'Green file icon in the Output Pane toolbar. Downloads an .xlsx file with actual Excel formulas (e.g., =NPV(B1,C3:C7)+B2, =IRR(B2:C7)). Values are computed by Excel, not by the AI.' },
+          { name: 'Formula Reference Table', purpose: 'The chat response includes a table mapping each metric to its Excel formula and cell reference. Example: | NPV | =NPV(B1,C3:C7)+B2 | D1 |' },
+        ],
+        sections: [
+          { name: 'Excel-First Rule', icon: 'shield-alert', detail: 'AI provides formulas ONLY — never computes values. All arithmetic delegated to Excel.', status: 'live' },
+          { name: 'Spreadsheet Grid', icon: 'grid', detail: 'Interactive Excel-like grid in Output Pane with formulas and cell references', status: 'live' },
+          { name: 'XLSX Download', icon: 'download', detail: 'Download Excel file with working formulas via green icon in toolbar', status: 'live' },
+        ],
+        tests: [
+          { id: 'calc-01', name: 'NPV calculation with Excel formulas', steps: ['Switch to Calculate mode', 'Ask: "Calculate NPV for an initial investment of Rs 10,00,000 with cash flows of Rs 3,00,000, Rs 4,00,000, Rs 5,00,000, Rs 3,50,000 over 4 years at 12% discount rate"', 'Wait for the response', 'Check that the response provides Excel formulas, NOT computed values', 'Check the Output Pane for spreadsheet data', 'Click the Excel download button'], expected: 'Response includes a formula table like: | NPV | =NPV(0.12,B3:B6)+B2 | . NO computed numeric value like "NPV = Rs 2,34,567". Excel file downloads with actual =NPV() formula.' },
+          { id: 'calc-02', name: 'AI does NOT compute values (Excel-First rule)', steps: ['Ask: "Calculate the tax liability for an individual with income of Rs 15,00,000 under the new regime for FY 2024-25"', 'Examine the ENTIRE response carefully', 'Check if any numeric tax amount is directly computed by the AI'], expected: 'Response provides Excel formulas for each slab calculation (e.g., =MIN(B2-300000,300000)*0.05). Response does NOT say "Tax liability = Rs X". All values are expressed as formulas or cell references.' },
+          { id: 'calc-03', name: 'Depreciation schedule generation', steps: ['Ask: "Generate a depreciation schedule for a machine costing Rs 5,00,000, useful life 10 years, residual value Rs 50,000, using Straight Line Method"', 'Check the Output Pane for a spreadsheet', 'Verify each year has depreciation amount, accumulated depreciation, and book value', 'Download the Excel file and check formulas'], expected: 'Output Pane shows 10-year schedule. Annual depreciation = (Cost - Residual) / Life as a formula. Each year\'s book value = Previous book value - Depreciation as a formula. Excel file has working formulas, not just values.' },
+          { id: 'calc-04', name: 'Break-even analysis', steps: ['Ask: "Calculate break-even point: Fixed costs Rs 2,00,000/month, selling price Rs 500/unit, variable cost Rs 300/unit"', 'Verify the formula for break-even units is provided', 'Verify the formula for break-even revenue is provided'], expected: 'Response provides: Break-even units = =B1/(B3-B2) (Fixed Costs / (SP - VC)). Break-even revenue = =break-even units * selling price as formula. Result expressed as formulas with cell references.' },
+          { id: 'calc-05', name: 'ROI and payback period', steps: ['Ask: "Calculate ROI and payback period for an investment of Rs 20,00,000 with annual net profit of Rs 5,00,000"', 'Verify formulas for ROI and payback period', 'Check Excel download contains the formulas'], expected: 'ROI formula: =(Annual Profit/Investment)*100 as cell reference. Payback = =Investment/Annual Profit. Excel file has both formulas working correctly.' },
+          { id: 'calc-06', name: 'Old vs New regime tax comparison', steps: ['Ask: "Compare tax under old and new regime for income Rs 20,00,000 with deductions: 80C Rs 1,50,000, 80D Rs 25,000, HRA Rs 2,40,000"', 'Verify both regime calculations are provided', 'Verify each slab has Excel formulas'], expected: 'Response shows two parallel calculations: Old regime (with deductions applied) and New regime (no deductions, different slabs). All amounts expressed as Excel formulas. Comparison table shows which regime is beneficial.' },
+          { id: 'calc-07', name: 'Compound interest and EMI with amortisation', steps: ['Ask: "Calculate EMI for a loan of Rs 50,00,000 at 8.5% interest for 20 years, and show the amortisation schedule for the first 12 months"', 'Verify the EMI formula uses =PMT() Excel function', 'Check that the amortisation schedule shows principal, interest, and balance columns', 'Download the Excel file and verify formulas reference previous rows'], expected: 'EMI formula: =PMT(rate/12, nper*12, -pv). Amortisation schedule for 12 months with columns: Month, Opening Balance, EMI, Interest (=Opening*Rate/12), Principal (=EMI-Interest), Closing Balance (=Opening-Principal). Each row references the previous row. No hardcoded numbers.' },
+          { id: 'calc-08', name: 'WACC calculation with multiple components', steps: ['Ask: "Calculate WACC given: Equity Rs 60 Cr at cost 14%, Debt Rs 40 Cr at cost 9%, Preference shares Rs 10 Cr at cost 11%, Tax rate 25%"', 'Verify the response provides the WACC formula with Excel cell references', 'Check that debt is adjusted for tax shield', 'Download Excel and verify the formula'], expected: 'WACC formula: =((E/V)*Re)+((D/V)*Rd*(1-Tc))+((P/V)*Rp) with each component in separate cells. Debt cost adjusted for tax: =9%*(1-25%). Total V = E+D+P. All weights computed as formulas (=E/V, =D/V, =P/V). No pre-computed percentages.' },
+          { id: 'calc-09', name: 'Transfer pricing margin computation', steps: ['Ask: "Calculate the arm\'s length margin using TNMM for a company with operating revenue Rs 100 Cr, operating costs Rs 85 Cr, and compare with 5 comparable companies having PLI margins of 12%, 14%, 16%, 18%, 20%"', 'Verify PLI (Profit Level Indicator) is computed using Excel formula', 'Check that the interquartile range is computed', 'Verify the conclusion references Section 92C'], expected: 'PLI formula: =(Revenue-Cost)/Cost or =(Revenue-Cost)/Revenue as cell formula. Comparable PLIs sorted. IQR computed: Q1 (=QUARTILE()), Median (=MEDIAN()), Q3 (=QUARTILE()). Tested party PLI compared against IQR. Section 92C(2) proviso for +/-3% range referenced.' },
+          { id: 'calc-10', name: 'Weighted average and ratio analysis', steps: ['Ask: "Calculate key financial ratios: Current Ratio, Debt-Equity Ratio, Return on Equity, and Interest Coverage Ratio given: Current Assets Rs 25 Cr, Current Liabilities Rs 15 Cr, Total Debt Rs 40 Cr, Equity Rs 50 Cr, Net Profit Rs 12 Cr, Interest Rs 6 Cr, EBIT Rs 18 Cr"', 'Verify each ratio is expressed as an Excel formula', 'Check that formulas use cell references, not hardcoded numbers', 'Download and verify all formulas compute correctly'], expected: 'Each ratio as formula: Current Ratio =CA/CL, Debt-Equity =Debt/Equity, ROE =NetProfit/Equity*100, ICR =EBIT/Interest. All use cell references. No pre-computed values like "Current Ratio = 1.67". Excel file has input cells and formula cells clearly separated.' },
+        ],
+      },
+
+      // ═══════════════════════════════════════════════════════
+      // CATEGORY: ROUNDTABLE MODE
+      // ═══════════════════════════════════════════════════════
+
+      { id: 'roundtable_discussion', name: 'Roundtable Discussion', cat: 'roundtable_mode', icon: 'users',
+        desc: 'A 6-agent multi-expert collaborative discussion mode. The Expert Assembler selects relevant domain experts (Tax, Audit, Forensic, International law, Compliance), Discussion Moderator creates an agenda and manages the flow, Position Articulator documents each expert\'s stance, Consensus Builder identifies agreements and disagreements, Action Recommender synthesises into actionable recommendations, and Documentation Specialist formats the roundtable outcome for the client.',
+        agents: [
+          { name: 'Expert Assembler', capability: 'expert-selection', purpose: 'Selects 3-5 relevant experts based on the query domain' },
+          { name: 'Discussion Moderator', capability: 'moderation', purpose: 'Creates discussion agenda and manages conversation flow' },
+          { name: 'Position Articulator', capability: 'communication', purpose: 'Documents each expert\'s position on the issue' },
+          { name: 'Consensus Builder', capability: 'negotiation', purpose: 'Identifies areas of agreement and disagreement among experts' },
+          { name: 'Action Recommender', capability: 'synthesis', purpose: 'Synthesises expert input into concrete recommendations' },
+          { name: 'Documentation Specialist', capability: 'documentation', purpose: 'Formats roundtable outcomes as a professional client-ready document' },
+        ],
+        components: [
+          { name: 'Expert Panel Display', purpose: 'The response identifies which experts are participating (e.g., Tax Advisor, Audit Partner, Company Law Expert). Each expert\'s viewpoint is presented under their heading.' },
+          { name: 'Consensus Summary', purpose: 'After individual positions, a summary shows: Areas of Agreement, Areas of Disagreement, and Recommended Actions. Presented as a structured document in the Output Pane.' },
+          { name: 'Action Items', purpose: 'Numbered list of concrete action items distilled from the expert discussion, each with owner, priority, and deadline suggestion.' },
+        ],
+        sections: [
+          { name: 'Expert Assembly', icon: 'users', detail: 'AI selects 3-5 domain experts based on query context', status: 'live' },
+          { name: 'Multi-Perspective Discussion', icon: 'messages-square', detail: 'Each expert provides their independent analysis', status: 'live' },
+          { name: 'Consensus & Actions', icon: 'check-circle', detail: 'Synthesised agreement points and actionable recommendations', status: 'live' },
+        ],
+        tests: [
+          { id: 'rt-01', name: 'Roundtable assembles relevant experts', steps: ['Switch to Roundtable mode', 'Ask: "Discuss the tax and legal implications of a corporate restructuring involving a demerger"', 'Wait for the full response', 'Verify that multiple experts are identified (e.g., Tax Expert, Company Law Expert, Valuation Expert)'], expected: 'Response identifies at least 3 experts: Tax Advisor (for capital gains, stamp duty), Company Law Expert (for NCLT approval, Section 230-232), Valuation Expert (for fair value determination). Each expert\'s perspective is presented separately.' },
+          { id: 'rt-02', name: 'Multi-expert perspectives presented', steps: ['Ask: "Should a company opt for the lower corporate tax rate under Section 115BAA, considering they have significant MAT credit?"', 'Verify each expert provides a distinct viewpoint', 'Check that viewpoints occasionally disagree'], expected: 'Tax Expert discusses 115BAA benefits (22% vs 30%) but loss of MAT credit. Another expert discusses long-term vs short-term implications. Potential disagreement on timing of switch. Multiple angles covered comprehensively.' },
+          { id: 'rt-03', name: 'Consensus and action items generated', steps: ['After any roundtable discussion, scroll to the end of the response', 'Verify a "Consensus" or "Summary" section exists', 'Verify "Action Items" or "Recommendations" are listed', 'Check that action items are concrete and specific'], expected: 'Summary section clearly states: areas of agreement, areas of disagreement. Action items are numbered with specific steps (e.g., "1. Compute comparative tax liability under both regimes", "2. Review MAT credit balance and utilisation timeline").' },
+          { id: 'rt-04', name: 'International tax roundtable', steps: ['Ask: "Discuss the DTAA implications for an Indian company paying royalties to a US parent company"', 'Verify experts include International Tax and Treaty experts', 'Check that DTAA Article references are included'], expected: 'Experts include International Tax Advisor and Domestic Tax Expert. Discussion references India-US DTAA Article 12 (Royalties), Section 195 (TDS on payments to NR), and Form 15CA/15CB requirements. Multiple perspectives on beneficial ownership and treaty eligibility.' },
+          { id: 'rt-05', name: 'Roundtable with competing legal provisions', steps: ['Ask: "Discuss whether a startup can claim deduction under Section 80-IAC while simultaneously opting for the lower tax rate under Section 115BAA"', 'Verify at least 3 experts are assembled (Tax Advisor, Startup Consultant, Compliance Expert)', 'Check that each expert cites specific sections and conditions', 'Verify the consensus summary addresses the mutual exclusivity of these provisions'], expected: 'Tax Advisor cites Section 115BAA(2) condition of forgoing all Chapter VI-A deductions. Startup expert cites Section 80-IAC eligibility (DPIIT recognition, incorporation date). Compliance expert addresses Form 10-IC filing. Experts disagree on optimal strategy — consensus section clearly states: 115BAA and 80-IAC are mutually exclusive, recommends comparative computation.' },
+          { id: 'rt-06', name: 'Roundtable with math-backed analysis', steps: ['Ask: "Discuss optimal capital structure for a manufacturing company with EBIT of Rs 50 Cr — should it take on Rs 100 Cr debt at 10% or issue equity?"', 'Verify experts include a Corporate Finance Expert and Tax Advisor', 'Check that the discussion includes mathematical formulas for EPS comparison', 'Verify tax shield calculations are referenced'], expected: 'Corporate Finance Expert references Modigliani-Miller propositions and trade-off theory. Tax Advisor quantifies the tax shield: Interest deduction of Rs 10 Cr at 25% tax = Rs 2.5 Cr annual savings (expressed as formulas where possible). Discussion includes EPS under both scenarios. Cost of financial distress weighed against tax benefits. Mathematical comparison supports the recommendation.' },
+        ],
+      },
+
+      // ═══════════════════════════════════════════════════════
+      // CATEGORY: SCENARIO SIMULATOR
+      // ═══════════════════════════════════════════════════════
+
+      { id: 'scenario_sim', name: 'Scenario Simulator', cat: 'scenario_simulator', icon: 'trending-up',
+        desc: 'A 12-agent scenario modelling system accessible via a separate page (/scenarios). Agents include: Scenario Designer (creates base/optimistic/pessimistic cases), Assumption Validator, Tax Impact Modeler, Financial Projector, Regulatory Simulator, Sensitivity Analyser, Comparison Synthesizer, Variance Analyser, Risk Modeler, Compliance Checker, Optimisation Engine, and Scenario Reporter. Scenarios are stored in the database with playbooks, variants, and run history.',
+        agents: [
+          { name: 'Scenario Designer', capability: 'scenario-design', purpose: 'Designs optimistic, pessimistic, and base-case scenarios' },
+          { name: 'Assumption Validator', capability: 'validation', purpose: 'Validates reasonableness of scenario assumptions' },
+          { name: 'Tax Impact Modeler', capability: 'tax-modeling', purpose: 'Models tax implications across scenarios' },
+          { name: 'Financial Projector', capability: 'projection', purpose: 'Projects income statements and balance sheets' },
+          { name: 'Regulatory Simulator', capability: 'compliance', purpose: 'Simulates regulatory impact scenarios' },
+          { name: 'Sensitivity Analyser', capability: 'what-if', purpose: 'Performs sensitivity analysis on key variables' },
+          { name: 'Comparison Synthesizer', capability: 'synthesis', purpose: 'Compares scenarios side-by-side' },
+          { name: 'Variance Analyser', capability: 'variance', purpose: 'Analyses variance between scenario outcomes' },
+          { name: 'Risk Modeler', capability: 'risk-analysis', purpose: 'Models financial and compliance risks per scenario' },
+          { name: 'Compliance Checker', capability: 'compliance-validation', purpose: 'Checks regulatory compliance of each scenario' },
+          { name: 'Optimisation Engine', capability: 'recommendation', purpose: 'Recommends optimised scenario parameters' },
+          { name: 'Scenario Reporter', capability: 'reporting', purpose: 'Generates comprehensive scenario analysis reports' },
+        ],
+        components: [
+          { name: 'Scenario Page (Separate)', purpose: 'Accessible via sidebar navigation to /scenarios. Dedicated page with scenario creation, variable definition, and comparison views. Not an in-chat mode.' },
+          { name: 'Playbook Manager', purpose: 'Create and manage scenario playbooks with base, optimistic, and pessimistic cases. Each playbook has variables, assumptions, and computed outcomes.' },
+          { name: 'Comparison Matrix', purpose: 'Side-by-side comparison table showing key metrics across scenarios: revenue, costs, tax, net profit, cash flow, key ratios.' },
+          { name: 'Sensitivity Dashboard', purpose: 'Shows how key outputs change as input variables vary. Identifies which variables have the most impact on outcomes.' },
+        ],
+        sections: [
+          { name: 'Scenario Design', icon: 'layout-grid', detail: 'Create base, optimistic, pessimistic scenarios with configurable variables', status: 'live' },
+          { name: 'Tax & Financial Projections', icon: 'trending-up', detail: 'Income statement, balance sheet, and tax projections per scenario', status: 'live' },
+          { name: 'Side-by-Side Comparison', icon: 'columns', detail: 'Matrix comparing key metrics across all scenarios', status: 'live' },
+          { name: 'Sensitivity Analysis', icon: 'sliders', detail: 'Identify high-impact variables and their effect on outcomes', status: 'live' },
+        ],
+        tests: [
+          { id: 'sc-01', name: 'Navigate to Scenario Simulator page', steps: ['Click "Scenarios" in the sidebar navigation', 'Verify the Scenario Simulator page loads', 'Check that the page has options to create a new scenario playbook'], expected: 'Scenario Simulator page loads at /scenarios. Interface shows options to create new scenarios or view existing playbooks.' },
+          { id: 'sc-02', name: 'Create a tax regime comparison scenario', steps: ['Create a new scenario: "Tax regime comparison for FY 2024-25"', 'Set up two variants: Old Regime and New Regime', 'Input parameters: Gross income Rs 25,00,000, Deductions (80C Rs 1,50,000, 80D Rs 25,000, HRA Rs 3,00,000)', 'Run the scenario comparison', 'Verify side-by-side tax computation for both regimes'], expected: 'Two scenario variants show parallel tax computations. Old regime shows reduced taxable income after deductions. New regime shows lower slab rates but no deductions. Comparison clearly shows which regime saves more tax.' },
+          { id: 'sc-03', name: 'Sensitivity analysis on discount rate', steps: ['Create a scenario: "Project NPV sensitivity to discount rate"', 'Set base case discount rate at 12%', 'Configure sensitivity range from 8% to 16% in 2% steps', 'Run the analysis', 'Verify the output shows how NPV changes across rates'], expected: 'Sensitivity analysis shows NPV at 8%, 10%, 12%, 14%, 16%. Clear trend showing NPV decreases as discount rate increases. Table format with chartable data.' },
+          { id: 'sc-04', name: 'Business expansion scenario', steps: ['Create scenario: "Impact of opening 3 new branches"', 'Define variables: setup cost, monthly rent, staffing, revenue projection', 'Create optimistic (120% revenue), base (100%), and pessimistic (70%) variants', 'Run and compare all three'], expected: 'Three-scenario comparison shows: optimistic achieves breakeven in X months, base case in Y months, pessimistic shows sustained losses. Key metrics compared side-by-side.' },
+          { id: 'sc-05', name: 'Regulatory impact scenario', steps: ['Create scenario: "Impact of proposed GST rate change from 18% to 12% on FMCG company"', 'Model the impact on revenue, input credit, and net profitability', 'Check compliance implications'], expected: 'Scenario models: reduced output GST liability, potential input credit accumulation, impact on pricing strategy, and overall P&L impact. Compliance implications for transitional credits.' },
+          { id: 'sc-06', name: 'Scenario save, reopen, and rerun history', steps: ['Create a scenario playbook with at least two variants', 'Run the scenario once', 'Leave the page and reopen the same playbook', 'Verify the prior run is visible in history', 'Change one assumption and rerun'], expected: 'Scenario playbook persists with its prior assumptions and run history. A new run is added rather than overwriting the original baseline, allowing comparison between the old and revised assumptions.' },
+          { id: 'sc-07', name: 'Scenario highlights covenant or compliance breach thresholds', steps: ['Create a debt-funded expansion scenario with DSCR or leverage constraints', 'Run optimistic, base, and pessimistic variants', 'Inspect the comparison output for alerting', 'Verify any breach scenario is visually distinguished'], expected: 'Comparison clearly highlights when a scenario breaches defined thresholds such as DSCR, leverage covenant, cash reserve minimum, or regulatory capital requirement. Breach cases are flagged rather than being buried in raw numbers.' },
+        ],
+      },
+
+      // ═══════════════════════════════════════════════════════
+      // CATEGORY: DELIVERABLE COMPOSER
+      // ═══════════════════════════════════════════════════════
+
+      { id: 'deliverable_comp', name: 'Deliverable Composer', cat: 'deliverable_composer', icon: 'file-edit',
+        desc: 'The largest agent mode with 45 agents across two groups. Part 1 (18 agents) handles audit reports and tax opinions: Executive Summary, Findings, Recommendations, TOC, Management Letters, Internal Controls, Compliance Statements, Tax Opinions, Tax Memos, Disclosures, and Quality Assurance. Part 2 (27 agents) handles advisory and financial models: Situation Summary, Options Analysis, Pro-Con, Action Plans, Implementation Timeline, Risk Assessment, ROI, Compliance Checklists, Due Diligence, M&A Advisory, Transaction Structure, Cost-Benefit, Stakeholder Communication, Legal Structure, Tax Efficiency, Financial Modelling, Earnings Projection, Working Capital, Cash Flow Forecasting, and Valuation. Accessible via separate /deliverables page.',
+        components: [
+          { name: 'Deliverables Page (Separate)', purpose: 'Accessible via sidebar navigation to /deliverables. Dedicated page with template library, document editor, and version management.' },
+          { name: 'Template Library', purpose: 'Pre-built templates for audit reports, tax memos, advisory letters, compliance checklists, board presentations, and management letters. Templates have variable placeholders.' },
+          { name: 'Document Editor', purpose: 'Rich-text editor for reviewing and editing AI-generated documents before export. Supports sections, headings, tables, and formatting.' },
+          { name: 'Export Options', purpose: 'Export generated deliverables as PDF, DOCX, PPTX, XLSX. Each format is optimised for the document type.' },
+          { name: 'Version History', purpose: 'Track document revisions. Compare versions and revert if needed.' },
+        ],
+        sections: [
+          { name: 'Audit Reports (18 agents)', icon: 'file-text', detail: 'Executive summary, findings, recommendations, management letters, compliance statements, tax opinions', status: 'live' },
+          { name: 'Advisory Documents (27 agents)', icon: 'briefcase', detail: 'Due diligence, M&A advisory, financial models, valuation analysis, compliance checklists', status: 'live' },
+          { name: 'Template Management', icon: 'layout-template', detail: 'Pre-built templates with variable substitution and customisation', status: 'live' },
+          { name: 'Multi-Format Export', icon: 'download', detail: 'PDF, DOCX, PPTX, XLSX export with format-appropriate styling', status: 'live' },
+        ],
+        tests: [
+          { id: 'del-01', name: 'Navigate to Deliverable Composer page', steps: ['Click "Deliverables" in the sidebar navigation', 'Verify the Deliverable Composer page loads', 'Check that template library options are visible'], expected: 'Page loads at /deliverables. Template library shows available document types: Audit Report, Tax Memo, Advisory Letter, Compliance Checklist, Management Letter.' },
+          { id: 'del-02', name: 'Generate an audit report', steps: ['Select "Audit Report" template', 'Provide context: "Statutory audit of ABC Manufacturing Ltd, FY 2023-24, revenue Rs 100 Cr, identified 3 material misstatements"', 'Generate the document', 'Verify it contains: Executive Summary, Audit Findings, Management Recommendations, Compliance Statement'], expected: 'Generated document has proper audit report structure with: Executive Summary (scope, methodology), Findings (3 material misstatements detailed), Recommendations (corrective actions), and Compliance Statement (with qualified/unqualified opinion). Professional tone throughout.' },
+          { id: 'del-03', name: 'Generate a tax advisory memo', steps: ['Select "Tax Memo" template', 'Provide context: "Advisory on transfer pricing implications for a software company with related-party transactions"', 'Generate the document', 'Verify it includes: Background, Issue, Analysis, Conclusion, and Recommendations'], expected: 'Tax memo follows proper structure: Background (client details, TP scenario), Issue (arm\'s length price determination), Analysis (Section 92, TP methods), Conclusion (recommended method and margin), Recommendations (documentation requirements, TP report). References Transfer Pricing regulations.' },
+          { id: 'del-04', name: 'Export deliverable as PDF and DOCX', steps: ['Generate any deliverable document', 'Click Export → PDF', 'Verify the PDF downloads with proper formatting', 'Click Export → DOCX', 'Verify the DOCX opens in Word with headings and formatting'], expected: 'PDF export has professional layout with headers, page numbers, and proper typography. DOCX export preserves heading hierarchy, tables, and formatting. Both are print-ready.' },
+          { id: 'del-05', name: 'Generate management letter', steps: ['Select "Management Letter" template', 'Provide context: "Year-end management letter for a hospital group audit, noting control weaknesses in inventory management and cash handling"', 'Generate the letter', 'Verify it includes: Observations, Risk/Impact, and Management Response sections for each finding'], expected: 'Management letter follows standard format: Introduction, Findings (each with Observation, Risk Assessment, Recommendation, Management Response placeholder). Each finding is numbered and prioritised (High/Medium/Low). Professional and actionable tone.' },
+          { id: 'del-06', name: 'Version history records document revisions', steps: ['Generate a deliverable document', 'Make a substantive edit in the document editor', 'Save a new version', 'Open version history', 'Compare the latest version against the prior one'], expected: 'Version history shows at least two document states with timestamps or labels. Users can identify what changed between revisions and restore an earlier version if required.' },
+          { id: 'del-07', name: 'Board presentation or advisory deck formatting is presentation-ready', steps: ['Select a presentation-style deliverable template', 'Generate the output using a transaction or restructuring case', 'Preview the generated slides or structured sections', 'Export as PPTX if supported'], expected: 'Presentation-oriented deliverables are structured as concise, executive-ready sections or slides with clear headings, summary points, risks, options, and recommendations. Exported output is suitable for management or board review, not just a long memo pasted into slides.' },
+        ],
+      },
+
+      // ═══════════════════════════════════════════════════════
+      // CATEGORY: FORENSIC INTELLIGENCE
+      // ═══════════════════════════════════════════════════════
+
+      { id: 'forensic_intel', name: 'Forensic Intelligence', cat: 'forensic_intelligence', icon: 'search',
+        desc: 'An 8-agent forensic analysis system accessible via the /forensics page. Agents include: Pattern Detector (round amounts, after-hours activity, frequency analysis), Anomaly Identifier (statistical outliers), Reconciliation Checker (cross-document matching), Timeline Reconstructor (event sequencing), Communication Analyser (NLP on emails/documents), Evidence Compiler, Report Generator (forensic examination reports), and Expert Opinion Provider (litigation support). Supports case management with document uploads and analysis workflows.',
+        agents: [
+          { name: 'Pattern Detector', capability: 'pattern-recognition', purpose: 'Detects suspicious transaction patterns: round amounts, weekend activity, high frequency' },
+          { name: 'Anomaly Identifier', capability: 'statistical-analysis', purpose: 'Identifies statistical outliers using Benford\'s law, z-scores, and clustering' },
+          { name: 'Reconciliation Checker', capability: 'reconciliation', purpose: 'Cross-checks documents (bank statements vs ledgers) for inconsistencies' },
+          { name: 'Timeline Reconstructor', capability: 'sequencing', purpose: 'Reconstructs transaction timelines to identify suspicious sequences' },
+          { name: 'Communication Analyser', capability: 'NLP, text-analysis', purpose: 'Analyses emails and documents for fraud indicators and sentiment' },
+          { name: 'Evidence Compiler', capability: 'compilation', purpose: 'Compiles supporting evidence with chain of custody documentation' },
+          { name: 'Report Generator', capability: 'reporting', purpose: 'Generates formal forensic examination reports for courts and regulators' },
+          { name: 'Expert Opinion Provider', capability: 'opinion', purpose: 'Provides expert forensic opinion statements for litigation support' },
+        ],
+        components: [
+          { name: 'Forensics Page (Separate)', purpose: 'Accessible via sidebar navigation to /forensics. Dedicated page with case management, document upload, and analysis dashboard.' },
+          { name: 'Case Manager', purpose: 'Create and manage forensic investigation cases. Each case has a description, uploaded documents, analysis results, and status tracking.' },
+          { name: 'Document Upload', purpose: 'Upload financial documents (bank statements, ledgers, invoices) for forensic analysis. Supports PDF, Excel, and CSV.' },
+          { name: 'Analysis Dashboard', purpose: 'Visual summary of detected patterns, anomalies, and reconciliation gaps. Interactive charts and data tables.' },
+          { name: 'Forensic Report', purpose: 'Generated examination report with findings, evidence chain, methodology, and expert opinion. Exportable as PDF.' },
+        ],
+        sections: [
+          { name: 'Pattern Detection', icon: 'scan', detail: 'Round amount detection, timing analysis, frequency patterns', status: 'live' },
+          { name: 'Anomaly Detection', icon: 'alert-triangle', detail: 'Benford\'s law, z-score outliers, clustering analysis', status: 'live' },
+          { name: 'Reconciliation', icon: 'git-compare', detail: 'Cross-document matching and gap identification', status: 'live' },
+          { name: 'Report Generation', icon: 'file-text', detail: 'Formal forensic examination report and expert opinion', status: 'live' },
+        ],
+        tests: [
+          { id: 'for-01', name: 'Navigate to Forensic Intelligence page', steps: ['Click "Forensics" in the sidebar navigation', 'Verify the Forensic Intelligence page loads', 'Check that case management options are visible'], expected: 'Page loads at /forensics. Interface shows options to create new forensic cases. Existing cases (if any) are listed.' },
+          { id: 'for-02', name: 'Create a forensic investigation case', steps: ['Click "New Case" on the Forensics page', 'Enter case details: "Suspected vendor fraud — circular transactions"', 'Upload sample transaction data (Excel or CSV)', 'Initiate analysis', 'Verify pattern detection runs on the uploaded data'], expected: 'Case is created with a unique ID. Uploaded data is processed. Analysis dashboard shows initial findings: any round-amount patterns, unusual timing, or duplicate transaction indicators.' },
+          { id: 'for-03', name: 'Pattern detection analysis', steps: ['Open a forensic case with uploaded transaction data', 'Run pattern detection analysis', 'Check for: round amount detection, weekend/after-hours transactions, high-frequency transactions to same party', 'Review the findings summary'], expected: 'Analysis identifies patterns such as: transactions ending in 000 (round amounts), transactions posted outside business hours, repeated transactions to the same beneficiary within short periods. Each pattern has a risk score.' },
+          { id: 'for-04', name: 'Generate forensic examination report', steps: ['After running analysis on a case', 'Click "Generate Report"', 'Verify the report includes: Scope of Examination, Methodology, Findings, Evidence Summary, and Expert Opinion', 'Export the report as PDF'], expected: 'Report follows professional forensic examination format. Includes methodology (data analytics, document review), detailed findings with evidence references, and expert opinion. PDF export is court-ready with professional formatting.' },
+          { id: 'for-05', name: 'Reconciliation analysis', steps: ['Upload two related documents (e.g., bank statement and cash book)', 'Run reconciliation analysis', 'Review identified discrepancies', 'Verify each discrepancy shows the amounts, dates, and nature of mismatch'], expected: 'Analysis identifies: unmatched entries, amount discrepancies, timing differences. Each discrepancy is listed with the source document, amount, date, and suggested investigation action.' },
+          { id: 'for-06', name: 'Benford or digit-distribution anomaly detection', steps: ['Upload a large transactional dataset suitable for statistical review', 'Run anomaly analysis', 'Inspect the statistical findings panel', 'Verify whether digit-distribution or similar anomaly indicators are shown'], expected: 'System surfaces statistical irregularities such as Benford deviations, unusual frequency bands, or outlier clusters with explanation of why the pattern warrants review. Findings are framed as risk indicators, not automatic fraud conclusions.' },
+          { id: 'for-07', name: 'Timeline reconstruction links events and evidence coherently', steps: ['Open a forensic case with multiple documents and dated transactions', 'Run timeline reconstruction', 'Review the ordered event sequence', 'Verify each major event can be traced back to source evidence'], expected: 'Timeline view orders transactions, communications, approvals, and anomalies chronologically. Each event links back to supporting evidence so the investigator can trace the narrative without losing source provenance.' },
+        ],
+      },
+
+    ]; // end MODULES
+
+
+    // ════════════════════════════════════════════════════════════
+    // STATE
+    // ════════════════════════════════════════════════════════════
+    let activeCategory = CATEGORIES[0].id;
+    const activeModulePerCat = {};
+    let testData = {};
+    let currentTester = '';
+    let syncOnline = false;
+    let storageAvailable = true;
+    const TESTER_KEY = 'cagpt_guide_tester';
+    const sidebar = document.getElementById('sidebar');
+    const main = document.getElementById('main');
+
+
+    // ════════════════════════════════════════════════════════════
+    // RENDER
+    // ════════════════════════════════════════════════════════════
+    function renderSidebar() {
+      let html = '<div class="sidebar-label">Categories</div>';
+      CATEGORIES.forEach(cat => {
+        const count = MODULES.filter(m => m.cat === cat.id).length;
+        const cls = cat.id === activeCategory ? 'active' : '';
+        html += `<a href="#" data-cat="${cat.id}" class="${cls}">
+          <i data-lucide="${cat.lucide}" class="s-icon"></i>
+          ${cat.name}
+          <span class="mod-count">${count}</span>
+        </a>`;
+      });
+      html += '<div id="active-testers" class="active-testers" style="margin-top:24px;border-top:1px solid var(--gray-200);padding-top:12px;"></div>';
+      sidebar.innerHTML = html;
+      lucide.createIcons({ nodes: sidebar.querySelectorAll('[data-lucide]') });
+      sidebar.querySelectorAll('a').forEach(a => {
+        a.addEventListener('click', e => { e.preventDefault(); activeCategory = a.dataset.cat; render(); });
+      });
+      renderActiveTestersSidebar();
+    }
+
+    function renderMain() {
+      try {
+        const cat = CATEGORIES.find(c => c.id === activeCategory) || CATEGORIES[0];
+        const mods = MODULES.filter(m => m.cat === cat.id);
+        const activeMod = activeModulePerCat[cat.id] || (mods[0] && mods[0].id);
+        let html = '';
+        if (mods.length === 0) {
+          html = `<div class="category-section active" id="cat-${cat.id}">
+            <div class="cat-header"><div class="cat-title-row"><i data-lucide="${cat.lucide}"></i><span class="cat-title">${cat.name}</span></div><div class="cat-desc">${cat.desc}</div></div>
+            <div style="padding:40px 28px;text-align:center;color:var(--gray-400);">No modules documented in this category yet.</div>
+          </div>`;
+        } else {
+          const tabs = mods.map(m =>
+            `<button class="module-tab${m.id === activeMod ? ' active' : ''}" data-cat="${cat.id}" data-mod="${m.id}"><i data-lucide="${m.icon}"></i>${m.name}</button>`
+          ).join('');
+          const panes = mods.map(m => {
+            const isActive = m.id === activeMod;
+            return `<div class="module-pane${isActive ? ' active' : ''}" id="pane-${m.id}">${renderModule(m)}</div>`;
+          }).join('');
+          html = `<div class="category-section active" id="cat-${cat.id}">
+            <div class="cat-header">
+              <div class="cat-title-row"><i data-lucide="${cat.lucide}"></i><span class="cat-title">${cat.name}</span></div>
+              <div class="cat-desc">${cat.desc}</div>
+              <div class="module-tabs">${tabs}</div>
+            </div>
+            ${panes}
+          </div>`;
+        }
+
+        // Test Dashboard before the modules
+        html = renderTestDashboard() + html;
+
+        main.innerHTML = html;
+        lucide.createIcons({ nodes: main.querySelectorAll('[data-lucide]') });
+
+        // Tab click handlers
+        main.querySelectorAll('.module-tab').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const catId = btn.dataset.cat, modId = btn.dataset.mod;
+            activeModulePerCat[catId] = modId;
+            const sec = document.getElementById(`cat-${catId}`);
+            sec.querySelectorAll('.module-tab').forEach(t => t.classList.toggle('active', t.dataset.mod === modId));
+            sec.querySelectorAll('.module-pane').forEach(p => p.classList.toggle('active', p.id === `pane-${modId}`));
+          });
+        });
+      } catch (e) {
+        main.innerHTML = '<div style="padding:40px;color:#dc2626;">Render error: ' + escapeHtml(e.message) + '</div>';
+      }
+    }
+
+    function renderModule(m) {
+      let html = '';
+
+      // Hero
+      html += `<div class="mod-hero">
+        <div class="mod-hero-title"><i data-lucide="${m.icon}"></i>${m.name}</div>
+        <div class="mod-hero-desc">${m.desc}</div>
+      </div>`;
+
+      // Toggle all
+      html += `<button class="toggle-all-btn" onclick="toggleAllCards(this)">Expand / Collapse All</button>`;
+
+      // Agents (if any)
+      if (m.agents && m.agents.length > 0) {
+        html += `<div class="card collapsible card-open">
+          <div class="card-header" onclick="toggleCard(this.parentElement)"><i data-lucide="bot"></i>AI Agents (${m.agents.length})<i data-lucide="chevron-down" class="chev"></i></div>
+          <div class="card-body">
+            <table class="agent-table">
+              <thead><tr><th>Agent</th><th>Capability</th><th>Purpose</th></tr></thead>
+              <tbody>${m.agents.map(a => `<tr><td style="font-weight:600">${a.name}</td><td>${a.capability}</td><td>${a.purpose}</td></tr>`).join('')}</tbody>
+            </table>
+          </div>
+        </div>`;
+      }
+
+      // Components
+      if (m.components && m.components.length > 0) {
+        html += `<div class="card collapsible card-open">
+          <div class="card-header" onclick="toggleCard(this.parentElement)"><i data-lucide="layers"></i>UI Components (${m.components.length})<i data-lucide="chevron-down" class="chev"></i></div>
+          <div class="card-body"><div class="comp-grid">${m.components.map(c =>
+            `<div class="comp-card"><div class="cc-name">${c.name}</div><div class="cc-purpose">${c.purpose}</div></div>`
+          ).join('')}</div></div>
+        </div>`;
+      }
+
+      // Sections
+      if (m.sections && m.sections.length > 0) {
+        html += `<div class="card collapsible">
+          <div class="card-header" onclick="toggleCard(this.parentElement)"><i data-lucide="layout-grid"></i>Sections<i data-lucide="chevron-down" class="chev"></i></div>
+          <div class="card-body"><div class="section-grid">${m.sections.map(s => {
+            const iconBg = s.status === 'live' ? 'background:var(--brand-50);' : 'background:#fef3c7;';
+            return `<div class="section-chip"><div class="sc-icon" style="${iconBg}"><i data-lucide="${s.icon}"></i></div><div><div class="sc-text">${s.name}</div><div class="sc-detail">${s.detail}</div></div></div>`;
+          }).join('')}</div></div>
+        </div>`;
+      }
+
+      // Tests
+      if (m.tests && m.tests.length > 0) {
+        html += `<div class="test-section"><h4><i data-lucide="test-tubes"></i>End-to-End Tests (${m.tests.length})</h4>`;
+        m.tests.forEach((t, i) => {
+          const result = getTestResult(t.id);
+          const stateClass = result === 'pass' ? 'passed' : result === 'fail' ? 'failed' : 'pending';
+          const statusBadge = result === 'pass' ? '<span class="tc-status-badge pass">PASSED</span>'
+            : result === 'fail' ? '<span class="tc-status-badge fail">FAILED</span>'
+            : '<span class="tc-status-badge pending">PENDING</span>';
+          const passActive = result === 'pass' ? ' active' : '';
+          const failActive = result === 'fail' ? ' active' : '';
+          const note = getTestNote(t.id);
+          const tester = getTestTester(t.id);
+          const time = getTestTime(t.id);
+
+          html += `<div class="test-case ${stateClass}" data-test-id="${t.id}">
+            <div class="tc-header" onclick="toggleTest('${t.id}')">
+              <div class="tc-num">${i + 1}</div>
+              <div class="tc-title">${t.name}</div>
+              ${statusBadge}
+              <span class="tc-tester-info">${tester ? `<span class="tc-tester-badge${tester === currentTester ? ' self' : ''}">${escapeHtml(tester)}</span>` : ''}${time ? ` <span class="tc-time-ago">${timeAgo(time)}</span>` : ''}</span>
+              <i data-lucide="chevron-down" class="tc-chevron"></i>
+            </div>
+            <div class="tc-body">
+              <ol class="tc-steps">${t.steps.map((s, si) => `<li data-step="${si + 1}.">${s}</li>`).join('')}</ol>
+              <div class="tc-expected"><div class="tc-expected-label">Expected Result</div>${t.expected}</div>
+              <div class="tc-actions">
+                <button class="tc-btn tc-btn-pass${passActive}" onclick="setTestResult('${t.id}','pass')">Pass</button>
+                <button class="tc-btn tc-btn-fail${failActive}" onclick="setTestResult('${t.id}','fail')">Fail</button>
+                <button class="tc-btn tc-btn-reset" onclick="setTestResult('${t.id}','pending')">Reset</button>
+              </div>
+              <div class="tc-notes">
+                <div class="tc-notes-label">Remarks</div>
+                <textarea placeholder="Add test notes or observations..." onchange="setTestNote('${t.id}',this.value)">${escapeHtml(note)}</textarea>
+              </div>
+            </div>
+          </div>`;
+        });
+        html += '</div>';
+      }
+
+      return html;
+    }
+
+
+    // ════════════════════════════════════════════════════════════
+    // TEST LOGIC
+    // ════════════════════════════════════════════════════════════
+    function getTestResult(testId) { return (testData[testId] || {}).status || 'pending'; }
+    function getTestNote(testId) { return (testData[testId] || {}).notes || ''; }
+    function getTestTester(testId) { return (testData[testId] || {}).tester || ''; }
+    function getTestTime(testId) { return (testData[testId] || {}).updatedAt || ''; }
+
+    function safeStorageGet(key, fallbackValue) {
+      try {
+        const value = localStorage.getItem(key);
+        storageAvailable = true;
+        return value === null ? fallbackValue : value;
+      } catch (e) {
+        storageAvailable = false;
+        return fallbackValue;
+      }
+    }
+
+    function safeStorageSet(key, value) {
+      try {
+        localStorage.setItem(key, value);
+        storageAvailable = true;
+        return true;
+      } catch (e) {
+        storageAvailable = false;
+        return false;
+      }
+    }
+
+    function loadTester() {
+      currentTester = safeStorageGet(TESTER_KEY, '') || '';
+      syncOnline = storageAvailable;
+    }
+
+    function saveTester(name) {
+      currentTester = name.trim().slice(0, 60);
+      safeStorageSet(TESTER_KEY, currentTester);
+      syncOnline = storageAvailable;
+    }
+
+    function showIdentityModal() {
+      const existing = document.getElementById('identity-overlay');
+      if (existing) existing.remove();
+      const overlay = document.createElement('div');
+      overlay.id = 'identity-overlay';
+      overlay.className = 'identity-overlay';
+      overlay.innerHTML = `<div class="identity-modal">
+        <h3>Who is testing?</h3>
+        <p>Enter your name so test results are attributed to you.</p>
+        <input id="id-input" placeholder="Your name" value="${escapeHtml(currentTester)}" maxlength="60" />
+        <button id="id-submit" ${!currentTester ? 'disabled' : ''}>Start Testing</button>
+      </div>`;
+      document.body.appendChild(overlay);
+      const inp = document.getElementById('id-input');
+      const btn = document.getElementById('id-submit');
+      inp.focus();
+      inp.addEventListener('input', () => { btn.disabled = !inp.value.trim(); });
+      inp.addEventListener('keydown', e => { if (e.key === 'Enter' && inp.value.trim()) { saveTester(inp.value); overlay.remove(); render(); } });
+      btn.addEventListener('click', () => { saveTester(inp.value); overlay.remove(); render(); });
+    }
+
+    function setTestResult(testId, result) {
+      const status = result === 'pending' ? 'pending' : result;
+      if (!testData[testId]) testData[testId] = {};
+      testData[testId].status = status;
+      testData[testId].tester = currentTester;
+      testData[testId].updatedAt = new Date().toISOString();
+      saveTestData();
+      updateTestUI(testId, status);
+      updateTestDashboard();
+      renderActiveTestersSidebar();
+      renderTesterBar();
+    }
+
+    function setTestNote(testId, note) {
+      if (!testData[testId]) testData[testId] = {};
+      testData[testId].notes = note;
+      saveTestData();
+    }
+
+    function saveTestData() {
+      safeStorageSet('cagpt_e2e_data', JSON.stringify(testData));
+      syncOnline = storageAvailable;
+    }
+    function loadTestData() {
+      try {
+        const saved = safeStorageGet('cagpt_e2e_data', '');
+        testData = saved ? JSON.parse(saved) : {};
+      } catch (e) {
+        testData = {};
+      }
+      syncOnline = storageAvailable;
+    }
+
+    function toggleCard(el) {
+      el.classList.toggle('card-open');
+    }
+    function toggleAllCards(btn) {
+      const pane = btn.closest('.module-pane');
+      const cards = pane.querySelectorAll('.card.collapsible');
+      const anyOpen = Array.from(cards).some(c => c.classList.contains('card-open'));
+      cards.forEach(c => { if (anyOpen) c.classList.remove('card-open'); else c.classList.add('card-open'); });
+    }
+
+    function toggleTest(testId) {
+      const el = document.querySelector(`.test-case[data-test-id="${testId}"]`);
+      if (el) el.classList.toggle('expanded');
+    }
+
+    function updateTestUI(testId, result) {
+      const el = document.querySelector(`.test-case[data-test-id="${testId}"]`);
+      if (!el) return;
+      el.className = 'test-case ' + (result === 'pass' ? 'passed' : result === 'fail' ? 'failed' : 'pending');
+      if (el.classList.contains('expanded')) el.classList.add('expanded');
+      const badge = el.querySelector('.tc-status-badge');
+      if (badge) {
+        badge.className = 'tc-status-badge ' + (result === 'pass' ? 'pass' : result === 'fail' ? 'fail' : 'pending');
+        badge.textContent = result === 'pass' ? 'PASSED' : result === 'fail' ? 'FAILED' : 'PENDING';
+      }
+      updateTesterBadge(testId);
+    }
+
+    function updateTesterBadge(testId) {
+      const el = document.querySelector(`.test-case[data-test-id="${testId}"] .tc-tester-info`);
+      if (!el) return;
+      const tester = getTestTester(testId), time = getTestTime(testId), status = getTestResult(testId);
+      if (status === 'pending') { el.innerHTML = ''; return; }
+      const isSelf = tester === currentTester;
+      el.innerHTML = `${tester ? `<span class="tc-tester-badge${isSelf ? ' self' : ''}">${escapeHtml(tester)}</span>` : ''}${time ? ` <span class="tc-time-ago">${timeAgo(time)}</span>` : ''}`;
+    }
+
+    function timeAgo(isoStr) {
+      if (!isoStr) return '';
+      const diff = Math.floor((Date.now() - new Date(isoStr).getTime()) / 1000);
+      if (diff < 60) return 'just now';
+      if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+      if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+      return Math.floor(diff / 86400) + 'd ago';
+    }
+
+    function escapeHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+    function renderActiveTestersSidebar() {
+      const container = document.getElementById('active-testers');
+      if (!container) return;
+      const testerMap = {};
+      for (const id in testData) {
+        const t = testData[id];
+        if (t.tester && t.status !== 'pending') {
+          if (!testerMap[t.tester]) testerMap[t.tester] = { pass: 0, fail: 0 };
+          if (t.status === 'pass') testerMap[t.tester].pass++;
+          if (t.status === 'fail') testerMap[t.tester].fail++;
+        }
+      }
+      const testers = Object.entries(testerMap).sort((a, b) => (b[1].pass + b[1].fail) - (a[1].pass + a[1].fail));
+      if (testers.length === 0) { container.innerHTML = ''; return; }
+      const colors = ['#004B87', '#7c3aed', '#ea580c', '#059669', '#dc2626', '#0891b2'];
+      let html = '<div class="active-testers-label">Testers</div>';
+      testers.forEach(([name, counts], i) => {
+        const initials = name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
+        const color = colors[i % colors.length];
+        const isSelf = name === currentTester;
+        html += `<div class="at-person${isSelf ? ' self' : ''}"><div class="at-avatar" style="background:${color}">${initials}</div>${escapeHtml(name)}<span class="at-count">${counts.pass}P ${counts.fail}F</span></div>`;
+      });
+      container.innerHTML = html;
+    }
+
+    function renderTesterBar() {
+      let bar = document.getElementById('tester-bar');
+      if (!bar) {
+        bar = document.createElement('div');
+        bar.id = 'tester-bar';
+        bar.className = 'tester-bar';
+        document.body.appendChild(bar);
+      }
+      const stats = getTestStats();
+      bar.innerHTML = `
+        <div class="tester-bar-label"><i data-lucide="user-check"></i> Tester:</div>
+        <div class="tester-bar-name" onclick="showIdentityModal()">${currentTester ? escapeHtml(currentTester) : 'Set Name'}</div>
+        <div style="font-size:11px;color:var(--gray-500);">${stats.passed} passed · ${stats.failed} failed · ${stats.total - stats.passed - stats.failed} pending</div>
+        <div class="tester-bar-sync"><span class="sync-dot${syncOnline ? '' : ' offline'}"></span><span class="sync-label">${syncOnline ? 'Synced' : 'Local Only'}</span></div>
+      `;
+      lucide.createIcons({ nodes: bar.querySelectorAll('[data-lucide]') });
+    }
+
+    function getTestStats() {
+      const testModules = MODULES.filter(m => m.tests && m.tests.length > 0);
+      let total = 0, passed = 0, failed = 0;
+      const perModule = [];
+      testModules.forEach(m => {
+        let mpass = 0, mfail = 0;
+        m.tests.forEach(t => { total++; const st = getTestResult(t.id); if (st === 'pass') { passed++; mpass++; } else if (st === 'fail') { failed++; mfail++; } });
+        perModule.push({ name: m.name, total: m.tests.length, pass: mpass, fail: mfail });
+      });
+      return { total, passed, failed, perModule };
+    }
+
+    function renderTestDashboard() {
+      const stats = getTestStats();
+      if (stats.total === 0) return '';
+      const pct = stats.total ? Math.round(((stats.passed + stats.failed) / stats.total) * 100) : 0;
+      const passPct = stats.total ? ((stats.passed / stats.total) * 100).toFixed(1) : 0;
+      const failPct = stats.total ? ((stats.failed / stats.total) * 100).toFixed(1) : 0;
+
+      let html = `<div class="test-dashboard" id="test-dashboard">
+        <h4><i data-lucide="test-tubes"></i>Test Dashboard — ${stats.total} Total Tests</h4>
+        <div class="td-stats">
+          <div class="td-stat"><div class="td-stat-value total">${stats.total}</div><div class="td-stat-label">Total</div></div>
+          <div class="td-stat"><div class="td-stat-value pass">${stats.passed}</div><div class="td-stat-label">Passed</div></div>
+          <div class="td-stat"><div class="td-stat-value fail">${stats.failed}</div><div class="td-stat-label">Failed</div></div>
+          <div class="td-stat"><div class="td-stat-value pending">${stats.total - stats.passed - stats.failed}</div><div class="td-stat-label">Pending</div></div>
+        </div>
+        <div class="td-progress-bar"><div class="td-progress-fill td-progress-pass" style="width:${passPct}%;display:inline-block"></div><div class="td-progress-fill td-progress-fail" style="width:${failPct}%;display:inline-block"></div></div>
+        <div class="td-modules-progress">`;
+
+      stats.perModule.forEach(pm => {
+        const done = pm.pass + pm.fail;
+        const donePct = pm.total ? Math.round((done / pm.total) * 100) : 0;
+        const ringColor = pm.fail > 0 ? '#dc2626' : pm.pass === pm.total ? '#059669' : 'var(--brand-400)';
+        const ringBg = pm.fail > 0 ? '#fee2e2' : pm.pass === pm.total ? '#d1fae5' : 'var(--brand-50)';
+        html += `<div class="td-mod-item"><div class="td-mod-ring" style="background:${ringBg};color:${ringColor}">${donePct}%</div><div class="td-mod-info"><div class="td-mod-name">${pm.name}</div><div class="td-mod-detail">${pm.pass}/${pm.total} passed${pm.fail ? `, ${pm.fail} failed` : ''}</div></div></div>`;
+      });
+
+      html += `</div><button class="td-reset-btn" onclick="resetAllTests()">Reset All Tests</button></div>`;
+      return html;
+    }
+
+    function updateTestDashboard() {
+      const existing = document.getElementById('test-dashboard');
+      if (!existing) return;
+      const parent = existing.parentElement;
+      const temp = document.createElement('div');
+      temp.innerHTML = renderTestDashboard();
+      parent.replaceChild(temp.firstElementChild, existing);
+      lucide.createIcons({ nodes: document.getElementById('test-dashboard').querySelectorAll('[data-lucide]') });
+    }
+
+    function resetAllTests() {
+      if (!confirm('Reset all test results? This cannot be undone.')) return;
+      testData = {};
+      saveTestData();
+      render();
+    }
+
+
+    // ════════════════════════════════════════════════════════════
+    // INIT
+    // ════════════════════════════════════════════════════════════
+    function showFatalInitError(err) {
+      const message = (err && err.message) ? err.message : 'Unknown startup error';
+      const details = (err && err.stack) ? err.stack.split('\n')[0] : '';
+      sidebar.innerHTML = '';
+      main.innerHTML = '<div style="padding:32px 28px;">'
+        + '<div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:10px;padding:16px;color:#991b1b;max-width:900px;">'
+        + '<div style="font-size:15px;font-weight:700;margin-bottom:6px;">Guide failed to initialize in this browser</div>'
+        + '<div style="font-size:12px;line-height:1.6;">Startup error: ' + escapeHtml(message) + '</div>'
+        + (details ? '<div style="font-size:11px;margin-top:6px;color:#b91c1c;">' + escapeHtml(details) + '</div>' : '')
+        + '<div style="font-size:12px;line-height:1.6;margin-top:10px;">Try hard refresh, private window, or disable strict privacy blocking for this page.</div>'
+        + '</div></div>';
+    }
+
+    (function init() {
+      try {
+        loadTester();
+        loadTestData();
+        if (!currentTester) showIdentityModal();
+        render();
+        renderTesterBar();
+      } catch (e) {
+        showFatalInitError(e);
+      }
+    })();
+
+    function render() { renderSidebar(); renderMain(); renderTesterBar(); }
+  </script>
+
+</body>
+</html>

@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -v -E \"\\\\.\\(ts|tsx|js|jsx|md|json|css|sql|html|toml|yml|yaml|env|sh|mjs|cjs\\)$\")",
+      "Read(//Users/apple/Downloads/ICAI CAGPT/**)",
+      "Read(//tmp/**)"
+    ]
+  }
+}

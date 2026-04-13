@@ -1,0 +1,42 @@
+# Robots.txt for LucaAgent - https://askluca.io
+
+User-agent: *
+Allow: /
+
+# Allow all major search engines
+User-agent: Googlebot
+Allow: /
+
+User-agent: Bingbot
+Allow: /
+
+User-agent: Slurp
+Allow: /
+
+User-agent: DuckDuckBot
+Allow: /
+
+User-agent: Baiduspider
+Allow: /
+
+User-agent: YandexBot
+Allow: /
+
+# Disallow admin and API routes
+Disallow: /api/
+Disallow: /admin/
+Disallow: /dashboard/
+Disallow: /settings/
+Disallow: /auth/
+
+# Disallow sensitive paths
+Disallow: /*?token=
+Disallow: /*?session=
+Disallow: /reset-password
+Disallow: /verify-email
+
+# Sitemap location
+Sitemap: https://askluca.io/sitemap.xml
+
+# Crawl-delay for polite crawling
+Crawl-delay: 1

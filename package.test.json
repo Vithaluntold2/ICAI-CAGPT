@@ -1,0 +1,52 @@
+{
+  "name": "luca-agent-tests",
+  "version": "1.0.0",
+  "description": "Comprehensive test suite for ICAI CAGPT AI system",
+  "scripts": {
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "test:fallback": "jest tests/ai-providers/fallback.test.ts",
+    "test:quality": "jest tests/ai-providers/quality-assessment.test.ts", 
+    "test:integration": "jest tests/integration/critical-system.test.ts",
+    "test:all": "jest --testPathPattern='tests/'",
+    "test:ci": "jest --ci --coverage --watchAll=false",
+    "test:verbose": "jest --verbose",
+    "benchmark": "jest --testNamePattern='Performance|Load' --verbose"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.5",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.1.1",
+    "typescript": "^5.2.2"
+  },
+  "jest": {
+    "preset": "ts-jest",
+    "testEnvironment": "node",
+    "roots": ["<rootDir>/tests"],
+    "testMatch": [
+      "**/__tests__/**/*.ts",
+      "**/?(*.)+(spec|test).ts"
+    ],
+    "transform": {
+      "^.+\\.ts$": "ts-jest"
+    },
+    "collectCoverageFrom": [
+      "server/services/**/*.ts",
+      "!server/services/**/*.d.ts",
+      "!server/services/**/index.ts"
+    ],
+    "coverageDirectory": "coverage",
+    "coverageReporters": [
+      "text",
+      "lcov",
+      "html"
+    ],
+    "testTimeout": 30000,
+    "setupFiles": ["<rootDir>/tests/setup.ts"],
+    "moduleNameMapping": {
+      "^@/(.*)$": "<rootDir>/client/src/$1",
+      "^@shared/(.*)$": "<rootDir>/shared/$1"
+    }
+  }
+}

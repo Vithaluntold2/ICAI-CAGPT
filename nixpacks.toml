@@ -1,0 +1,14 @@
+[phases.setup]
+nixPkgs = ['nodejs_22', 'npm-10_x']
+
+[phases.install]
+cmds = [
+  'npm ci --legacy-peer-deps --include=dev',
+  'cd client && npm ci --legacy-peer-deps --include=dev --verbose'
+]
+
+[phases.build]
+cmds = ['if [ -d dist/public ]; then echo "Using pre-built dist"; else npm run build; fi']
+
+[start]
+cmd = 'npm start'

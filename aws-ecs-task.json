@@ -1,0 +1,71 @@
+# ============================================================
+# ICAI CA GPT — AWS ECS Task Definition (reference template)
+# ============================================================
+# Usage: Update placeholders and register via:
+#   aws ecs register-task-definition --cli-input-json file://aws-ecs-task.json
+# ============================================================
+
+{
+  "family": "icai-cagpt",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "1024",
+  "memory": "2048",
+  "executionRoleArn": "arn:aws:iam::ACCOUNT_ID:role/ecsTaskExecutionRole",
+  "taskRoleArn": "arn:aws:iam::ACCOUNT_ID:role/icai-cagpt-task-role",
+  "containerDefinitions": [
+    {
+      "name": "icai-cagpt",
+      "image": "ACCOUNT_ID.dkr.ecr.ap-south-1.amazonaws.com/icai-cagpt:latest",
+      "portMappings": [
+        {
+          "containerPort": 5000,
+          "protocol": "tcp"
+        }
+      ],
+      "essential": true,
+      "environment": [
+        { "name": "NODE_ENV", "value": "production" },
+        { "name": "PORT", "value": "5000" },
+        { "name": "KEY_VAULT_PROVIDER", "value": "aws-kms" }
+      ],
+      "secrets": [
+        {
+          "name": "DATABASE_URL",
+          "valueFrom": "arn:aws:secretsmanager:ap-south-1:ACCOUNT_ID:secret:icai-cagpt/DATABASE_URL"
+        },
+        {
+          "name": "SESSION_SECRET",
+          "valueFrom": "arn:aws:secretsmanager:ap-south-1:ACCOUNT_ID:secret:icai-cagpt/SESSION_SECRET"
+        },
+        {
+          "name": "OPENAI_API_KEY",
+          "valueFrom": "arn:aws:secretsmanager:ap-south-1:ACCOUNT_ID:secret:icai-cagpt/OPENAI_API_KEY"
+        },
+        {
+          "name": "ANTHROPIC_API_KEY",
+          "valueFrom": "arn:aws:secretsmanager:ap-south-1:ACCOUNT_ID:secret:icai-cagpt/ANTHROPIC_API_KEY"
+        },
+        {
+          "name": "AWS_KMS_KEY_ID",
+          "valueFrom": "arn:aws:secretsmanager:ap-south-1:ACCOUNT_ID:secret:icai-cagpt/AWS_KMS_KEY_ID"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/icai-cagpt",
+          "awslogs-region": "ap-south-1",
+          "awslogs-stream-prefix": "ecs"
+        }
+      },
+      "healthCheck": {
+        "command": ["CMD-SHELL", "wget -qO- http://localhost:5000/api/health || exit 1"],
+        "interval": 30,
+        "timeout": 10,
+        "retries": 3,
+        "startPeriod": 60
+      }
+    }
+  ]
+}

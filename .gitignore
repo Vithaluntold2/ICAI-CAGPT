@@ -23,5 +23,6 @@ attached_assets/*.txt
 attached_assets/Pasted*
 attached_assets/Screenshot*
 !attached_assets/logo*.png
+!attached_assets/icai*.png
 !attached_assets/Luca*.png
 !attached_assets/generated_images/*.png

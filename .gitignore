@@ -8,11 +8,14 @@ vite.config.ts.*
 # Environment variables
 .env
 .env.local
+.env.railway
 .env.production
 .env.development
 # Sensitive files
 .env.bak
 .env.backup.*
+*.bak
+*.backup
 SETUP.md
 setup-env.js
 check-env.js

@@ -473,7 +473,20 @@ router.post('/stt', requireAuth, audioUpload.single('audio'), async (req: Authen
     });
   } catch (error: any) {
     logger.error('[VoiceRoutes] STT error:', error);
-    res.status(500).json({ error: error.message || 'Transcription failed' });
+    
+    // Return user-friendly error message
+    if (error.code === 'NO_PROVIDER') {
+      return res.status(503).json({ 
+        error: error.message,
+        code: 'SERVICE_UNAVAILABLE',
+        details: 'Speech-to-text service is not configured. Please contact administrator.'
+      });
+    }
+    
+    res.status(500).json({ 
+      error: error.message || 'Transcription failed',
+      code: error.code || 'TRANSCRIPTION_ERROR'
+    });
   }
 });
 

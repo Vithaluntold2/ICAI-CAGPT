@@ -49,11 +49,17 @@ export function useVoiceRecording() {
             credentials: 'include',
           });
 
-          if (!response.ok) throw new Error('Transcription failed');
+          if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ error: 'Transcription failed' }));
+            throw new Error(errorData.error || errorData.details || 'Transcription failed');
+          }
+          
           const data = await response.json();
           resolve(data.text);
-        } catch (err) {
-          console.error('Transcription error', err);
+        } catch (err: any) {
+          console.error('Transcription error:', err);
+          // Show user-friendly error message
+          alert(`Voice transcription failed: ${err.message || 'Unknown error'}`);
           resolve(null);
         } finally {
           setIsTranscribing(false);

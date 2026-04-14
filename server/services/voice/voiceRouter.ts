@@ -55,12 +55,16 @@ export class VoiceRouter {
 
     // Initialize Azure provider (Standard TTS)
     try {
-      const azureProvider = new AzureVoiceProvider({
-        provider: VoiceProviderName.AZURE,
-        enabled: !!process.env.AZURE_SPEECH_KEY,
-      });
-      this.providers.set(VoiceProviderName.AZURE, azureProvider);
-      logger.info('[VoiceRouter] Azure voice provider initialized');
+      if (process.env.AZURE_SPEECH_KEY && process.env.AZURE_SPEECH_KEY !== 'YOUR_AZURE_SPEECH_KEY_HERE') {
+        const azureProvider = new AzureVoiceProvider({
+          provider: VoiceProviderName.AZURE,
+          enabled: true,
+        });
+        this.providers.set(VoiceProviderName.AZURE, azureProvider);
+        logger.info('[VoiceRouter] Azure voice provider initialized');
+      } else {
+        logger.warn('[VoiceRouter] Azure Speech credentials not configured (AZURE_SPEECH_KEY missing or placeholder)');
+      }
     } catch (error: any) {
       logger.warn(`[VoiceRouter] Azure voice provider not available: ${error?.message || error}`);
     }
@@ -220,8 +224,29 @@ export class VoiceRouter {
     const provider = this.providers.get(routing.stt);
 
     if (!provider) {
+      const availableProviders = Array.from(this.providers.keys()).join(', ');
+      const requestedProvider = routing.stt;
+      logger.error(`[VoiceRouter] STT provider '${requestedProvider}' not available. Available: ${availableProviders}`);
+      
+      // Provide helpful error message based on which provider was expected
+      if (requestedProvider === VoiceProviderName.AZURE) {
+        throw new VoiceProviderError(
+          'Azure Speech API is not configured. Please add AZURE_SPEECH_KEY and AZURE_SPEECH_REGION to environment variables.',
+          routing.stt,
+          'NO_PROVIDER',
+          false
+        );
+      } else if (requestedProvider === VoiceProviderName.OPENAI) {
+        throw new VoiceProviderError(
+          'OpenAI API is not configured. Please add a valid OPENAI_API_KEY (format: sk-...) to environment variables.',
+          routing.stt,
+          'NO_PROVIDER',
+          false
+        );
+      }
+      
       throw new VoiceProviderError(
-        'No STT provider available',
+        `No speech-to-text provider available. Available providers: ${availableProviders}`,
         routing.stt,
         'NO_PROVIDER',
         false

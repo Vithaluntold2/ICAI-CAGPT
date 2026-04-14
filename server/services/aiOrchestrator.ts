@@ -263,19 +263,28 @@ export class AIOrchestrator {
           options.attachment.mimeType
         );
         
-        if (analysisResult.success && analysisResult.analysis.extractedText) {
+        // FIXED: Always use analysis result even if success=false, as long as we have extracted text
+        if (analysisResult.analysis.extractedText) {
           documentAnalysis = analysisResult.analysis;
           
           // Enrich the query with extracted document text
           enrichedQuery = `${query}\n\n--- Document Content (${options.attachment.filename}) ---\n${analysisResult.analysis.extractedText}`;
           
-          console.log(`[Orchestrator] Document analyzed successfully. Extracted ${analysisResult.analysis.extractedText.length} characters`);
+          console.log(`[Orchestrator] Document analyzed (${analysisResult.provider}). Extracted ${analysisResult.analysis.extractedText.length} characters`);
+          
+          // Log if analysis had warnings
+          if (analysisResult.error) {
+            console.warn(`[Orchestrator] Document analysis warning: ${analysisResult.error}`);
+          }
         } else {
-          console.warn(`[Orchestrator] Document analysis failed or returned no text:`, analysisResult.error);
+          // No text extracted at all - inform the AI
+          console.error(`[Orchestrator] Document analysis failed completely: ${analysisResult.error || 'Unknown error'}`);
+          enrichedQuery = `${query}\n\n[System Note: User attached a file "${options.attachment.filename}" but text extraction failed. Error: ${analysisResult.error}. Please acknowledge the file attachment and ask the user to describe the content or try a different format.]`;
         }
       } catch (error) {
         console.error('[Orchestrator] Error analyzing document:', error);
-        // Continue without document analysis - fallback to original query
+        // FIXED: Inform the AI about the failure instead of silent fallback
+        enrichedQuery = `${query}\n\n[System Note: User attached a file "${options.attachment.filename}" but an error occurred during analysis: ${error.message}. Please acknowledge the file attachment and ask the user to describe the content.]`;
       }
     }
     

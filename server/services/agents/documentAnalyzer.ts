@@ -52,7 +52,8 @@ export class DocumentAnalyzerAgent {
     // Step 1: Try Azure Document Intelligence (has OCR for images and scanned PDFs)
     try {
       azureResult = await this.analyzeWithAzure(buffer, filename, mimeType);
-      if (azureResult.success && azureResult.analysis.extractedText && azureResult.analysis.extractedText.length > 100) {
+      // FIXED: Lowered threshold from 100 to 20 chars to accept more extractions
+      if (azureResult.success && azureResult.analysis.extractedText && azureResult.analysis.extractedText.length > 20) {
         console.log(`[DocumentAnalyzer] Azure DI extracted ${azureResult.analysis.extractedText.length} chars`);
         return azureResult;
       }
@@ -65,11 +66,12 @@ export class DocumentAnalyzerAgent {
     if (mimeType === 'application/pdf') {
       try {
         pdfParseResult = await this.fallbackExtraction(buffer, filename, mimeType);
-        if (pdfParseResult.success && pdfParseResult.analysis.extractedText && pdfParseResult.analysis.extractedText.length > 100) {
+        // FIXED: Lowered threshold from 100 to 20 chars
+        if (pdfParseResult.success && pdfParseResult.analysis.extractedText && pdfParseResult.analysis.extractedText.length > 20) {
           console.log(`[DocumentAnalyzer] pdf-parse extracted ${pdfParseResult.analysis.extractedText.length} chars`);
           
           // If Azure also got some text, combine them
-          if (azureResult?.analysis?.extractedText && azureResult.analysis.extractedText.length > 50) {
+          if (azureResult?.analysis?.extractedText && azureResult.analysis.extractedText.length > 10) {
             pdfParseResult.analysis.extractedText = 
               `--- Azure OCR Analysis ---\n${azureResult.analysis.extractedText}\n\n--- PDF Text Extraction ---\n${pdfParseResult.analysis.extractedText}`;
             pdfParseResult.provider = 'hybrid';
@@ -89,13 +91,41 @@ export class DocumentAnalyzerAgent {
       return pdfParseResult;
     }
     
-    // Step 4: For images without Azure DI, return helpful message
+    // Step 4: Return partial results even if below success threshold
+    // This ensures user sees SOMETHING extracted rather than silent failure
+    if (azureResult?.analysis?.extractedText && azureResult.analysis.extractedText.length > 0) {
+      console.warn(`[DocumentAnalyzer] Returning Azure partial result (${azureResult.analysis.extractedText.length} chars)`);
+      return {
+        ...azureResult,
+        success: true, // Mark as successful so content is included
+        analysis: {
+          ...azureResult.analysis,
+          extractedText: azureResult.analysis.extractedText + 
+            `\n\n[Note: Limited text extracted from document. If this seems incomplete, the document may be image-based or poorly formatted.]`
+        }
+      };
+    }
+    
+    if (pdfParseResult?.analysis?.extractedText && pdfParseResult.analysis.extractedText.length > 0) {
+      console.warn(`[DocumentAnalyzer] Returning pdf-parse partial result (${pdfParseResult.analysis.extractedText.length} chars)`);
+      return {
+        ...pdfParseResult,
+        success: true,
+        analysis: {
+          ...pdfParseResult.analysis,
+          extractedText: pdfParseResult.analysis.extractedText + 
+            `\n\n[Note: Limited text extracted from document. If this seems incomplete, the document may be image-based or poorly formatted.]`
+        }
+      };
+    }
+    
+    // Step 5: For images without Azure DI, return helpful message
     if (mimeType.startsWith('image/')) {
       return {
-        success: false,
+        success: true, // Changed to true so message is shown to AI
         analysis: {
           documentType: 'image',
-          extractedText: `[Image file uploaded: ${filename}]\n\nTo extract text from images, Azure Document Intelligence with OCR is required. Please ensure AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT and AZURE_DOCUMENT_INTELLIGENCE_KEY are configured.`,
+          extractedText: `[Image file uploaded: ${filename}]\n\nTo extract text from images, Azure Document Intelligence with OCR is required. Please ensure AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT and AZURE_DOCUMENT_INTELLIGENCE_KEY are configured.\n\nAlternatively, you can describe the image content in your message.`,
           keyFindings: [],
         },
         error: 'OCR requires Azure Document Intelligence',
@@ -103,13 +133,18 @@ export class DocumentAnalyzerAgent {
       };
     }
     
-    // Last resort fallback
+    // Step 6: Last resort fallback
     try {
       return await this.fallbackExtraction(buffer, filename, mimeType);
     } catch (error: any) {
+      // Even on total failure, inform the AI that a file was attached
       return {
-        success: false,
-        analysis: { documentType: 'unknown', keyFindings: [] },
+        success: true, // Changed to true so AI knows a file was attempted
+        analysis: { 
+          documentType: 'unknown', 
+          extractedText: `[Document uploaded: ${filename}]\n\nUnable to extract text from this document. Error: ${error.message}\n\nPlease describe the document content in your message, or try uploading a different format.`,
+          keyFindings: [] 
+        },
         error: error.message,
         provider: 'fallback-extraction'
       };
@@ -171,8 +206,8 @@ export class DocumentAnalyzerAgent {
         keyValuePairs: this.extractKeyValuePairs(azureResponse.metadata),
       };
 
-      // Ensure we have actual content to return as successful
-      if (!extractedText || extractedText.length < 50) {
+      // FIXED: Lowered threshold from 50 to 10 chars to be less strict
+      if (!extractedText || extractedText.length < 10) {
         console.warn('[DocumentAnalyzer] Azure DI returned minimal/no content, falling back');
         return {
           success: false,

@@ -466,31 +466,47 @@ export class AIOrchestrator {
       console.log(`[AIOrchestrator] Injected agent workflow results (${options.agentWorkflowResult.analysis.length} chars) into query`);
     }
     
-    // Smart conversation memory: for long conversations, replace full history with
-    // recent turns + relevant memory retrieval to avoid context window limits
+    // Enhanced context retention: always inject rolling summary and top memory for all but the first user query
     let effectiveHistory = conversationHistory;
     const MAX_RAW_MESSAGES = 12; // 6 turns of user+assistant
-    
-    if (conversationHistory.length > MAX_RAW_MESSAGES) {
-      const conversationId = options?.conversationId;
-      if (conversationId && conversationMemory.shouldUseMemory(conversationId)) {
-        // Retrieve relevant past context
-        const memoryContext = conversationMemory.retrieveRelevantMemory(conversationId, finalQuery);
-        // Keep only last 4 turns as raw history
-        effectiveHistory = conversationHistory.slice(-8);
-        // Prepend memory as a system-level context injection
-        if (memoryContext) {
-          effectiveHistory = [
-            { role: 'assistant' as const, content: `[Conversation Memory]\n${memoryContext}` },
-            ...effectiveHistory,
-          ];
-        }
-        console.log(`[AIOrchestrator] Memory retrieval: ${conversationHistory.length} messages → ${effectiveHistory.length} (memory-augmented)`);
-      } else {
-        // No memory stored yet, just keep recent history
-        effectiveHistory = conversationHistory.slice(-MAX_RAW_MESSAGES);
-        console.log(`[AIOrchestrator] History trimmed: ${conversationHistory.length} → ${effectiveHistory.length} messages`);
+    const conversationId = options?.conversationId;
+    let memoryContext = '';
+    let runningSummary = '';
+    if (conversationId) {
+      // Always get rolling summary if available
+      const store = conversationMemory['memoryStore']?.get(conversationId);
+      if (store && store.runningContext) {
+        runningSummary = store.runningContext;
       }
+      // Always get top memory entries if available
+      memoryContext = conversationMemory.retrieveRelevantMemory(conversationId, finalQuery);
+    }
+
+    // For all but the very first user query, inject summary and memory
+    if (conversationHistory.length > 1) {
+      // Keep only last 8 turns as raw history if long
+      effectiveHistory = conversationHistory.length > MAX_RAW_MESSAGES
+        ? conversationHistory.slice(-8)
+        : [...conversationHistory];
+      // Prepend running summary and memory as system-level context
+      const contextBlocks = [];
+      if (runningSummary) {
+        contextBlocks.push({ role: 'assistant' as const, content: `Summary of prior discussion:\n${runningSummary}` });
+      }
+      if (memoryContext) {
+        contextBlocks.push({ role: 'assistant' as const, content: `[Relevant Conversation Memory]\n${memoryContext}` });
+      }
+      if (contextBlocks.length > 0) {
+        effectiveHistory = [
+          ...contextBlocks,
+          ...effectiveHistory,
+        ];
+      }
+      console.log(`[AIOrchestrator] Injected context: summary=${!!runningSummary}, memory=${!!memoryContext}, history turns=${effectiveHistory.length}`);
+    } else if (conversationHistory.length > MAX_RAW_MESSAGES) {
+      // Fallback for very long initial queries
+      effectiveHistory = conversationHistory.slice(-MAX_RAW_MESSAGES);
+      console.log(`[AIOrchestrator] History trimmed: ${conversationHistory.length} → ${effectiveHistory.length} messages`);
     }
     
     const aiResponse = await this.callAIModel(

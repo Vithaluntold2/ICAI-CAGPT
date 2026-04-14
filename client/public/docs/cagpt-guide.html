@@ -1109,19 +1109,35 @@
     const API_BASE = '/api/guide';
 
     async function apiPost(path, body) {
-      const res = await fetch(API_BASE + path, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) throw new Error('API ' + res.status);
-      return res.json();
+      try {
+        const res = await fetch(API_BASE + path, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) {
+          console.error('[Guide API] POST ' + path + ' failed:', res.status);
+          throw new Error('API ' + res.status);
+        }
+        return res.json();
+      } catch (err) {
+        console.error('[Guide API] POST error:', err.message);
+        throw err;
+      }
     }
 
     async function apiGet(path) {
-      const res = await fetch(API_BASE + path);
-      if (!res.ok) throw new Error('API ' + res.status);
-      return res.json();
+      try {
+        const res = await fetch(API_BASE + path);
+        if (!res.ok) {
+          console.error('[Guide API] GET ' + path + ' failed:', res.status);
+          throw new Error('API ' + res.status);
+        }
+        return res.json();
+      } catch (err) {
+        console.error('[Guide API] GET error:', err.message);
+        throw err;
+      }
     }
 
     function setTestResult(testId, result) {
@@ -1132,14 +1148,15 @@
       testData[testId].updatedAt = new Date().toISOString();
       testData[testId].notes = testData[testId].notes || '';
       saveTestData();  // save locally first for instant UI
+      console.log('[Guide] Test result:', testId, status, 'by', currentTester);
       updateTestUI(testId, status);
       updateTestDashboard();
       renderActiveTestersSidebar();
       renderTesterBar();
       // Async push to server
       apiPost('/results', { testId, tester: currentTester, status, notes: testData[testId].notes })
-        .then(() => { syncOnline = true; renderTesterBar(); })
-        .catch(() => { syncOnline = false; renderTesterBar(); });
+        .then(() => { console.log('[Guide] Synced to server:', testId); syncOnline = true; renderTesterBar(); })
+        .catch(err => { console.error('[Guide] Sync failed:', err.message); syncOnline = false; renderTesterBar(); });
     }
 
     function setTestNote(testId, note) {
@@ -1161,13 +1178,16 @@
       try {
         const saved = safeStorageGet('cagpt_e2e_data', '');
         testData = saved ? JSON.parse(saved) : {};
+        console.log('[Guide] Loaded from localStorage:', Object.keys(testData).length, 'tests');
       } catch (e) {
         testData = {};
+        console.error('[Guide] localStorage parse error:', e.message);
       }
       syncOnline = storageAvailable;
       // Then fetch from server and merge (server wins for status, keeps latest updatedAt)
       apiGet('/results')
         .then(remote => {
+          console.log('[Guide] Fetched from server:', Object.keys(remote).length, 'tests');
           let changed = false;
           for (const [id, r] of Object.entries(remote)) {
             const local = testData[id];
@@ -1176,6 +1196,7 @@
               changed = true;
             }
           }
+          console.log('[Guide] Merged:', changed ? 'changes detected, re-rendering' : 'no changes');
           if (changed) {
             saveTestData();
             render();
@@ -1183,7 +1204,11 @@
           syncOnline = true;
           renderTesterBar();
         })
-        .catch(() => { syncOnline = false; renderTesterBar(); });
+        .catch(err => {
+          console.error('[Guide] API fetch failed:', err.message);
+          syncOnline = false;
+          renderTesterBar();
+        });
     }
 
     function toggleCard(el) {

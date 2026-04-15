@@ -2127,6 +2127,43 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
       res.status(500).json({ error: "Failed to unshare conversation" });
     }
   });
+
+  // Get shared conversation by token (public access - no auth required)
+  app.get("/api/shared/:token", async (req, res) => {
+    try {
+      const { token } = req.params;
+      
+      if (!token || token.length !== 64) {
+        return res.status(400).json({ error: "Invalid share token" });
+      }
+      
+      // Find conversation by share token (only if still shared)
+      const conversation = await storage.getConversationByShareToken(token);
+      
+      if (!conversation) {
+        return res.status(404).json({ error: "Shared conversation not found or no longer shared" });
+      }
+      
+      // Get messages for the conversation
+      const messages = await storage.getConversationMessages(conversation.id);
+      
+      // Return conversation data without sensitive user info
+      res.json({
+        id: conversation.id,
+        title: conversation.title,
+        createdAt: conversation.createdAt,
+        messages: messages.map(msg => ({
+          id: msg.id,
+          role: msg.role,
+          content: msg.content,
+          createdAt: msg.createdAt
+        }))
+      });
+    } catch (error) {
+      console.error('Get shared conversation error:', error);
+      res.status(500).json({ error: "Failed to load shared conversation" });
+    }
+  });
   
   // Delete conversation
   app.delete("/api/conversations/:id", requireAuth, async (req, res) => {

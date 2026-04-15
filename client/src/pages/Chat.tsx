@@ -798,7 +798,21 @@ export default function Chat() {
     const last30Days = new Date(today);
     last30Days.setDate(last30Days.getDate() - 30);
 
-    const groups: { label: string; conversations: typeof convs }[] = [
+    // Separate pinned and unpinned conversations
+    const pinned = convs.filter(c => c.pinned).sort((a, b) => 
+      new Date(b.updatedAt || b.createdAt).getTime() - new Date(a.updatedAt || a.createdAt).getTime()
+    );
+    const unpinned = convs.filter(c => !c.pinned);
+
+    const groups: { label: string; conversations: typeof convs }[] = [];
+
+    // Add pinned group first if there are any pinned conversations
+    if (pinned.length > 0) {
+      groups.push({ label: 'Pinned', conversations: pinned });
+    }
+
+    // Create time-based groups for unpinned conversations
+    const timeGroups: { label: string; conversations: typeof convs }[] = [
       { label: 'Today', conversations: [] },
       { label: 'Yesterday', conversations: [] },
       { label: 'Previous 7 Days', conversations: [] },
@@ -806,29 +820,29 @@ export default function Chat() {
       { label: 'Older', conversations: [] },
     ];
 
-    // Sort by pinned first, then by date
-    const sorted = [...convs].sort((a, b) => {
-      if (a.pinned && !b.pinned) return -1;
-      if (!a.pinned && b.pinned) return 1;
-      return new Date(b.updatedAt || b.createdAt).getTime() - new Date(a.updatedAt || a.createdAt).getTime();
-    });
-
-    sorted.forEach(conv => {
+    unpinned.forEach(conv => {
       const convDate = new Date(conv.updatedAt || conv.createdAt);
       if (convDate >= today) {
-        groups[0].conversations.push(conv);
+        timeGroups[0].conversations.push(conv);
       } else if (convDate >= yesterday) {
-        groups[1].conversations.push(conv);
+        timeGroups[1].conversations.push(conv);
       } else if (convDate >= last7Days) {
-        groups[2].conversations.push(conv);
+        timeGroups[2].conversations.push(conv);
       } else if (convDate >= last30Days) {
-        groups[3].conversations.push(conv);
+        timeGroups[3].conversations.push(conv);
       } else {
-        groups[4].conversations.push(conv);
+        timeGroups[4].conversations.push(conv);
       }
     });
 
-    return groups.filter(g => g.conversations.length > 0);
+    // Add non-empty time groups
+    timeGroups.forEach(group => {
+      if (group.conversations.length > 0) {
+        groups.push(group);
+      }
+    });
+
+    return groups;
   };
 
   const groupedConversations = groupConversationsByTime(filteredConversations);
@@ -1062,7 +1076,7 @@ export default function Chat() {
                                   <Button
                                     variant="ghost"
                                     size="icon"
-                                    className="h-6 w-6 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity mr-1"
+                                    className="h-6 w-6 flex-shrink-0 opacity-50 group-hover:opacity-100 transition-opacity mr-1"
                                     data-testid={`button-conversation-menu-${conv.id}`}
                                     onClick={(e) => e.stopPropagation()}
                                   >

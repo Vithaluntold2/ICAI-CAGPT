@@ -14,6 +14,7 @@ import signature from 'cookie-signature';
 import { AnalyticsProcessor } from './services/analyticsProcessor';
 import { addTitleGenerationJob, addAnalyticsJob } from './services/hybridJobQueue';
 import { AIResponseCache, CachedAIResponse } from './services/hybridCache';
+import { conversationMemory } from './services/conversationMemory';
 
 interface ChatStreamMessage {
   type: 'start' | 'chunk' | 'end' | 'error';
@@ -433,6 +434,9 @@ async function handleChatStream(ws: AuthenticatedWebSocket, message: any) {
       content: fullResponse,
       previousMessages: [...conversationHistory, { role: 'user', content: query }]
     });
+
+    // Store conversation turn in memory for context retention in long conversations
+    conversationMemory.storeTurn(conversation.id, query, fullResponse);
 
     // Auto-generate conversation title and metadata if this is the first message
     if (conversationHistory.length === 0 && conversation.title === 'New Conversation') {

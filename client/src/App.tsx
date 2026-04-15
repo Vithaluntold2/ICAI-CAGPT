@@ -6,6 +6,7 @@ import { ProtectedRoute } from './components/ProtectedRoute';
 import Landing from './pages/Landing';
 import Auth from './pages/Auth';
 import Chat from './pages/Chat';
+import SharedConversation from './pages/SharedConversation';
 
 // Static/Info Pages
 import Features from './pages/Features';
@@ -159,6 +160,11 @@ function App() {
       {/* Auth Route */}
       <Route path="/auth">
         <Auth />
+      </Route>
+
+      {/* Shared Conversation Route - Public access */}
+      <Route path="/shared/:token">
+        <SharedConversation />
       </Route>
 
       {/* Chat Route - Main app after login */}

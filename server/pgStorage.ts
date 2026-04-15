@@ -345,6 +345,18 @@ export class PostgresStorage implements IStorage {
     return result[0] || undefined;
   }
 
+  async getConversationByShareToken(token: string): Promise<Conversation | undefined> {
+    const result = await db
+      .select()
+      .from(conversations)
+      .where(and(
+        eq(conversations.sharedToken, token),
+        eq(conversations.isShared, true)
+      ))
+      .limit(1);
+    return result[0] || undefined;
+  }
+
   async getUserConversations(userId: string, profileId?: string | null): Promise<Conversation[]> {
     try {
       const conditions = [eq(conversations.userId, userId)];

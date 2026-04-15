@@ -25,6 +25,7 @@ export interface IStorage {
   
   // Conversation management
   getConversation(id: string): Promise<Conversation | undefined>;
+  getConversationByShareToken(token: string): Promise<Conversation | undefined>;
   getUserConversations(userId: string, profileId?: string | null): Promise<Conversation[]>;
   createConversation(conversation: InsertConversation): Promise<Conversation>;
   updateConversation(id: string, updates: Partial<Conversation>): Promise<Conversation | undefined>;
@@ -110,6 +111,11 @@ export class MemStorage implements IStorage {
   // Conversation methods
   async getConversation(id: string): Promise<Conversation | undefined> {
     return this.conversations.get(id);
+  }
+
+  async getConversationByShareToken(token: string): Promise<Conversation | undefined> {
+    return Array.from(this.conversations.values())
+      .find(conv => conv.sharedToken === token && conv.isShared);
   }
 
   async getUserConversations(userId: string, profileId?: string | null): Promise<Conversation[]> {

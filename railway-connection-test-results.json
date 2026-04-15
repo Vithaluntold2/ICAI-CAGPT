@@ -1,0 +1,206 @@
+{
+  "timestamp": "2026-04-14T09:34:01.355Z",
+  "duration": "7.16s",
+  "summary": {
+    "passed": 26,
+    "failed": 0,
+    "warnings": 0
+  },
+  "results": [
+    {
+      "service": "Environment",
+      "status": "PASS",
+      "message": "DATABASE_URL = postgresql://postgres:icai_cag..."
+    },
+    {
+      "service": "Environment",
+      "status": "PASS",
+      "message": "REDIS_URL = redis://mainline.proxy.rlwy.net:14275"
+    },
+    {
+      "service": "Environment",
+      "status": "PASS",
+      "message": "AZURE_OPENAI_API_KEY = 9erWL5lZZ2aCYRxuZIWjxE8YxuP4N4..."
+    },
+    {
+      "service": "Environment",
+      "status": "PASS",
+      "message": "ENCRYPTION_KEY = 44277bb7444483d64420645d4900e5..."
+    },
+    {
+      "service": "Environment",
+      "status": "PASS",
+      "message": "SESSION_SECRET = 3604b6b9d6a25a31a8988b7668e38b..."
+    },
+    {
+      "service": "Environment",
+      "status": "PASS",
+      "message": "PORT = 5000"
+    },
+    {
+      "service": "Environment",
+      "status": "PASS",
+      "message": "NODE_ENV = development"
+    },
+    {
+      "service": "Environment",
+      "status": "PASS",
+      "message": "AZURE_EMBEDDING_API_KEY configured"
+    },
+    {
+      "service": "Environment",
+      "status": "PASS",
+      "message": "AZURE_SEARCH_API_KEY configured"
+    },
+    {
+      "service": "Environment",
+      "status": "PASS",
+      "message": "MICROSOFT_CLIENT_ID configured"
+    },
+    {
+      "service": "Railway Meta",
+      "status": "PASS",
+      "message": "Project: ICAI-CAGPT"
+    },
+    {
+      "service": "Railway Meta",
+      "status": "PASS",
+      "message": "Project ID: 74bf1b14-0160-4853-ae52-1a9d708ef2ce"
+    },
+    {
+      "service": "Railway Meta",
+      "status": "PASS",
+      "message": "Environment: production"
+    },
+    {
+      "service": "Railway Meta",
+      "status": "PASS",
+      "message": "Service: web"
+    },
+    {
+      "service": "Railway Meta",
+      "status": "PASS",
+      "message": "Public Domain: ca-gpt.up.railway.app"
+    },
+    {
+      "service": "Railway Meta",
+      "status": "PASS",
+      "message": "Private Domain: web.railway.internal"
+    },
+    {
+      "service": "PostgreSQL",
+      "status": "PASS",
+      "message": "Connection established"
+    },
+    {
+      "service": "PostgreSQL",
+      "status": "PASS",
+      "message": "Version: 16.13"
+    },
+    {
+      "service": "PostgreSQL",
+      "status": "PASS",
+      "message": "Database: icai_cagpt"
+    },
+    {
+      "service": "PostgreSQL",
+      "status": "PASS",
+      "message": "Active connections: 3"
+    },
+    {
+      "service": "PostgreSQL",
+      "status": "PASS",
+      "message": "Tables found: 61",
+      "details": {
+        "tables": [
+          "accounting_integrations",
+          "ai_provider_costs",
+          "api_keys",
+          "audit_logs",
+          "cache_entries",
+          "conversation_analytics",
+          "conversations",
+          "coupon_usage",
+          "coupons",
+          "deliverable_assets",
+          "deliverable_instances",
+          "deliverable_shares",
+          "deliverable_templates",
+          "deliverable_versions",
+          "finetuning_dataset",
+          "forensic_cases",
+          "forensic_documents",
+          "forensic_evidence",
+          "forensic_findings",
+          "forensic_reconciliations",
+          "gdpr_consents",
+          "guide_test_results",
+          "interaction_logs",
+          "knowledge_edges",
+          "knowledge_nodes",
+          "maintenance_tasks",
+          "message_analytics",
+          "message_feedback",
+          "messages",
+          "model_routing_logs",
+          "payments",
+          "profile_members",
+          "profiles",
+          "regulatory_alerts",
+          "roundtable_sessions",
+          "scenario_comparisons",
+          "scenario_conversation_links",
+          "scenario_metrics",
+          "scenario_playbooks",
+          "scenario_runs",
+          "scenario_shares",
+          "scenario_variants",
+          "search_history",
+          "sentiment_trends",
+          "subscriptions",
+          "support_tickets",
+          "system_alerts",
+          "tax_file_uploads",
+          "ticket_messages",
+          "usage_quotas",
+          "usage_tracking",
+          "user_behavior_patterns",
+          "user_llm_config",
+          "user_sessions",
+          "users",
+          "vector_embeddings",
+          "voice_credit_purchases",
+          "voice_credits",
+          "voice_usage",
+          "voice_usage_daily",
+          "white_label_configs"
+        ]
+      }
+    },
+    {
+      "service": "Redis",
+      "status": "PASS",
+      "message": "Connection established"
+    },
+    {
+      "service": "Redis",
+      "status": "PASS",
+      "message": "PING response: PONG"
+    },
+    {
+      "service": "Redis",
+      "status": "PASS",
+      "message": "Version: 7.4.8"
+    },
+    {
+      "service": "Redis",
+      "status": "PASS",
+      "message": "Write/Read test: Connected at 2026-04-14T09:33:59.603Z"
+    },
+    {
+      "service": "Redis",
+      "status": "PASS",
+      "message": "Keys in database: 4"
+    }
+  ]
+}

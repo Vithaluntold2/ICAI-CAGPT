@@ -60,10 +60,10 @@ function extractTopics(text: string): string[] {
  * Create a compact summary of a conversation turn
  */
 function summarizeTurn(userMsg: string, assistantMsg: string): string {
-  // Take first 150 chars of user message
-  const userPart = userMsg.length > 150 ? userMsg.substring(0, 150) + '...' : userMsg;
-  // Take first 300 chars of assistant response (captures the key answer)
-  const assistantPart = assistantMsg.length > 300 ? assistantMsg.substring(0, 300) + '...' : assistantMsg;
+  // Take first 200 chars of user message (increased for better context)
+  const userPart = userMsg.length > 200 ? userMsg.substring(0, 200) + '...' : userMsg;
+  // Take first 400 chars of assistant response (captures more of the key answer)
+  const assistantPart = assistantMsg.length > 400 ? assistantMsg.substring(0, 400) + '...' : assistantMsg;
   return `User asked: ${userPart}\nResponse: ${assistantPart}`;
 }
 
@@ -131,9 +131,11 @@ export class ConversationMemoryService {
 
     store.entries.push(entry);
 
-    // Update rolling context (keep last 3 summaries as running context)
-    const recentEntries = store.entries.slice(-3);
+    // Update rolling context (keep last 5 summaries as running context for better continuity)
+    const recentEntries = store.entries.slice(-5);
     store.runningContext = recentEntries.map(e => e.summary).join('\n\n');
+    
+    console.log(`[ConversationMemory] Stored turn ${entry.turnIndex} for conversation - Topics: ${entry.topics.join(', ')}, Total turns: ${store.entries.length}`);
   }
 
   /**
@@ -166,9 +168,10 @@ export class ConversationMemoryService {
       .slice(0, maxEntries);
 
     if (relevant.length === 0) {
-      // No topical match — return last 2 turns as recent context
-      const recent = store.entries.slice(-2);
+      // No topical match — return last 3-4 turns as recent context
+      const recent = store.entries.slice(-4);
       if (recent.length === 0) return '';
+      console.log(`[ConversationMemory] No topical match for query - returning ${recent.length} recent turns as fallback`);
       return '**Recent conversation context:**\n' +
         recent.map(e => e.summary).join('\n\n');
     }
@@ -177,6 +180,7 @@ export class ConversationMemoryService {
     relevant.sort((a, b) => a.entry.turnIndex - b.entry.turnIndex);
 
     const memoryText = relevant.map(r => r.entry.summary).join('\n\n');
+    console.log(`[ConversationMemory] Retrieved ${relevant.length} relevant entries out of ${store.entries.length} total turns`);
     return `**Relevant conversation history (${relevant.length} of ${store.entries.length} exchanges):**\n${memoryText}`;
   }
 

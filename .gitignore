@@ -5,15 +5,14 @@ server/public
 vite.config.ts.*
 *.tar.gz
 
-# Environment variables
+# Environment variables - ALL .env files except examples
 .env
-.env.local
-.env.railway
-.env.production
-.env.development
+.env.*
+!.env.example
+!.env.test.example
+!.env.enhancements
+
 # Sensitive files
-.env.bak
-.env.backup.*
 *.bak
 *.backup
 SETUP.md

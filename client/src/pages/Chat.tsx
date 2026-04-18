@@ -952,92 +952,8 @@ export default function Chat() {
 
       {/* Mode ribbon hidden for spacious layout — mode selector in input bar + menu */}
 
-      {whiteboardEnabled ? (
-        view === "board" ? (
-          /* Whiteboard v2 BOARD VIEW: canvas + floating chat PIP */
-          <div className="flex-1 relative overflow-hidden">
-            {activeConversation ? (
-              <Whiteboard conversationId={activeConversation} />
-            ) : (
-              <div
-                className="flex flex-col items-center justify-center h-full text-muted-foreground p-8 text-center"
-                data-testid="whiteboard-no-conversation"
-              >
-                <p className="text-sm">Start a conversation to populate your whiteboard.</p>
-              </div>
-            )}
-            <ChatPIP
-              messages={messages.map(m => ({ id: m.id, role: m.role, content: m.content }))}
-              byId={artifactsData?.byId ?? {}}
-              onSend={(text, selection) => handleSend(text, selection)}
-            />
-          </div>
-        ) : (
-          /* Whiteboard v2 CHAT VIEW (flag ON): stacked message list with rich rendering */
-          <div className="flex-1 flex flex-col h-full min-h-0">
-            <ScrollArea className="flex-1" data-testid="chat-messages-rich">
-              <div className="max-w-4xl mx-auto p-4 space-y-4">
-                {messages.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center h-full text-center py-16">
-                    <h2 className="text-2xl font-medium text-foreground/80">What are you working on?</h2>
-                  </div>
-                ) : (
-                  <>
-                    {messages
-                      .filter(m => !(m.role === 'assistant' && m.metadata?.showInOutputPane))
-                      .map(message => (
-                      <div
-                        key={message.id}
-                        className={message.role === 'user' ? 'flex justify-end' : 'flex justify-start'}
-                      >
-                        <div
-                          className={
-                            message.role === 'user'
-                              ? 'bg-primary text-primary-foreground rounded-lg px-3 py-2 max-w-2xl'
-                              : 'bg-card border rounded-lg px-3 py-2 max-w-3xl w-full'
-                          }
-                        >
-                          {message.role === 'assistant' ? (
-                            message.content ? (
-                              <ChatMessageRich
-                                content={message.content}
-                                conversationId={activeConversation}
-                              />
-                            ) : (
-                              isStreaming && message.id.startsWith('streaming-') ? (
-                                <ThinkingBlock
-                                  steps={thinkingSteps}
-                                  isActive={true}
-                                  currentStatus={cagptStatus || 'Thinking'}
-                                />
-                              ) : (
-                                <span className="text-sm text-muted-foreground italic">Loading...</span>
-                              )
-                            )
-                          ) : (
-                            <p className="text-sm whitespace-pre-wrap">{message.content}</p>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                    <div ref={messagesEndRef} />
-                  </>
-                )}
-              </div>
-            </ScrollArea>
-            <div className="border-t p-4 bg-background/95">
-              <div className="max-w-4xl mx-auto">
-                <Composer
-                  onSend={(text, selection) => handleSend(text, selection)}
-                  disabled={sendMessageMutation.isPending}
-                />
-              </div>
-            </div>
-          </div>
-        )
-      ) : (
-      /* 3-Pane Resizable Layout */
-      <ResizablePanelGroup key={`layout-${rightPaneCollapsed}-${leftPaneCollapsed}`} direction="horizontal" className="flex-1">
+      {/* 3-Pane Resizable Layout — sidebar always renders; middle+right pane content depends on whiteboardEnabled */}
+      <ResizablePanelGroup key={`layout-${rightPaneCollapsed}-${leftPaneCollapsed}-${whiteboardEnabled ? 'wb' : 'legacy'}-${view}`} direction="horizontal" className="flex-1">
         {/* Left Pane: Sessions - Always render, control visibility with collapsedSize */}
         <ResizablePanel 
           defaultSize={leftPaneCollapsed ? 4 : 14} 
@@ -1395,8 +1311,27 @@ export default function Chat() {
         </ResizablePanel>
         <ResizableHandle withHandle />
 
-        {/* Middle Pane: Chat */}
-        <ResizablePanel defaultSize={rightPaneCollapsed ? 80 : 50} minSize={30}>
+        {/* Middle Pane: Chat — board view swaps to Whiteboard+PIP; chat view keeps the familiar layout */}
+        <ResizablePanel defaultSize={whiteboardEnabled ? 86 : (rightPaneCollapsed ? 80 : 50)} minSize={30}>
+          {whiteboardEnabled && view === "board" ? (
+            <div className="relative h-full overflow-hidden">
+              {activeConversation ? (
+                <Whiteboard conversationId={activeConversation} />
+              ) : (
+                <div
+                  className="flex flex-col items-center justify-center h-full text-muted-foreground p-8 text-center"
+                  data-testid="whiteboard-no-conversation"
+                >
+                  <p className="text-sm">Start a conversation to populate your whiteboard.</p>
+                </div>
+              )}
+              <ChatPIP
+                messages={messages.map(m => ({ id: m.id, role: m.role, content: m.content }))}
+                byId={artifactsData?.byId ?? {}}
+                onSend={(text, selection) => handleSend(text, selection)}
+              />
+            </div>
+          ) : (
           <div className="flex flex-col h-full">
             <ScrollArea className="flex-1 p-4">
               <div className="max-w-4xl mx-auto space-y-6">
@@ -1689,10 +1624,11 @@ export default function Chat() {
               </div>
             </div>
           </div>
+          )}
         </ResizablePanel>
 
-        {/* Right Pane: Output - Always render, control visibility with size */}
-        {!isOutputFullscreen && (
+        {/* Right Pane: Output - only in legacy (flag-off) layout */}
+        {!whiteboardEnabled && !isOutputFullscreen && (
           <>
             <ResizableHandle withHandle />
             <ResizablePanel 
@@ -1740,7 +1676,6 @@ export default function Chat() {
           </>
         )}
       </ResizablePanelGroup>
-      )}
 
       {/* Rename Dialog */}
       <Dialog open={renameDialogOpen} onOpenChange={setRenameDialogOpen}>

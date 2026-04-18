@@ -298,9 +298,170 @@ export class DocumentExporter {
   }
 
   /**
-   * Export content to PDF format with proper markdown parsing
+   * Strip whiteboard <artifact id="..."/> placeholders from content so they
+   * don't show as raw tags in the exported PDF. The actual artifact (chart,
+   * flowchart, etc.) is not embedded — a short placeholder label is left in its
+   * place so readers know the diagram exists.
+   */
+  private static stripArtifactTags(text: string): string {
+    return text.replace(/<artifact\s+id="([^"]+)"\s*\/?>\s*<\/artifact>|<artifact\s+id="([^"]+)"\s*\/>/g,
+      () => "[Diagram — view in the app]");
+  }
+
+  /**
+   * Detect a GFM table block starting at `start`.
+   * Returns { rows, end } where `end` is the index AFTER the last table line,
+   * or null when the block at `start` is not a table.
+   */
+  private static parseTableBlock(lines: string[], start: number): { headers: string[]; rows: string[][]; end: number } | null {
+    const headerLine = lines[start]?.trim();
+    const separatorLine = lines[start + 1]?.trim();
+    if (!headerLine || !separatorLine) return null;
+    if (!headerLine.startsWith('|') || !headerLine.endsWith('|')) return null;
+    if (!/^\|\s*:?-+:?\s*(\|\s*:?-+:?\s*)+\|$/.test(separatorLine)) return null;
+
+    const splitRow = (raw: string): string[] =>
+      raw.replace(/^\||\|$/g, '').split('|').map(c => c.trim());
+
+    const headers = splitRow(headerLine);
+    const rows: string[][] = [];
+    let i = start + 2;
+    while (i < lines.length) {
+      const rowLine = lines[i].trim();
+      if (!rowLine.startsWith('|') || !rowLine.endsWith('|')) break;
+      rows.push(splitRow(rowLine));
+      i++;
+    }
+    return { headers, rows, end: i };
+  }
+
+  /**
+   * Render a table block into the PDF using pdfkit primitives.
+   */
+  private static renderPdfTable(
+    doc: PDFKit.PDFDocument,
+    headers: string[],
+    rows: string[][],
+  ): void {
+    const marginLeft = (doc.page.margins?.left ?? 50);
+    const marginRight = (doc.page.margins?.right ?? 50);
+    const tableWidth = doc.page.width - marginLeft - marginRight;
+    const colCount = Math.max(1, headers.length);
+    const colWidth = tableWidth / colCount;
+    const cellPadX = 4;
+    const cellPadY = 3;
+
+    const measureRowHeight = (cells: string[], font: string, size: number): number => {
+      doc.font(font).fontSize(size);
+      let h = 0;
+      for (const c of cells) {
+        const text = DocumentExporter.stripMarkdown(c || '');
+        const textH = doc.heightOfString(text || ' ', { width: colWidth - cellPadX * 2 });
+        if (textH > h) h = textH;
+      }
+      return h + cellPadY * 2;
+    };
+
+    const drawRow = (cells: string[], y: number, height: number, bold: boolean, fill?: string) => {
+      if (fill) {
+        doc.save();
+        doc.rect(marginLeft, y, tableWidth, height).fill(fill);
+        doc.restore();
+      }
+      doc.font(bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(10).fillColor('#000000');
+      for (let c = 0; c < colCount; c++) {
+        const text = DocumentExporter.stripMarkdown(cells[c] ?? '');
+        doc.text(text, marginLeft + c * colWidth + cellPadX, y + cellPadY, {
+          width: colWidth - cellPadX * 2,
+          height: height - cellPadY * 2,
+          ellipsis: false,
+        });
+      }
+      // vertical column separators
+      doc.strokeColor('#dddddd').lineWidth(0.5);
+      for (let c = 0; c <= colCount; c++) {
+        const x = marginLeft + c * colWidth;
+        doc.moveTo(x, y).lineTo(x, y + height).stroke();
+      }
+      // top and bottom
+      doc.moveTo(marginLeft, y).lineTo(marginLeft + tableWidth, y).stroke();
+      doc.moveTo(marginLeft, y + height).lineTo(marginLeft + tableWidth, y + height).stroke();
+    };
+
+    const ensureRoom = (neededH: number) => {
+      const bottom = doc.page.height - (doc.page.margins?.bottom ?? 50);
+      if (doc.y + neededH > bottom) doc.addPage();
+    };
+
+    // header
+    const headerH = measureRowHeight(headers, 'Helvetica-Bold', 10);
+    ensureRoom(headerH);
+    drawRow(headers, doc.y, headerH, true, '#f3f4f6');
+    doc.y = doc.y + headerH;
+
+    // rows
+    for (const row of rows) {
+      const h = measureRowHeight(row, 'Helvetica', 10);
+      ensureRoom(h);
+      drawRow(row, doc.y, h, false);
+      doc.y = doc.y + h;
+    }
+
+    doc.moveDown(0.4);
+    doc.strokeColor('#000000').lineWidth(1); // reset
+  }
+
+  /**
+   * Render a fenced code block. For `mermaid`, a placeholder note is emitted
+   * (the diagram cannot be rendered server-side without a headless browser);
+   * otherwise the block is rendered in a monospace font with a gray background.
+   */
+  private static renderPdfCodeBlock(
+    doc: PDFKit.PDFDocument,
+    lang: string,
+    body: string,
+  ): void {
+    if (lang.toLowerCase() === 'mermaid') {
+      doc.moveDown(0.2);
+      doc.fontSize(10).font('Helvetica-Oblique').fillColor('#666666')
+        .text('[Diagram — rendered version available in the app]');
+      doc.fillColor('#000000');
+      doc.moveDown(0.3);
+      return;
+    }
+
+    const marginLeft = (doc.page.margins?.left ?? 50);
+    const marginRight = (doc.page.margins?.right ?? 50);
+    const blockWidth = doc.page.width - marginLeft - marginRight;
+    const padX = 6;
+    const padY = 4;
+
+    doc.font('Courier').fontSize(9).fillColor('#111111');
+    const textH = doc.heightOfString(body, { width: blockWidth - padX * 2 });
+
+    const bottom = doc.page.height - (doc.page.margins?.bottom ?? 50);
+    if (doc.y + textH + padY * 2 + 6 > bottom) doc.addPage();
+
+    doc.save();
+    doc.rect(marginLeft, doc.y, blockWidth, textH + padY * 2).fill('#f5f5f5');
+    doc.restore();
+
+    doc.font('Courier').fontSize(9).fillColor('#111111')
+      .text(body, marginLeft + padX, doc.y + padY, { width: blockWidth - padX * 2 });
+
+    doc.y = doc.y + padY;
+    doc.fillColor('#000000');
+    doc.moveDown(0.5);
+  }
+
+  /**
+   * Export content to PDF format. Block-aware: renders GFM tables as real
+   * tables, fenced code blocks as code (or as a placeholder for mermaid),
+   * and strips whiteboard <artifact/> placeholders.
    */
   static async exportToPdf(content: string, title: string = 'CA GPT Output'): Promise<Buffer> {
+    const cleaned = this.stripArtifactTags(content);
+
     return new Promise((resolve, reject) => {
       const doc = new PDFDocument({ margin: 50 });
       const chunks: Buffer[] = [];
@@ -313,12 +474,36 @@ export class DocumentExporter {
       doc.fontSize(20).font('Helvetica-Bold').text(this.stripMarkdown(title), { align: 'left' });
       doc.moveDown();
 
-      // Process content
-      const lines = content.split('\n');
-      for (const line of lines) {
+      const lines = cleaned.split('\n');
+      let i = 0;
+      while (i < lines.length) {
+        const line = lines[i];
         const trimmed = line.trim();
-        
-        // Handle headers
+
+        // --- Fenced code block ---
+        const fenceMatch = /^```(\w*)\s*$/.exec(trimmed);
+        if (fenceMatch) {
+          const lang = fenceMatch[1] || '';
+          const bodyLines: string[] = [];
+          i++;
+          while (i < lines.length && !/^```\s*$/.test(lines[i].trim())) {
+            bodyLines.push(lines[i]);
+            i++;
+          }
+          if (i < lines.length) i++; // skip closing fence
+          this.renderPdfCodeBlock(doc, lang, bodyLines.join('\n'));
+          continue;
+        }
+
+        // --- GFM table block ---
+        const table = this.parseTableBlock(lines, i);
+        if (table) {
+          this.renderPdfTable(doc, table.headers, table.rows);
+          i = table.end;
+          continue;
+        }
+
+        // --- Headings ---
         if (trimmed.startsWith('# ')) {
           doc.moveDown(0.5);
           doc.fontSize(18).font('Helvetica-Bold').text(this.stripMarkdown(trimmed.replace(/^#\s+/, '')));
@@ -336,31 +521,27 @@ export class DocumentExporter {
           doc.fontSize(12).font('Helvetica-Bold').text(this.stripMarkdown(trimmed.replace(/^####\s+/, '')));
           doc.moveDown(0.1);
         } else if (trimmed.startsWith('- ') || trimmed.startsWith('* ') || trimmed.startsWith('+ ')) {
-          // Bullet points
           const bulletText = this.stripMarkdown(trimmed.replace(/^[-*+]\s+/, ''));
           doc.fontSize(11).font('Helvetica').text('• ' + bulletText, { indent: 20 });
         } else if (/^\d+\.\s+/.test(trimmed)) {
-          // Numbered list
           const listText = this.stripMarkdown(trimmed);
           doc.fontSize(11).font('Helvetica').text(listText, { indent: 20 });
         } else if (trimmed.startsWith('> ')) {
-          // Blockquote
           const quoteText = this.stripMarkdown(trimmed.replace(/^>\s+/, ''));
           doc.fontSize(11).font('Helvetica-Oblique').fillColor('#666666').text(quoteText, { indent: 30 });
           doc.fillColor('#000000');
         } else if (trimmed === '---' || trimmed === '***' || trimmed === '___') {
-          // Horizontal rule
           doc.moveDown(0.3);
           doc.moveTo(50, doc.y).lineTo(doc.page.width - 50, doc.y).stroke();
           doc.moveDown(0.3);
         } else if (trimmed) {
-          // Regular text with inline formatting
           const cleanText = this.stripMarkdown(trimmed);
           doc.fontSize(11).font('Helvetica').text(cleanText, { align: 'left' });
         } else {
-          // Empty line
           doc.moveDown(0.5);
         }
+
+        i++;
       }
 
       doc.end();

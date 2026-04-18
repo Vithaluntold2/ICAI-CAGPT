@@ -10,6 +10,8 @@ export function useConversationArtifacts(conversationId?: string) {
   return useQuery<ConversationArtifactsData>({
     queryKey: ["whiteboard", conversationId],
     enabled: !!conversationId,
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
     queryFn: async () => {
       const res = await fetch(`/api/conversations/${conversationId}/whiteboard`, {
         credentials: "include",

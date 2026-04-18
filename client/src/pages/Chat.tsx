@@ -953,7 +953,7 @@ export default function Chat() {
       {/* Mode ribbon hidden for spacious layout — mode selector in input bar + menu */}
 
       {/* 3-Pane Resizable Layout — sidebar always renders; middle+right pane content depends on whiteboardEnabled */}
-      <ResizablePanelGroup key={`layout-${rightPaneCollapsed}-${leftPaneCollapsed}-${whiteboardEnabled ? 'wb' : 'legacy'}-${view}`} direction="horizontal" className="flex-1">
+      <ResizablePanelGroup key={`layout-${rightPaneCollapsed}-${leftPaneCollapsed}-${whiteboardEnabled ? 'wb' : 'legacy'}`} direction="horizontal" className="flex-1">
         {/* Left Pane: Sessions - Always render, control visibility with collapsedSize */}
         <ResizablePanel 
           defaultSize={leftPaneCollapsed ? 4 : 14} 

@@ -1,18 +1,24 @@
-import { useLocation } from "wouter";
+import { useState } from "react";
 import { cn } from "@/lib/utils";
 
 export type ChatView = "chat" | "board";
 
 export function useChatView(): [ChatView, (v: ChatView) => void] {
-  const [, setLocation] = useLocation();
-  const url = new URL(window.location.href);
-  const current = (url.searchParams.get("view") === "board" ? "board" : "chat") as ChatView;
+  const [view, setView] = useState<ChatView>(() => {
+    if (typeof window === "undefined") return "chat";
+    return new URL(window.location.href).searchParams.get("view") === "board" ? "board" : "chat";
+  });
   const set = (v: ChatView) => {
-    const u = new URL(window.location.href);
-    u.searchParams.set("view", v);
-    setLocation(u.pathname + u.search);
+    setView(v);
+    try {
+      const u = new URL(window.location.href);
+      u.searchParams.set("view", v);
+      window.history.replaceState(null, "", u.pathname + u.search);
+    } catch {
+      // ignore — URL sync is best-effort
+    }
   };
-  return [current, set];
+  return [view, set];
 }
 
 export function ChatViewSwitcher({ value, onChange }: { value: ChatView; onChange: (v: ChatView) => void }) {

@@ -48,6 +48,12 @@ import type { CreateArtifactInput } from './whiteboard/repository';
 import type { SelectionInput } from './whiteboard/selectionPreamble';
 import { formatManifest } from './whiteboard/manifest';
 import { buildSelectionPreamble } from './whiteboard/selectionPreamble';
+// Tool-calling (Phase 4.7)
+import { completeWithToolLoop } from './aiOrchestrator.toolLoop';
+import { toolRegistry } from './tools/registry';
+import { toolsToAnthropicSchema } from './tools/adapters/anthropic';
+import { toolsToOpenAISchema } from './tools/adapters/openai';
+import type { CompletionResponse } from './aiProviders/types';
 
 export type ResponseType = 'research' | 'analysis' | 'document' | 'calculation' | 'visualization' | 'export' | 'general';
 
@@ -117,6 +123,9 @@ export interface ProcessQueryOptions {
   // Whiteboard integration (Phase 2.4)
   messageId?: string;
   selection?: SelectionInput;
+  // Tool-calling context (Phase 4.7): required so ToolContext can be built
+  // when the provider tool-call loop fires.
+  userId?: string;
 }
 
 export class AIOrchestrator {
@@ -136,7 +145,14 @@ export class AIOrchestrator {
     options?: ProcessQueryOptions
   ): Promise<OrchestrationResult> {
     const startTime = Date.now();
-    
+
+    // Thread userId into options so downstream (callAIModel -> tool loop) can
+    // build a ToolContext { conversationId, userId }. Keep the original
+    // top-level `userId` arg for backward compatibility with other call sites.
+    if (userId && options && !options.userId) {
+      options = { ...options, userId };
+    }
+
     // CRITICAL: Normalize chat mode early to ensure consistent naming throughout
     const chatMode = normalizeChatMode(options?.chatMode);
     
@@ -1909,8 +1925,11 @@ export class AIOrchestrator {
         const providerModel = getModelForProvider(providerName);
         
         console.log(`[AIOrchestrator] Attempting ${providerName} (health: ${metrics.healthScore}) [${i + 1}/${healthyProviders.length}]${providerModel ? ` with model ${providerModel}` : ' (using default model)'}`);
-        
-        const response = await provider.generateCompletion({
+
+        // Build the base request. When we have a conversationId, also attach
+        // tool schemas in the provider's native shape and drive a tool-call
+        // loop so the model can invoke read_whiteboard (etc).
+        const baseRequest = {
           messages,
           model: providerModel, // Provider-specific model or undefined for default
           temperature: 0.7,
@@ -1921,7 +1940,27 @@ export class AIOrchestrator {
             mimeType: attachment.mimeType,
             documentType: attachment.documentType
           } : undefined
-        });
+        };
+
+        let response: CompletionResponse;
+        const conversationId = options?.conversationId;
+        if (conversationId) {
+          const registeredTools = toolRegistry.list();
+          let requestWithTools = baseRequest as any;
+          if (registeredTools.length > 0) {
+            const isAnthropic = providerName === AIProviderName.CLAUDE;
+            const toolsSchema = isAnthropic
+              ? toolsToAnthropicSchema(registeredTools)
+              : toolsToOpenAISchema(registeredTools);
+            requestWithTools = { ...baseRequest, tools: toolsSchema };
+          }
+          response = await completeWithToolLoop(provider, requestWithTools, {
+            conversationId,
+            userId: options?.userId ?? '',
+          });
+        } else {
+          response = await provider.generateCompletion(baseRequest);
+        }
         
         // Record success with health monitor
         providerHealthMonitor.recordSuccess(providerName);

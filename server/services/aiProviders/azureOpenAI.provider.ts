@@ -14,6 +14,7 @@ import {
   CostEstimate,
   ProviderError,
 } from './types';
+import { parseOpenAIToolCall } from '../tools/adapters/openai';
 
 export class AzureOpenAIProvider extends AIProvider {
   private client: AzureOpenAI | null = null;
@@ -111,17 +112,39 @@ export class AzureOpenAIProvider extends AIProvider {
       // Azure OpenAI uses deployment from client config, not model parameter
       // gpt-5.2-chat only supports temperature=1, so omit it for that model
       const supportsTemperature = !this.deploymentName.includes('5.1') && !this.deploymentName.includes('5.2');
-      const completion = await this.client.chat.completions.create({
+      const apiRequest: any = {
         model: this.deploymentName,
         messages: messages,
         ...(supportsTemperature ? { temperature: request.temperature ?? 0.7 } : {}),
         max_completion_tokens: request.maxTokens ?? 2000,
         stream: false,
-      }) as any;
+      };
+      if (request.tools && request.tools.length > 0) {
+        apiRequest.tools = request.tools;
+      }
+      const completion = await this.client.chat.completions.create(apiRequest) as any;
 
-      const content = completion.choices?.[0]?.message?.content || '';
+      const choice = completion.choices?.[0];
+      const message = choice?.message;
+      const content = message?.content || '';
       const inputTokens = completion.usage?.prompt_tokens || 0;
       const outputTokens = completion.usage?.completion_tokens || 0;
+
+      // Parse tool calls if present
+      const toolCalls = message ? parseOpenAIToolCall(message as any) : [];
+      const hasToolCalls = toolCalls.length > 0;
+
+      const rawFinish = choice?.finish_reason;
+      let finishReason: CompletionResponse['finishReason'];
+      if (hasToolCalls || rawFinish === 'tool_calls' || rawFinish === 'function_call') {
+        finishReason = 'tool_calls';
+      } else if (rawFinish === 'length') {
+        finishReason = 'length';
+      } else if (rawFinish === 'stop') {
+        finishReason = 'stop';
+      } else {
+        finishReason = 'stop';
+      }
 
       return {
         content,
@@ -132,7 +155,10 @@ export class AzureOpenAIProvider extends AIProvider {
         },
         model: completion.model || this.deploymentName,
         provider: AIProviderName.AZURE_OPENAI,
-        finishReason: completion.choices?.[0]?.finish_reason === 'stop' ? 'stop' : 'error',
+        finishReason,
+        metadata: {
+          toolCalls: hasToolCalls ? toolCalls : undefined,
+        },
       };
     } catch (error: any) {
       console.error('[AzureOpenAI] Completion error:', error);

@@ -1,8 +1,8 @@
 # Dynamic Chat + Whiteboard — Design
 
 **Date:** 2026-04-18
-**Status:** Approved design, pending implementation plan
-**Scope:** `client/src/pages/Chat.tsx`, `client/src/pages/ForensicIntelligence.tsx`
+**Status:** Approved design (revised 2026-04-18 to descope ForensicIntelligence), pending implementation plan
+**Scope:** `client/src/pages/Chat.tsx` only. Forensic conversations already run through `Chat.tsx` via the `ModeDockRibbon` `forensic-intelligence` mode, so they inherit the whiteboard automatically. The standalone `ForensicIntelligence.tsx` page is a document-analysis/findings surface with no chat UI and is explicitly out of scope.
 
 ## 1. Summary
 
@@ -21,6 +21,7 @@ Replace the current persistent right-side `OutputPane` with a toggled **view mod
 - Minimap, user-driven freeform annotation, drag-to-rearrange artifacts.
 - Real-time collaboration across users.
 - Migrating other chat surfaces (`Roundtable`, `ScenarioSimulator`, `DeliverableComposer`). Those stay on the existing layout until separately migrated.
+- Touching `ForensicIntelligence.tsx`. It is not a chat surface and is out of scope; adding a whiteboard of findings there would be a separate feature with its own spec.
 - Vision/screenshot-based agent awareness. Reconsider only if the manifest + tool hybrid proves insufficient.
 
 ## 4. User experience
@@ -89,7 +90,7 @@ whiteboard_artifacts {
 
 Assistant messages continue to be stored in `messages`. Their body includes inline `<artifact id="art_…"/>` placeholders; a lightweight `artifacts: string[]` array on the message row enumerates the ids so the chat-view renderer can resolve them without reparsing.
 
-**Write path.** When `aiOrchestrator` finishes a message, the existing artifact-extraction logic (`spreadsheet detector`, `parseWorkflowContent`, visualization extractor, new Mermaid extractor) runs, INSERTs one row per artifact, and inserts the placeholder tokens into the persisted message body.
+**Write path.** When `AIOrchestrator.processQuery` finishes assembling a response, a new post-processing step runs artifact extractors in order: `VisualizationGenerator` (charts), `WorkflowGenerator.generateWorkflowVisualization` (workflows), `MindMapGenerator` (mindmaps), `excelOrchestrator` output (spreadsheets), and a new Mermaid fenced-block extractor (flowcharts). Each produced artifact is INSERTed into `whiteboard_artifacts` with a generated id and the placeholder `<artifact id="…" />` is inserted into the persisted message `content` in place of whatever raw block produced it (fenced code, `<DELIVERABLE>` tag, etc.).
 
 **Derivation on reload.** The board view calls `GET /api/conversations/:id/whiteboard`, which returns the ordered artifact list with positions already computed.
 
@@ -98,7 +99,7 @@ Assistant messages continue to be stored in `messages`. Their body includes inli
 ```
 client/src/components/chat/
 ├── ChatViewSwitcher.tsx            [Chat | Whiteboard] pill; reads/writes ?view= param
-├── ChatMessageRich.tsx             replaces plain ChatMessage on the two target pages
+├── ChatMessageRich.tsx             replaces inline message rendering on Chat.tsx
 ├── Composer.tsx                    shared composer primitive (textarea + send + attachments)
 ├── artifacts/
 │   ├── ArtifactRenderer.tsx        dispatcher by kind, given artifact_id or inline payload
@@ -122,11 +123,11 @@ client/src/components/chat/
     └── useSelectionContext.ts      zustand store for pinned selection → composer
 ```
 
-`ChatMessage.tsx` and the `ResizablePanelGroup` + `OutputPane` usages in `Chat.tsx` and `ForensicIntelligence.tsx` are removed from those two pages. `OutputPane.tsx` remains in the repo because other pages still depend on it.
+The `ResizablePanelGroup` + `OutputPane` usages in `Chat.tsx` (currently around lines 913–1615) are removed; inline message rendering migrates to `ChatMessageRich`. `OutputPane.tsx` and the free-standing `ChatMessage.tsx` remain in the repo because other pages still depend on them.
 
 ## 7. In-chat rich rendering
 
-- **Renderer:** `react-markdown` with `remark-gfm`, `remark-math`, `rehype-katex`, and the newly added `rehype-highlight` (single theme per color mode, ~15 kB).
+- **Renderer:** `react-markdown` is already used in `Chat.tsx` with `remark-gfm`, `remark-math`, `rehype-katex`, and custom `<Table>` component mappings (see `Chat.tsx:1305–1344`). The deltas are: add `rehype-highlight` (new dep) with a single theme per color mode; add the artifact-placeholder rehype plugin (below); and swap the plain-text fallback at `Chat.tsx:1388` for the rich renderer.
 - **Tables:** `components.table` / `thead` / `tbody` / `tr` / `th` / `td` map to shadcn `<Table>` primitives.
 - **Code:** hover-to-copy button, pre-wrap behavior preserved.
 - **Artifacts:** a custom rehype plugin rewrites `<artifact id="…"/>` placeholders to a React element that calls `ArtifactRenderer`. The artifact payloads come from `useConversationArtifacts(conversationId)`, a React Query hook invalidated when a new assistant message completes.
@@ -188,7 +189,7 @@ Budget: if the manifest exceeds ~1500 tokens, trim oldest-first and append `"…
 
 ### 9.2 `read_whiteboard` tool
 
-Registered in `server/services/aiProviders/registry.ts` alongside existing tools:
+The codebase today does **not** have a provider-agnostic tool registry — models are invoked directly via `aiProviderRegistry`. This feature introduces one: a new `server/services/tools/` module that registers tools once and exposes per-provider adapters (Anthropic tool-use, OpenAI function-calling). The `read_whiteboard` tool is the first tool in the registry and is defined as:
 
 ```ts
 {
@@ -196,8 +197,8 @@ Registered in `server/services/aiProviders/registry.ts` alongside existing tools
   description: "Retrieve the full structured payload of an artifact currently on the whiteboard. Use when you need exact numbers, workflow steps, mindmap nodes, or spreadsheet cells from a prior artifact.",
   input_schema: { artifact_id: string },
   handler: async ({ artifact_id }, { conversationId }) => {
-    const row = await db.select().from(whiteboard_artifacts).where(eq(id, artifact_id));
-    if (!row || row.conversation_id !== conversationId) throw new Error("artifact_not_found");
+    const row = await db.select().from(whiteboardArtifacts).where(eq(whiteboardArtifacts.id, artifact_id)).then(r => r[0]);
+    if (!row || row.conversationId !== conversationId) throw new Error("artifact_not_found");
     return { kind: row.kind, title: row.title, payload: row.payload };
   }
 }
@@ -240,16 +241,16 @@ This is prompt injection of context, not a tool call — the agent reads the pre
 
 **Manual smoke (required before merge):**
 
-On a dev server, exercise both target pages end-to-end for every artifact kind plus markdown table, code, and math. Exercise pan/zoom with a 10+ artifact conversation; exercise PIP drag/collapse; exercise multi-select + board export for all three formats. Type-check and tests passing is necessary but not sufficient — feature must work in a real browser.
+On a dev server, exercise `Chat.tsx` end-to-end across the primary modes (default, forensic-intelligence, workflow, calculation, deep-research) for every artifact kind plus markdown table, code, and math. Exercise pan/zoom with a 10+ artifact conversation; exercise PIP drag/collapse; exercise multi-select + board export for all three formats. Type-check and tests passing is necessary but not sufficient — feature must work in a real browser.
 
 ## 11. Rollout
 
 1. **Step 0 (prerequisite):** commit the current working tree on `main`. No code edits until this is done.
 2. Schema migration: new `whiteboard_artifacts` table and a new `artifacts text[]` column on `messages` (nullable, defaulted to `NULL`). Lazy backfill: on first access of a conversation, if it has assistant messages but no rows, parse them once, insert rows, and set the `artifacts` column on each source message.
-3. Ship behind a `WHITEBOARD_V2` feature flag on `Chat.tsx` and `ForensicIntelligence.tsx` to allow per-user QA toggling.
-4. New endpoints: `GET /api/conversations/:id/whiteboard`, `POST /api/conversations/:id/whiteboard/export`, and the `read_whiteboard` tool registration in `aiProviders/registry.ts`.
-5. `OutputPane.tsx` stays in the codebase; only the two target pages stop mounting it.
-6. After a QA pass on both pages, remove the feature flag and treat the new UX as the default.
+3. Ship behind an `ENABLE_WHITEBOARD_V2` feature flag wired through `server/config/featureFlags.ts` and surfaced to the client via `getClientFeatures()`. `Chat.tsx` reads the flag to decide between old layout and new layout.
+4. New endpoints: `GET /api/conversations/:id/whiteboard`, `POST /api/conversations/:id/whiteboard/export`. A new tool registry at `server/services/tools/` with `read_whiteboard` as its first entry and per-provider adapters for Anthropic and OpenAI/Azure.
+5. `OutputPane.tsx` stays in the codebase; only `Chat.tsx` stops mounting it. Other consumers are untouched.
+6. After a QA pass on `Chat.tsx` (all modes, including `forensic-intelligence` mode), remove the feature flag and treat the new UX as the default.
 
 ## 12. Open decisions deferred to implementation
 

@@ -48,6 +48,7 @@ import type { CreateArtifactInput } from './whiteboard/repository';
 import type { SelectionInput } from './whiteboard/selectionPreamble';
 import { formatManifest } from './whiteboard/manifest';
 import { buildSelectionPreamble } from './whiteboard/selectionPreamble';
+import { WHITEBOARD_USAGE_GUIDANCE } from './whiteboard/systemGuidance';
 // Tool-calling (Phase 4.7)
 import { completeWithToolLoop } from './aiOrchestrator.toolLoop';
 import { toolRegistry } from './tools/registry';
@@ -1789,18 +1790,25 @@ export class AIOrchestrator {
       return providerModelMap[providerName];
     };
     
-    // Whiteboard awareness (Phase 4.6): manifest + selection preamble
-    let whiteboardManifestBlock = "";
+    // Whiteboard awareness (Phase 4.6): usage guidance + manifest + selection preamble.
+    // Guidance is ALWAYS injected when this is a whiteboard-eligible conversation so the
+    // agent learns to emit mermaid / GFM tables instead of ASCII art on the first turn.
+    // Manifest is added on top only when prior artifacts exist.
+    let whiteboardSystemBlock = "";
     if (options?.conversationId) {
+      whiteboardSystemBlock = WHITEBOARD_USAGE_GUIDANCE;
       try {
         const priorArtifacts = await listArtifactsByConversation(options.conversationId);
         if (priorArtifacts.length > 0) {
-          whiteboardManifestBlock = formatManifest(priorArtifacts);
+          whiteboardSystemBlock = `${whiteboardSystemBlock}\n\n${formatManifest(priorArtifacts)}`;
         }
       } catch (e) {
         console.error("[whiteboard] manifest fetch failed; skipping:", e);
       }
     }
+    // Back-compat: keep the old local name alive so the message-assembly blocks below
+    // do not need changes.
+    const whiteboardManifestBlock = whiteboardSystemBlock;
     const selectionPreamble = buildSelectionPreamble(options?.selection);
     const effectiveUserQuery = selectionPreamble
       ? `${selectionPreamble}\n\n${userQuery}`

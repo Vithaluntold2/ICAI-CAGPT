@@ -25,4 +25,10 @@ export default defineConfig({
       deny: ["**/.*"],
     },
   },
+  optimizeDeps: {
+    // Mermaid is dynamic-imported by FlowchartArtifact; pre-bundling it pulls in
+    // chevrotain-allstar which mis-resolves against the root chevrotain@7 instead
+    // of the nested v12 it needs.
+    exclude: ["mermaid"],
+  },
 });

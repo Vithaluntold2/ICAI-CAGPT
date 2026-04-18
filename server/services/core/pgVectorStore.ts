@@ -130,6 +130,10 @@ export class PgVectorStore {
   /**
    * Search for similar documents using pgvector cosine similarity
    */
+  // Process-level short-circuit once we discover the pgvector extension
+  // isn't installed. Avoids spamming error logs on every chat turn.
+  private static pgvectorUnavailable = false;
+
   async search(
     query: string | number[],
     options?: {
@@ -140,29 +144,35 @@ export class PgVectorStore {
       jurisdiction?: string;
     }
   ): Promise<SearchResult[]> {
+    if (PgVectorStore.pgvectorUnavailable) {
+      return [];
+    }
+
     // Generate query embedding if string provided
-    const queryEmbedding = typeof query === 'string' 
+    const queryEmbedding = typeof query === 'string'
       ? await generateEmbedding(query)
       : query;
-    
+
     const limit = options?.limit || 10;
     const minSimilarity = options?.minSimilarity || 0.7;
-    
+
     // Build dynamic WHERE conditions
     const conditions: any[] = [];
-    
+
     if (options?.types && options.types.length > 0) {
       conditions.push(inArray(vectorEmbeddings.documentType, options.types));
     }
-    
+
     if (options?.jurisdiction) {
       conditions.push(eq(vectorEmbeddings.jurisdiction, options.jurisdiction));
     }
-    
+
     // Use pgvector's cosine similarity operator
     const embeddingVector = `[${queryEmbedding.join(',')}]`;
-    
-    const results = await db
+
+    let results;
+    try {
+      results = await db
       .select({
         id: vectorEmbeddings.id,
         content: vectorEmbeddings.content,
@@ -181,7 +191,19 @@ export class PgVectorStore {
       .where(conditions.length > 0 ? and(...conditions) : undefined)
       .orderBy(sql`${vectorEmbeddings.embedding} <=> ${embeddingVector}::vector`)
       .limit(limit * 2); // Fetch extra to filter by similarity
-    
+    } catch (err: any) {
+      // pgvector extension isn't installed on this Postgres instance.
+      // Log once, disable further vector search for the remainder of the process.
+      if (err?.code === '42704' && /type "vector" does not exist/i.test(String(err?.message || ''))) {
+        if (!PgVectorStore.pgvectorUnavailable) {
+          console.warn('[PgVectorStore] pgvector extension not installed on the database — semantic search disabled. Install pgvector (or use pgvector/pgvector:pg16 image) to enable RAG retrieval.');
+        }
+        PgVectorStore.pgvectorUnavailable = true;
+        return [];
+      }
+      throw err;
+    }
+
     // Filter by minimum similarity and format results
     const filtered = results
       .filter(r => r.similarity >= minSimilarity)

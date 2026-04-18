@@ -27,49 +27,95 @@ const getVendor = (data: any): string | null => {
   return data.vendor || data.VendorName || data.Vendor || null;
 };
 
-// 1. Benford's Law Agent
+// 1. Benford's Law Agent — full digit distribution + chi-square goodness-of-fit.
 export class BenfordLawAgent implements ForensicAgent {
   name = "Benford's Law Agent";
+
+  // Benford expected frequencies for first digit 1..9
+  private static readonly EXPECTED: Record<number, number> = {
+    1: 0.301, 2: 0.176, 3: 0.125, 4: 0.097, 5: 0.079,
+    6: 0.067, 7: 0.058, 8: 0.051, 9: 0.046,
+  };
+
+  // Chi-square critical values at 8 degrees of freedom
+  // p=0.05 → 15.507, p=0.01 → 20.090
+  private static readonly CHI2_CRIT_P05 = 15.507;
+  private static readonly CHI2_CRIT_P01 = 20.090;
 
   async analyze(context: ForensicContext): Promise<ForensicFinding[]> {
     const findings: ForensicFinding[] = [];
     const amounts: number[] = [];
 
-    // Collect amounts from line items if available
     const items = context.extractedData.items || context.extractedData.LineItems || [];
     if (Array.isArray(items)) {
       items.forEach((item: any) => {
         const amt = getAmount(item);
-        if (amt && Math.abs(amt) > 10) amounts.push(amt); // Ignore very small numbers
+        if (amt !== null && Math.abs(amt) > 10) amounts.push(Math.abs(amt));
       });
     }
-    
-    // Also include total
     const total = getAmount(context.extractedData);
-    if (total && Math.abs(total) > 10) amounts.push(total);
+    if (total !== null && Math.abs(total) > 10) amounts.push(Math.abs(total));
 
-    // Benford's Law requires a decent sample size.
-    // < 15 points is statistically noisy/useless.
-    if (amounts.length < 15) return findings;
+    // Benford needs a reasonable sample size; below this, results are noise.
+    if (amounts.length < 30) return findings;
 
-    const firstDigits = amounts.map(n => parseInt(Math.abs(n).toString()[0]));
     const digitCounts = new Array(10).fill(0);
-    firstDigits.forEach(d => digitCounts[d]++);
+    for (const n of amounts) {
+      const d = parseInt(String(n)[0], 10);
+      if (d >= 1 && d <= 9) digitCounts[d]++;
+    }
+    const N = amounts.length;
 
-    // Check digit 1. Benford says ~30.1%
-    const totalCount = firstDigits.length;
-    const freq1 = digitCounts[1] / totalCount;
+    // Observed frequencies and expected counts
+    const observedFreq: Record<number, number> = {};
+    const expectedCount: Record<number, number> = {};
+    let chi2 = 0;
+    for (let d = 1; d <= 9; d++) {
+      observedFreq[d] = digitCounts[d] / N;
+      expectedCount[d] = BenfordLawAgent.EXPECTED[d] * N;
+      const diff = digitCounts[d] - expectedCount[d];
+      chi2 += (diff * diff) / expectedCount[d];
+    }
+    chi2 = Number(chi2.toFixed(2));
 
-    // Tolerance range: 15% - 45% (Wide tolerance for small samples)
-    if (freq1 < 0.15 || freq1 > 0.45) {
-        findings.push({
-            findingType: 'fraud_indicator',
-            severity: 'low',
-            title: "Benford's Law Deviation",
-            description: `The distribution of first digits in amounts deviates from Benford's Law (Digit 1 frequency: ${(freq1 * 100).toFixed(1)}%, expected ~30%). Sample size: ${totalCount}.`,
-            impactedMetrics: { digit1Frequency: freq1, sampleSize: totalCount },
-            remediationJson: { action: "expanded_sampling", priority: "low" }
-        });
+    // Largest single-digit deviation (for human-readable narrative)
+    let maxDigit = 1;
+    let maxDev = 0;
+    for (let d = 1; d <= 9; d++) {
+      const dev = Math.abs(observedFreq[d] - BenfordLawAgent.EXPECTED[d]);
+      if (dev > maxDev) { maxDev = dev; maxDigit = d; }
+    }
+
+    const distributionTable = Array.from({ length: 9 }, (_, i) => {
+      const d = i + 1;
+      return {
+        digit: d,
+        expectedPct: Number((BenfordLawAgent.EXPECTED[d] * 100).toFixed(1)),
+        observedPct: Number((observedFreq[d] * 100).toFixed(1)),
+        count: digitCounts[d],
+      };
+    });
+
+    if (chi2 > BenfordLawAgent.CHI2_CRIT_P01) {
+      findings.push({
+        findingType: 'fraud_indicator',
+        severity: 'high',
+        title: "Benford's Law — Strong Deviation",
+        description: `First-digit distribution deviates strongly from Benford's Law (χ²=${chi2}, df=8, critical@p=0.01 is ${BenfordLawAgent.CHI2_CRIT_P01}; N=${N}). Largest deviation on digit ${maxDigit} (observed ${(observedFreq[maxDigit] * 100).toFixed(1)}% vs expected ${(BenfordLawAgent.EXPECTED[maxDigit] * 100).toFixed(1)}%). This pattern is consistent with fabricated or heavily-manipulated figures. Corroborating evidence required before drawing conclusions.`,
+        impactedMetrics: { chiSquare: chi2, sampleSize: N, maxDeviationDigit: maxDigit },
+        evidenceDetails: { distribution: distributionTable },
+        remediationJson: { action: 'targeted_substantive_testing', priority: 'high' },
+      });
+    } else if (chi2 > BenfordLawAgent.CHI2_CRIT_P05) {
+      findings.push({
+        findingType: 'fraud_indicator',
+        severity: 'medium',
+        title: "Benford's Law — Moderate Deviation",
+        description: `First-digit distribution deviates from Benford's Law at the 5% significance level (χ²=${chi2}, df=8, critical ${BenfordLawAgent.CHI2_CRIT_P05}; N=${N}). Largest deviation on digit ${maxDigit}. This may reflect a genuine business pattern (rounded prices, caps, cohorts) or data manipulation — requires expanded sampling to disambiguate.`,
+        impactedMetrics: { chiSquare: chi2, sampleSize: N, maxDeviationDigit: maxDigit },
+        evidenceDetails: { distribution: distributionTable },
+        remediationJson: { action: 'expanded_sampling', priority: 'medium' },
+      });
     }
 
     return findings;

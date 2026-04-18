@@ -608,21 +608,27 @@ export default function Chat() {
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
-      // Validate file type - only formats supported by Azure Document Intelligence
+      // Mirror the server's allowed MIME types (see routes.ts /api/chat/upload-file)
       const allowedTypes = [
         'application/pdf',
         'image/jpeg',
         'image/png',
         'image/jpg',
         'image/tiff',
-        'image/tif'
+        'image/tif',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'application/vnd.ms-excel',
+        'text/csv',
+        'text/plain',
       ];
-      
-      if (!allowedTypes.includes(file.type)) {
+      // Fallback: some browsers report empty MIME for .csv — trust the extension
+      const extOk = /\.(pdf|jpe?g|png|tiff?|xlsx?|csv|txt)$/i.test(file.name);
+
+      if (!allowedTypes.includes(file.type) && !extOk) {
         toast({
           variant: "destructive",
           title: "Invalid file type",
-          description: "Supported formats: PDF, PNG, JPEG, TIFF"
+          description: "Supported formats: PDF, PNG, JPEG, TIFF, Excel (XLSX/XLS), CSV, TXT"
         });
         return;
       }
@@ -1428,7 +1434,7 @@ export default function Chat() {
                     id="file-upload"
                     className="hidden"
                     onChange={handleFileSelect}
-                    accept=".pdf,.jpg,.jpeg,.png,.tiff,.tif"
+                    accept=".pdf,.jpg,.jpeg,.png,.tiff,.tif,.xlsx,.xls,.csv,.txt"
                     aria-label="Upload document file"
                     data-testid="input-file-upload"
                   />

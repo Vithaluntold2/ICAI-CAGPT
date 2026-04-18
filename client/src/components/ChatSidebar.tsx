@@ -143,8 +143,8 @@ export default function ChatSidebar({
                 </Button>
               </Link>
               <Link href="/search" data-testid="link-nav-search">
-                <Button 
-                  variant="ghost" 
+                <Button
+                  variant="ghost"
                   className={cn(
                     "w-full justify-start gap-2",
                     location === '/search' && "bg-sidebar-accent"

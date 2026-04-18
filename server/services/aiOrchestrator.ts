@@ -858,8 +858,8 @@ export class AIOrchestrator {
     // Step 6: Log interaction for continuous learning (async, non-blocking)
     if (userId) {
       continuousLearning.logInteraction({
-        userId: typeof userId === 'string' ? parseInt(userId, 10) || 0 : userId,
-        conversationId: options?.conversationId ? parseInt(String(options.conversationId), 10) || 0 : 0,
+        userId,
+        conversationId: options?.conversationId || '',
         query,
         response: mainResponse,
         classification,

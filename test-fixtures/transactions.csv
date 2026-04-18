@@ -1,0 +1,41 @@
+Date,Vendor,Amount,InvoiceNumber,Description
+2026-03-02,Acme Consulting,9500,INV-1001,Professional services
+2026-03-02,Acme Consulting,9500,INV-1002,Professional services duplicate
+2026-03-03,Bright Solutions,1234.56,INV-1003,Software subscription
+2026-03-04,Cash Payee,5000,INV-1004,Misc expense
+2026-03-05,Delta Logistics,48750,INV-1005,Freight delivery
+2026-03-06,Elite Services,9800,INV-1006,Consulting
+2026-03-07,Acme Consulting,9500,INV-1007,Professional services triplicate
+2026-03-08,Forge Metals,12000,INV-1008,Raw material supply
+2026-03-09,Global Traders,50000,INV-1009,Bulk procurement
+2026-03-10,Horizon Tech,9750,INV-1010,Hardware maintenance
+2026-03-11,Iris Media,9950,INV-1011,Marketing agency
+2026-03-12,Jasper LLP,47500,INV-1012,Legal advisory
+2026-03-14,Kelly Inc,9900,INV-1013,Weekend payment - Saturday
+2026-03-15,Lima Corp,9850,INV-1014,Weekend payment - Sunday
+2026-03-16,Micro Logix,1100,INV-1015,Office supplies
+2026-03-17,Noble Enterprises,9990,INV-1016,Admin services
+2026-03-18,Orion Holdings,9870,INV-1017,Consulting retainer
+2026-03-19,Pine Traders,49500,INV-1018,Procurement
+2026-03-20,Quartz Solutions,9980,INV-1019,IT services
+2026-03-21,Rio Ventures,9920,INV-1020,Weekend payment - Saturday
+2026-03-22,Saturn Works,9910,INV-1021,Weekend payment - Sunday
+2026-03-23,Titan Industries,10000,INV-1022,Round number order
+2026-03-24,Umbra Media,1150,INV-1023,Campaign expense
+2026-03-25,Vertex Labs,9940,INV-1024,R&D consulting
+2026-03-26,Wave Dynamics,9930,INV-1025,Software license
+2026-03-27,Xenon Corp,9960,INV-1026,Integration services
+2026-03-28,Yara Traders,9970,INV-1027,Weekend payment - Saturday
+2026-03-29,Zenith Group,9890,INV-1028,Weekend payment - Sunday
+2026-03-30,Acme Consulting,9500,INV-1029,Services contract
+2026-03-31,Beta Networks,48000,INV-1030,Network procurement
+2026-04-01,Gamma Systems,47250,INV-1031,Infrastructure
+2026-04-02,Delta Logistics,48750,INV-1032,Freight delivery duplicate
+2026-04-03,Epsilon Trading,9820,INV-1033,Commodity purchase
+2026-04-05,Cash Payee,15000,INV-1034,Weekend Saturday cash
+2026-04-06,Misc Services,8000,INV-1035,Weekend Sunday misc
+2026-04-07,Zeta Holdings,100000,INV-1036,Round number - 100k
+2026-12-25,Holiday Payee,9500,INV-1037,Christmas day payment
+2026-01-01,New Year Corp,9900,INV-1038,New Year day payment
+2026-04-08,Omega Corp,9750,INV-1039,Services
+2026-04-09,Sigma LLC,9640,INV-1040,Consulting

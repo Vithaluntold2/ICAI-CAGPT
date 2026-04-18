@@ -98,6 +98,10 @@ export class AzureDocumentIntelligenceProvider extends AIProvider {
             documentType: documentType,
             pagesAnalyzed: result.pages?.length || 0,
             filename: request.attachment.filename,
+            // Pass through raw structured data so downstream extractors can surface tables,
+            // key-value pairs, and row-level items for per-row forensic detection.
+            tables: result.tables ?? [],
+            keyValuePairs: result.keyValuePairs ?? [],
           },
         };
       }
@@ -270,25 +274,30 @@ export class AzureDocumentIntelligenceProvider extends AIProvider {
     if (documentType) {
       return documentType;
     }
-    
-    // Map common MIME types to document types
-    // Use 'read' for images to trigger OCR with prebuilt-read model
+
+    // Default to 'layout' for PDFs/images so Azure DI extracts tables (in addition
+    // to text), enabling per-row forensic detection on tabular PDFs. Callers that
+    // want pure OCR can pass documentType='read' explicitly.
     const mimeToTypeMap: Record<string, string> = {
-      'application/pdf': 'read',  // Use OCR-capable model for all PDFs
-      'image/png': 'read',        // OCR for images
-      'image/jpeg': 'read',       // OCR for images
-      'image/jpg': 'read',        // OCR for images  
-      'image/tiff': 'read',       // OCR for images
-      'image/tif': 'read',        // OCR for images
+      'application/pdf': 'layout',
+      'image/png': 'layout',
+      'image/jpeg': 'layout',
+      'image/jpg': 'layout',
+      'image/tiff': 'layout',
+      'image/tif': 'layout',
     };
-    
-    return mimeToTypeMap[mimeType.toLowerCase()] || 'read';
+
+    return mimeToTypeMap[mimeType.toLowerCase()] || 'layout';
   }
 
   private selectModel(documentType: string): string {
     const modelMap: Record<string, string> = {
-      // OCR model - best for text extraction from any document
+      // prebuilt-layout: text + tables + structure (best for tabular forensic data)
+      layout: 'prebuilt-layout',
+      // prebuilt-read: pure OCR, text only (no table structure)
       read: 'prebuilt-read',
+      // prebuilt-document: text + key-value pairs + tables (generic structured extraction)
+      document: 'prebuilt-document',
       // Specialized models for structured documents
       invoice: 'prebuilt-invoice',
       receipt: 'prebuilt-receipt',
@@ -297,10 +306,9 @@ export class AzureDocumentIntelligenceProvider extends AIProvider {
       '1098': 'prebuilt-tax.us.1098',
       '1099': 'prebuilt-tax.us.1099',
       tax: 'prebuilt-document',
-      document: 'prebuilt-read',  // Use read model for general documents
     };
 
-    return modelMap[documentType.toLowerCase()] || 'prebuilt-read';
+    return modelMap[documentType.toLowerCase()] || 'prebuilt-layout';
   }
 
   /**

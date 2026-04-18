@@ -1,6 +1,6 @@
 import { ForensicAgent, ForensicContext, ForensicFinding } from "./types";
-import { AIProviderRegistry } from "../../../aiProviders/registry";
-import { AIProviderName } from "../../../aiProviders/types";
+import { aiProviderRegistry } from "../../aiProviders/registry";
+import { AIProviderName } from "../../aiProviders/types";
 
 export class DeepForensicAgent implements ForensicAgent {
   name = "Deep Forensic AI Investigator";
@@ -9,8 +9,7 @@ export class DeepForensicAgent implements ForensicAgent {
     const findings: ForensicFinding[] = [];
     
     try {
-      const registry = AIProviderRegistry.getInstance();
-      const availableProviders = registry.getAvailableProviderNames();
+      const availableProviders = aiProviderRegistry.getAvailableProviderNames();
       
       // We need a smart model for this.
       const smartModels = [
@@ -27,7 +26,11 @@ export class DeepForensicAgent implements ForensicAgent {
         return [];
       }
       
-      const provider = registry.getProvider(providerName);
+      const provider = aiProviderRegistry.getProvider(providerName);
+      if (!provider) {
+        console.warn(`[DeepForensicAgent] Provider ${providerName} not resolvable.`);
+        return [];
+      }
       
       const prompt = `
         You are an elite Forensic Accountant and Fraud Examiner (CFE) with decades of experience.
@@ -78,10 +81,9 @@ export class DeepForensicAgent implements ForensicAgent {
               { role: 'user', content: prompt }
           ],
           temperature: 0.1, // Low temp for precision
-          jsonMode: true
       });
 
-      const content = response.choices[0]?.message?.content || '{}';
+      const content = response.content || '{}';
       const cleanJson = content.replace(/```json/g, '').replace(/```/g, '').trim();
       
       const result = JSON.parse(cleanJson);

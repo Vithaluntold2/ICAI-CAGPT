@@ -26,13 +26,25 @@ export class ForensicAnalyzer {
         throw new Error(analysisResult.error || 'Document analysis failed');
       }
       
-      // Update document with extracted data
+      // Build extracted data payload. Includes:
+      //   - items[]: per-row objects (for forensic per-row detection)
+      //   - tables[]: preserved for evidence/provenance
+      //   - keyValuePairs: field-level extractions
+      //   - extractedText: full OCR/text body (for LLM and narrative analysis)
+      const a = analysisResult.analysis as any;
+      const extractedData = {
+        ...(a.structuredData || {}),
+        ...(a.keyValuePairs ? { keyValuePairs: a.keyValuePairs } : {}),
+        ...(a.tables ? { tables: a.tables } : {}),
+        ...(a.extractedText ? { extractedText: a.extractedText } : {}),
+      };
+
       await db.update(forensicDocuments)
         .set({
-          extractedData: analysisResult.analysis.structuredData || analysisResult.analysis.keyValuePairs || {},
+          extractedData,
           documentMetadata: {
-            documentType: analysisResult.analysis.documentType,
-            keyFindings: analysisResult.analysis.keyFindings,
+            documentType: a.documentType,
+            keyFindings: a.keyFindings,
             provider: analysisResult.provider
           },
           analysisStatus: 'analyzed'
@@ -50,8 +62,8 @@ export class ForensicAnalyzer {
         throw new Error('Document not found');
       }
       
-      // Run forensic analysis heuristics using extracted data
-      const extractedData = analysisResult.analysis.structuredData || analysisResult.analysis.keyValuePairs || {};
+      // Run forensic analysis heuristics on the same payload we just persisted
+      // so row-level detection sees items[] when present (PDF tables + CSV/XLSX).
       const findings = await this.detectAnomalies(document, extractedData);
       
       // Store findings
@@ -83,21 +95,71 @@ export class ForensicAnalyzer {
    */
   private static async detectAnomalies(document: any, extractedData: any): Promise<any[]> {
     console.log('[ForensicAnalyzer] Running algorithmic forensic agents...');
-    
+
+    const items = Array.isArray(extractedData?.items) ? extractedData.items : [];
+
     try {
-      // Run the suite of 8 statistical/algorithmic agents
-      const findings = await runForensicAgents({
+      const docLevelFindings = await runForensicAgents({
         document,
-        extractedData
+        extractedData,
       });
-      
-      console.log(`[ForensicAnalyzer] Agents completed with ${findings.length} findings.`);
-      return findings;
-      
+
+      // For tabular datasets, also run per-row detection so the checklist patterns
+      // (round amount, weekend, structuring, vendor validation) surface on transactions.
+      let rowLevelFindings: any[] = [];
+      if (items.length >= 5) {
+        rowLevelFindings = await this.runPerRowDetection(document, items);
+      }
+
+      const all = [...docLevelFindings, ...rowLevelFindings];
+      console.log(`[ForensicAnalyzer] Agents completed: ${docLevelFindings.length} doc-level + ${rowLevelFindings.length} row-level = ${all.length} findings.`);
+      return all;
     } catch (error) {
       console.error('[ForensicAnalyzer] Agent processing failed:', error);
       return [];
     }
+  }
+
+  /**
+   * Per-row forensic detection for tabular datasets.
+   * Uses the same agents that operate on a single-document shape, treating each row
+   * as a synthetic extractedData object. Caps per-category findings to avoid spam.
+   */
+  private static async runPerRowDetection(document: any, items: Array<Record<string, any>>): Promise<any[]> {
+    const { RoundNumberAgent, WeekendHolidayAgent, ThresholdSplitAgent, VendorValidationAgent } =
+      await import('./agents/forensic/statAgents');
+
+    const agents = [
+      new RoundNumberAgent(),
+      new WeekendHolidayAgent(),
+      new ThresholdSplitAgent(),
+      new VendorValidationAgent(),
+    ];
+
+    const CAP_PER_CATEGORY = 10;
+    const bucket: Record<string, any[]> = {};
+
+    for (let i = 0; i < items.length; i++) {
+      const row = items[i];
+      for (const agent of agents) {
+        try {
+          const findings = await agent.analyze({ document, extractedData: row });
+          for (const f of findings) {
+            const key = f.title || agent.name;
+            bucket[key] = bucket[key] || [];
+            if (bucket[key].length >= CAP_PER_CATEGORY) continue;
+            bucket[key].push({
+              ...f,
+              evidenceDetails: { rowIndex: i, row, ...(f.evidenceDetails || {}) },
+            });
+          }
+        } catch (err) {
+          // silent; don't let one row kill the pass
+        }
+      }
+    }
+
+    return Object.values(bucket).flat();
   }
   
   /**

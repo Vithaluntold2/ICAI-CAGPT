@@ -1337,9 +1337,9 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
           // Log interaction for continuous learning
           try {
             await continuousLearning.logInteraction({
-              userId: parseInt(userId || '0', 10),
-              conversationId: parseInt(conversation.id, 10),
-              messageId: assistantMessage.id ? parseInt(assistantMessage.id, 10) : undefined,
+              userId: userId || '',
+              conversationId: conversation.id,
+              messageId: assistantMessage.id,
               query: message,
               response: result.response,
               classification: result.classification,
@@ -4162,7 +4162,7 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
       // Trigger forensic analysis asynchronously
       const { ForensicAnalyzer } = await import("./services/forensicAnalyzer");
       setImmediate(() => {
-        ForensicAnalyzer.analyzeDocument(document.id, req.file!.buffer, req.file!.mimetype).catch((error: any) => {
+        ForensicAnalyzer.analyzeDocument(document.id, req.file!.buffer, req.file!.mimetype, req.file!.originalname).catch((error: any) => {
           console.error('[Forensics] Analysis failed:', error);
         });
       });
@@ -4171,6 +4171,57 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
     } catch (error) {
       console.error('Upload forensic document error:', error);
       res.status(500).json({ error: "Failed to upload document" });
+    }
+  });
+
+  app.get("/api/forensics/cases/:caseId/documents", requireAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      const { db } = await import("./db");
+      const { forensicCases, forensicDocuments } = await import("@shared/schema");
+      const { eq, and, desc } = await import("drizzle-orm");
+
+      const [forensicCase] = await db
+        .select()
+        .from(forensicCases)
+        .where(and(
+          eq(forensicCases.id, req.params.caseId),
+          eq(forensicCases.userId, userId)
+        ))
+        .limit(1);
+
+      if (!forensicCase) {
+        return res.status(404).json({ error: "Case not found" });
+      }
+
+      const docs = await db
+        .select({
+          id: forensicDocuments.id,
+          caseId: forensicDocuments.caseId,
+          filename: forensicDocuments.filename,
+          sourceType: forensicDocuments.sourceType,
+          analysisStatus: forensicDocuments.analysisStatus,
+          documentMetadata: forensicDocuments.documentMetadata,
+          createdAt: forensicDocuments.createdAt,
+        })
+        .from(forensicDocuments)
+        .where(eq(forensicDocuments.caseId, req.params.caseId))
+        .orderBy(desc(forensicDocuments.createdAt));
+
+      const sanitized = docs.map(d => {
+        const meta = (d.documentMetadata ?? {}) as Record<string, any>;
+        const { storageKey, encryptedFileKey, nonce, checksum, ...safe } = meta;
+        return {
+          ...d,
+          documentType: safe.documentType ?? safe.mimeType ?? 'document',
+          documentMetadata: safe,
+        };
+      });
+
+      res.json(sanitized);
+    } catch (error) {
+      console.error('Fetch forensic documents error:', error);
+      res.status(500).json({ error: "Failed to fetch documents" });
     }
   });
 
@@ -4254,7 +4305,7 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
               metadata.encryptedFileKey,
               metadata.nonce
             );
-            await ForensicAnalyzer.analyzeDocument(doc.id, fileBuffer, metadata.mimeType || 'application/octet-stream');
+            await ForensicAnalyzer.analyzeDocument(doc.id, fileBuffer, metadata.mimeType || 'application/octet-stream', doc.filename);
           } catch (err) {
             console.error(`[Forensics] Failed to analyze doc ${doc.id}:`, err);
           }
@@ -4267,14 +4318,74 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
         .from(forensicFindings)
         .where(eq(forensicFindings.caseId, req.params.caseId));
       
-      res.json({ 
-        success: true, 
+      res.json({
+        success: true,
         documentsAnalyzed: pendingDocs.length,
-        totalFindings: findings.length 
+        totalFindings: findings.length
       });
     } catch (error) {
       console.error('Forensic analysis error:', error);
       res.status(500).json({ error: "Failed to run forensic analysis" });
+    }
+  });
+
+  // Generate court-ready forensic report PDF for a case
+  app.post("/api/forensics/cases/:caseId/report", requireAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      const { ForensicReportGenerator } = await import("./services/forensics/reportGenerator");
+      const pdf = await ForensicReportGenerator.generate(req.params.caseId, userId);
+      if (!pdf) {
+        return res.status(404).json({ error: "Case not found" });
+      }
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="forensic-report-${req.params.caseId}.pdf"`);
+      res.setHeader('Content-Length', pdf.length.toString());
+      res.end(pdf);
+    } catch (error) {
+      console.error('Forensic report generation error:', error);
+      res.status(500).json({ error: "Failed to generate report" });
+    }
+  });
+
+  // Reconcile two documents within a case (match rows, surface discrepancies)
+  app.post("/api/forensics/cases/:caseId/reconcile", requireAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      const { sourceDocumentId, targetDocumentId } = req.body || {};
+      if (!sourceDocumentId || !targetDocumentId) {
+        return res.status(400).json({ error: "sourceDocumentId and targetDocumentId required" });
+      }
+      const { ForensicReconciler } = await import("./services/forensics/reconciler");
+      const result = await ForensicReconciler.reconcile({
+        caseId: req.params.caseId,
+        userId,
+        sourceDocumentId,
+        targetDocumentId,
+      });
+      if (!result) {
+        return res.status(404).json({ error: "Case or documents not found" });
+      }
+      res.json(result);
+    } catch (error) {
+      console.error('Forensic reconciliation error:', error);
+      res.status(500).json({ error: "Failed to reconcile documents" });
+    }
+  });
+
+  // Build chronological timeline across all case documents with evidence provenance
+  app.get("/api/forensics/cases/:caseId/timeline", requireAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      const { ForensicTimelineBuilder } = await import("./services/forensics/timelineBuilder");
+      const timeline = await ForensicTimelineBuilder.build(req.params.caseId, userId);
+      if (!timeline) {
+        return res.status(404).json({ error: "Case not found" });
+      }
+      res.json(timeline);
+    } catch (error) {
+      console.error('Forensic timeline error:', error);
+      res.status(500).json({ error: "Failed to build timeline" });
     }
   });
 

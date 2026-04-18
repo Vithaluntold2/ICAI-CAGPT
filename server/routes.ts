@@ -40,6 +40,7 @@ import { listArtifactsByConversation } from "./services/whiteboard/repository";
 import { buildBoardXlsxBuffer } from "./services/whiteboard/exportXlsx";
 import { buildBoardPptxBuffer } from "./services/whiteboard/exportPptx";
 import { buildBoardPdfBuffer } from "./services/whiteboard/exportPdf";
+import { backfillIfNeeded } from "./services/whiteboard/backfill";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import multer from "multer";
@@ -983,6 +984,7 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
     const conversation = await storage.getConversation(id);
     if (!conversation) return res.status(404).json({ error: "Conversation not found" });
     if (conversation.userId !== userId) return res.status(403).json({ error: "Access denied" });
+    await backfillIfNeeded(id);
     const artifacts = await listArtifactsByConversation(id);
     res.json({ artifacts });
   });

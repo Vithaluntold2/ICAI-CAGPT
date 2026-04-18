@@ -38,6 +38,7 @@ import { continuousLearning } from "./services/core/continuousLearning";
 import { voiceService } from "./services/voice/voiceService";
 import { listArtifactsByConversation } from "./services/whiteboard/repository";
 import { buildBoardXlsxBuffer } from "./services/whiteboard/exportXlsx";
+import { buildBoardPptxBuffer } from "./services/whiteboard/exportPptx";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import multer from "multer";
@@ -1013,7 +1014,14 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
       res.setHeader("Content-Disposition", `attachment; filename="whiteboard-${id}.xlsx"`);
       return res.send(buf);
     }
-    // PPTX + PDF handlers added in Phase 10.2 / 10.3
+    if (format === "pptx") {
+      if (!renderedImages) return res.status(400).json({ error: "rendered_images_required" });
+      const buf = await buildBoardPptxBuffer(subset, renderedImages);
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.presentationml.presentation");
+      res.setHeader("Content-Disposition", `attachment; filename="whiteboard-${id}.pptx"`);
+      return res.send(buf);
+    }
+    // PDF handler added in Phase 10.3
     return res.status(501).json({ error: "format_not_yet_implemented", format });
   });
 

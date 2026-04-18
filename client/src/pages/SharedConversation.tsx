@@ -11,6 +11,7 @@ import rehypeKatex from "rehype-katex";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Lock, Share2, AlertCircle, Loader2, Bot, User } from "lucide-react";
 import cagptLogoUrl from "@assets/icai-ca-india-logo.png";
+import { normalizeMath } from "@/lib/mathNormalizer";
 
 interface Message {
   id: string;
@@ -168,7 +169,7 @@ export default function SharedConversation() {
                             ),
                           }}
                         >
-                          {msg.content}
+                          {normalizeMath(msg.content)}
                         </ReactMarkdown>
                       </div>
                     </div>

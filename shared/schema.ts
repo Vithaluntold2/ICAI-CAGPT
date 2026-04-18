@@ -303,6 +303,7 @@ export const messages = pgTable("messages", {
   tokensUsed: integer("tokens_used"),
   excelFilename: text("excel_filename"),
   excelBuffer: text("excel_buffer"),
+  artifactIds: jsonb("artifact_ids").$type<string[]>().default([]),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (table) => ({
   // NEW: Index for fetching conversation messages with pagination
@@ -310,6 +311,89 @@ export const messages = pgTable("messages", {
   // NEW: Index for analytics queries by user
   roleCreatedIdx: index("messages_role_created_idx").on(table.role, table.createdAt),
 }));
+
+/**
+ * Rolling LLM-generated summary of older turns + an accumulated facts glossary.
+ * One row per conversation. Regenerated every ~10 new turns so long conversations
+ * don't lose early context when the raw-message window slides past turn 1.
+ */
+export const conversationSummaries = pgTable("conversation_summaries", {
+  conversationId: varchar("conversation_id")
+    .primaryKey()
+    .references(() => conversations.id, { onDelete: "cascade" }),
+  // LLM-generated paragraph summarising turns 1..coveredUpToTurn
+  summaryText: text("summary_text").notNull(),
+  // Highest turn index fully covered by the summary (0-based)
+  coveredUpToTurn: integer("covered_up_to_turn").notNull(),
+  // Accumulated entities/facts pulled from every turn so far
+  //   { names: string[], amounts: string[], dates: string[], orgs: string[] }
+  glossary: jsonb("glossary").$type<{
+    names?: string[];
+    amounts?: string[];
+    dates?: string[];
+    orgs?: string[];
+  }>().default({}),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+/**
+ * Per-turn conversation memory store with semantic-search embeddings.
+ * Enables pgvector-based retrieval across the full history so long conversations
+ * can surface relevant earlier turns by meaning, not just keywords.
+ * The embedding column uses halfvec(3072) to match text-embedding-3-large
+ * dimensionality while staying under pgvector's HNSW ~4000-dim ceiling.
+ */
+export const conversationMemoryEntries = pgTable("conversation_memory_entries", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  conversationId: varchar("conversation_id")
+    .notNull()
+    .references(() => conversations.id, { onDelete: "cascade" }),
+  turnIndex: integer("turn_index").notNull(),
+  userMessage: text("user_message").notNull(),
+  assistantMessage: text("assistant_message").notNull(),
+  summary: text("summary").notNull(),
+  topics: jsonb("topics").$type<string[]>().default([]),
+  // embedding column is halfvec(3072) in DB; drizzle lacks a halfvec type so we
+  // reference it as text and rely on raw SQL for inserts/queries.
+  embedding: text("embedding"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const whiteboardArtifacts = pgTable("whiteboard_artifacts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  conversationId: varchar("conversation_id")
+    .notNull()
+    .references(() => conversations.id, { onDelete: "cascade" }),
+  messageId: varchar("message_id")
+    .notNull()
+    .references(() => messages.id, { onDelete: "cascade" }),
+  sequence: integer("sequence").notNull(),
+  kind: text("kind").notNull(), // 'chart' | 'workflow' | 'mindmap' | 'flowchart' | 'spreadsheet'
+  title: text("title").notNull(),
+  summary: text("summary").notNull(),
+  payload: jsonb("payload").notNull(),
+  canvasX: integer("canvas_x").notNull(),
+  canvasY: integer("canvas_y").notNull(),
+  width: integer("width").notNull(),
+  height: integer("height").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  conversationSequenceIdx: index("whiteboard_conv_seq_idx")
+    .on(table.conversationId, table.sequence),
+  messageIdx: index("whiteboard_message_idx").on(table.messageId),
+}));
+
+export type WhiteboardArtifact = typeof whiteboardArtifacts.$inferSelect;
+export type InsertWhiteboardArtifact = typeof whiteboardArtifacts.$inferInsert;
+
+export const whiteboardArtifactKinds = [
+  "chart",
+  "workflow",
+  "mindmap",
+  "flowchart",
+  "spreadsheet",
+] as const;
+export type WhiteboardArtifactKind = typeof whiteboardArtifactKinds[number];
 
 export const modelRoutingLogs = pgTable("model_routing_logs", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),

@@ -15,6 +15,7 @@ import {
   ProviderFeature,
   CostEstimate
 } from './types';
+import { parseAnthropicToolCall } from '../tools/adapters/anthropic';
 
 export class ClaudeProvider extends AIProvider {
   private client: Anthropic;
@@ -75,24 +76,33 @@ export class ClaudeProvider extends AIProvider {
       }
       
       const { system, messages } = this.convertMessages(requestMessages);
-      
-      const response = await this.client.messages.create({
+
+      const apiRequest: any = {
         model,
         max_tokens: request.maxTokens || 2000,
         temperature: request.temperature ?? 0.7,
         system,
         messages,
-      });
+      };
+      if (request.tools && request.tools.length > 0) {
+        apiRequest.tools = request.tools;
+      }
 
-      // Extract the response content
+      const response = await this.client.messages.create(apiRequest);
+
+      // Extract the response content (text blocks only)
       const content = response.content
         .filter(block => block.type === 'text')
         .map(block => 'text' in block ? block.text : '')
         .join('\n');
 
+      // Parse any tool_use blocks
+      const toolCalls = parseAnthropicToolCall(response.content as any);
+      const hasToolCalls = toolCalls.length > 0;
+
       return {
         content,
-        finishReason: this.mapStopReason(response.stop_reason),
+        finishReason: hasToolCalls ? 'tool_calls' : this.mapStopReason(response.stop_reason),
         tokensUsed: {
           input: response.usage.input_tokens,
           output: response.usage.output_tokens,
@@ -104,6 +114,7 @@ export class ClaudeProvider extends AIProvider {
           id: response.id,
           stopSequence: response.stop_sequence || undefined,
           extractedFromPdf: request.attachment?.mimeType === 'application/pdf',
+          toolCalls: hasToolCalls ? toolCalls : undefined,
         }
       };
     } catch (error: any) {

@@ -36,6 +36,11 @@ import { getClientFeatures, isFeatureEnabled } from "./config/featureFlags";
 import { documentIngestion } from "./services/core/documentIngestion";
 import { continuousLearning } from "./services/core/continuousLearning";
 import { voiceService } from "./services/voice/voiceService";
+import { listArtifactsByConversation, createArtifact } from "./services/whiteboard/repository";
+import { buildBoardXlsxBuffer } from "./services/whiteboard/exportXlsx";
+import { buildBoardPptxBuffer } from "./services/whiteboard/exportPptx";
+import { buildBoardPdfBuffer } from "./services/whiteboard/exportPdf";
+import { backfillIfNeeded } from "./services/whiteboard/backfill";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import multer from "multer";
@@ -971,6 +976,64 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
     }
   });
 
+  // Whiteboard artifacts for a conversation (read-only)
+  app.get("/api/conversations/:id/whiteboard", requireAuth, async (req, res) => {
+    const userId = getCurrentUserId(req);
+    if (!userId) return res.status(401).json({ error: "Not authenticated" });
+    const { id } = req.params;
+    const conversation = await storage.getConversation(id);
+    if (!conversation) return res.status(404).json({ error: "Conversation not found" });
+    if (conversation.userId !== userId) return res.status(403).json({ error: "Access denied" });
+    await backfillIfNeeded(id);
+    const artifacts = await listArtifactsByConversation(id);
+    res.json({ artifacts });
+  });
+
+  app.post("/api/conversations/:id/whiteboard/export", requireAuth, async (req, res) => {
+    const userId = getCurrentUserId(req);
+    if (!userId) return res.status(401).json({ error: "Not authenticated" });
+    const { id } = req.params;
+    const conversation = await storage.getConversation(id);
+    if (!conversation) return res.status(404).json({ error: "Conversation not found" });
+    if (conversation.userId !== userId) return res.status(403).json({ error: "Access denied" });
+
+    const { format, artifactIds, renderedImages } = (req.body ?? {}) as {
+      format?: "pdf" | "pptx" | "xlsx";
+      artifactIds?: string[];
+      renderedImages?: Record<string, string>;
+    };
+    if (!format || !["pdf", "pptx", "xlsx"].includes(format)) {
+      return res.status(400).json({ error: "bad_format" });
+    }
+
+    const all = await listArtifactsByConversation(id);
+    const subset = artifactIds && artifactIds.length > 0
+      ? all.filter(a => artifactIds.includes(a.id))
+      : all;
+
+    if (format === "xlsx") {
+      const buf = await buildBoardXlsxBuffer(subset);
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      res.setHeader("Content-Disposition", `attachment; filename="whiteboard-${id}.xlsx"`);
+      return res.send(buf);
+    }
+    if (format === "pptx") {
+      if (!renderedImages) return res.status(400).json({ error: "rendered_images_required" });
+      const buf = await buildBoardPptxBuffer(subset, renderedImages);
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.presentationml.presentation");
+      res.setHeader("Content-Disposition", `attachment; filename="whiteboard-${id}.pptx"`);
+      return res.send(buf);
+    }
+    if (format === "pdf") {
+      if (!renderedImages) return res.status(400).json({ error: "rendered_images_required" });
+      const buf = await buildBoardPdfBuffer(subset, renderedImages);
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `attachment; filename="whiteboard-${id}.pdf"`);
+      return res.send(buf);
+    }
+    return res.status(400).json({ error: "bad_format", format });
+  });
+
   // Download Excel file for a specific message
   app.get("/api/conversations/:conversationId/messages/:messageId/excel", requireAuth, async (req, res) => {
     try {
@@ -1213,6 +1276,10 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
         }
       }
       
+      // Generate the assistant message id up-front so the orchestrator can
+      // anchor any whiteboard artifacts to this exact message row (Phase 2.4).
+      const assistantMessageId = crypto.randomUUID();
+
       // Process query through AI orchestrator with chat mode
       const result = await aiOrchestrator.processQuery(
         message,
@@ -1227,13 +1294,19 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
             documentType: attachmentMetadata.documentType
           },
           chatMode: chatMode || 'standard',
-          agentWorkflowResult // Pass agent results to orchestrator
+          agentWorkflowResult, // Pass agent results to orchestrator
+          conversationId: conversation.id,
+          messageId: assistantMessageId,
+          selection: (req.body as any)?.selection,
         } : {
           chatMode: chatMode || 'standard',
-          agentWorkflowResult
+          agentWorkflowResult,
+          conversationId: conversation.id,
+          messageId: assistantMessageId,
+          selection: (req.body as any)?.selection,
         }
       );
-      
+
       // Prepare Excel data if generated
       let excelData: { filename: string; buffer: string } | undefined;
       if (result.excelWorkbook) {
@@ -1243,12 +1316,18 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
         };
         console.log(`[Excel] Generated workbook: ${excelData.filename} (${result.excelWorkbook.buffer.length} bytes)`);
       }
-      
+
+      // Whiteboard artifact wiring (Phase 2.4): prefer the pipeline-updated
+      // content (with <artifact /> placeholders) and capture ids for the row.
+      const assistantContent = result.whiteboardUpdatedContent ?? result.response;
+      const artifactIds = result.whiteboardArtifacts?.map(a => a.id) ?? [];
+
       // Save assistant message with full metadata
       const assistantMessage = await storage.createMessage({
+        id: assistantMessageId,
         conversationId: conversation.id,
         role: 'assistant',
-        content: result.response,
+        content: assistantContent,
         modelUsed: result.modelUsed,
         routingDecision: JSON.parse(JSON.stringify(result.routingDecision)),
         calculationResults: result.calculationResults,
@@ -1262,8 +1341,18 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
           hasExcel: !!excelData,
           // Include spreadsheet preview data with formulas for UI display
           spreadsheetData: result.spreadsheetData
-        }))
+        })),
+        artifactIds,
       });
+
+      // Persist any extracted whiteboard artifacts (best-effort; never fatal)
+      for (const art of result.whiteboardArtifacts ?? []) {
+        try {
+          await createArtifact(art);
+        } catch (e) {
+          console.error('[whiteboard] failed to persist artifact:', art.id, e);
+        }
+      }
       
       // Create routing log
       await storage.createRoutingLog({
@@ -4601,6 +4690,10 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
         sendThinking('analyzing', 'Interpreting your message...');
         await new Promise(resolve => setTimeout(resolve, 100));
         
+        // Generate the assistant message id up-front so the orchestrator can
+        // anchor any whiteboard artifacts to this exact message row (Phase 2.4).
+        const assistantMessageId = crypto.randomUUID();
+
         // Check cache first for non-file queries
         let fullResponse = '';
         let result: any;
@@ -4739,10 +4832,12 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
             conversationHistory,
             userTier,
             userId, // For AI cost tracking
-            { 
+            {
               chatMode,
               agentWorkflowResult,
               conversationId: conversation.id,
+              messageId: assistantMessageId,
+              selection: (req.body as any)?.selection,
               attachment: attachmentBuffer && attachmentMetadata ? {
                 buffer: attachmentBuffer,
                 filename: attachmentMetadata.filename,
@@ -4779,9 +4874,42 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
           }
         }
 
+        // Extract ```sheet``` blocks the AI emitted, evaluate their formulas,
+        // and promote the result into metadata.spreadsheetData so OutputPane
+        // renders the sheet on the right. Replaces the raw block in chat text
+        // with a compact pointer. Must run BEFORE inline formula evaluation so
+        // we don't double-decorate formulas that are also inside sheet blocks.
+        let aiSpreadsheetData: any = null;
+        try {
+          const { extractAndEvaluateSheetBlocks } = await import('./services/excel/sheetBlockParser');
+          const extracted = extractAndEvaluateSheetBlocks(fullResponse);
+          if (extracted.blockCount > 0 && extracted.spreadsheetData) {
+            fullResponse = extracted.text;
+            aiSpreadsheetData = extracted.spreadsheetData;
+            console.log(`[SSE] Extracted ${extracted.blockCount} sheet block(s) into spreadsheetData`);
+          }
+        } catch (err) {
+          console.warn('[SSE] Sheet-block extraction skipped:', (err as Error).message);
+        }
+
+        // Evaluate any Excel formulas the AI emitted INLINE in prose and inline
+        // their results next to each formula. Non-destructive: fails silently on
+        // any formula error, preserving the original text.
+        try {
+          const { inlineFormulaResults } = await import('./services/excel/formulaInliner');
+          const before = fullResponse.length;
+          const { content: rewritten, stats } = inlineFormulaResults(fullResponse);
+          if (stats.succeeded > 0) {
+            fullResponse = rewritten;
+            console.log(`[SSE] Inlined ${stats.succeeded}/${stats.attempted} formula results (added ${fullResponse.length - before} chars)`);
+          }
+        } catch (err) {
+          console.warn('[SSE] Formula inlining skipped:', (err as Error).message);
+        }
+
         // Stream response in chunks - use word-based streaming for natural feel
         console.log(`[SSE] Streaming ${fullResponse.length} chars...`);
-        
+
         // Split by words but keep punctuation attached
         const words = fullResponse.split(/(\s+)/);
         let wordBuffer = '';
@@ -4856,11 +4984,17 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
           metadata.excelCacheKey = excelCacheKey;
           console.log('[SSE] Excel workbook cached:', result.excelWorkbook.filename, 'key:', excelCacheKey);
         }
-        // Include spreadsheet preview data for Output Pane rendering
-        if (result.spreadsheetData) {
+        // Include spreadsheet preview data for Output Pane rendering.
+        // Prefer the AI-authored sheet blocks (lightweight, any mode) when present;
+        // otherwise use the Excel generator's structured output.
+        if (aiSpreadsheetData) {
+          metadata.spreadsheetData = aiSpreadsheetData;
+          metadata.showInOutputPane = true;
+          console.log(`[SSE] AI-authored spreadsheetData attached (${aiSpreadsheetData.sheets?.length || 0} sheet(s))`);
+        } else if (result.spreadsheetData) {
           metadata.spreadsheetData = result.spreadsheetData;
           metadata.showInOutputPane = true;
-          console.log('[SSE] Spreadsheet preview data attached');
+          console.log('[SSE] Spreadsheet preview data attached (from generator)');
         }
 
         // Debug log metadata (without large buffers)
@@ -4869,17 +5003,33 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
           spreadsheetData: metadata.spreadsheetData ? '[SPREADSHEET DATA]' : undefined
         }, null, 2));
 
+        // Whiteboard artifact wiring (Phase 2.4): prefer the pipeline-updated
+        // content (with <artifact /> placeholders) and capture ids for the row.
+        const assistantContent = result.whiteboardUpdatedContent ?? fullResponse;
+        const artifactIds = result.whiteboardArtifacts?.map((a: { id: string }) => a.id) ?? [];
+
         // Save assistant message with metadata
         const assistantMessage = await storage.createMessage({
+          id: assistantMessageId,
           conversationId: conversation.id,
           role: 'assistant',
-          content: fullResponse,
+          content: assistantContent,
           modelUsed: result.modelUsed,
           routingDecision: result.routingDecision,
           calculationResults: result.calculationResults,
           tokensUsed: result.tokensUsed,
-          metadata: Object.keys(metadata).length > 0 ? metadata : null
+          metadata: Object.keys(metadata).length > 0 ? metadata : null,
+          artifactIds,
         });
+
+        // Persist any extracted whiteboard artifacts (best-effort; never fatal)
+        for (const art of result.whiteboardArtifacts ?? []) {
+          try {
+            await createArtifact(art);
+          } catch (e) {
+            console.error('[whiteboard] failed to persist artifact:', art.id, e);
+          }
+        }
 
         // Process assistant message analytics (non-blocking)
         AnalyticsProcessor.processMessage({

@@ -6,6 +6,7 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import App from "./App";
 import "./index.css";
 import "katex/dist/katex.min.css";
+import "highlight.js/styles/github-dark.css";
 
 // Initialize theme from localStorage or system preference
 const initializeTheme = () => {

@@ -40,6 +40,11 @@ import ReactMarkdown from "react-markdown";
 import remarkMath from "remark-math";
 import remarkGfm from "remark-gfm";
 import rehypeKatex from "rehype-katex";
+import rehypeRaw from "rehype-raw";
+import { rehypeArtifactPlaceholder } from "@/components/chat/rehypeArtifactPlaceholder";
+import { normalizeMath } from "@/lib/mathNormalizer";
+import { ArtifactRenderer } from "@/components/chat/artifacts/ArtifactRenderer";
+import { FlowchartArtifact } from "@/components/chat/artifacts/FlowchartArtifact";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { 
   Table, 
@@ -93,6 +98,14 @@ import { ConversationListSkeleton } from "@/components/ui/LoadingSkeleton";
 import { VoiceModeEnhanced, MessageSpeakButton } from "@/components/voice/VoiceModeEnhanced";
 import type { SpeakControls } from "@/components/voice/VoiceModeEnhanced";
 import { ThinkingBlock } from "@/components/ThinkingBlock";
+import { useFeatureFlags } from "@/lib/featureFlags";
+import { ChatViewSwitcher, useChatView } from "@/components/chat/ChatViewSwitcher";
+import { ChatMessageRich } from "@/components/chat/ChatMessageRich";
+import { Whiteboard } from "@/components/chat/whiteboard/Whiteboard";
+import { ChatPIP } from "@/components/chat/pip/ChatPIP";
+import { Composer } from "@/components/chat/Composer";
+import { useConversationArtifacts } from "@/hooks/useConversationArtifacts";
+import type { ComposerSelection } from "@/components/chat/Composer";
 
 // Helper function to get appropriate status message based on chat mode
 const getStatusForMode = (mode: string): string => {
@@ -186,6 +199,13 @@ export default function Chat() {
   const { user, logout, isLoading } = useAuth();
   const [, setLocation] = useLocation();
   const { toast } = useToast();
+
+  // Feature flag: whiteboard v2 (rich rendering + whiteboard view + PIP).
+  const { data: features } = useFeatureFlags();
+  const whiteboardEnabled = !!features?.whiteboardV2;
+  const [view, setView] = useChatView();
+  // Artifacts for PIP chip lookup / rich message rendering when flag is ON.
+  const { data: artifactsData } = useConversationArtifacts(activeConversation);
 
   const chatModes = [
     { id: 'standard', label: 'Standard Chat', icon: MessageSquare, description: 'General accounting advice', gradient: 'from-slate-500 to-slate-600' },
@@ -390,7 +410,7 @@ export default function Chat() {
   }, [messagesData, isStreaming]);
 
   const sendMessageMutation = useMutation({
-    mutationFn: async ({ content, file }: { content: string; file: File | null }) => {
+    mutationFn: async ({ content, file, selection }: { content: string; file: File | null; selection?: ComposerSelection }) => {
       // Determine which profile to use for new conversations
       let profileIdToUse: string | null | undefined = undefined;
       if (!activeConversation) {
@@ -467,8 +487,14 @@ export default function Chat() {
           data: fileData.base64Data,
           type: fileData.type,
           filename: fileData.name
-        } : undefined
-      }, {
+        } : undefined,
+        // selection is forwarded when whiteboard v2 is on; api.ts passes
+        // only declared fields today, so the server will still receive it
+        // once api.ts is extended. Kept on the mutation variables so call
+        // sites from Composer / ChatPIP can round-trip the whiteboard
+        // context. See routes.ts — `req.body.selection` is already read.
+        ...(selection ? { selection } : {}),
+      } as Parameters<typeof chatApi.streamMessage>[0], {
         onStart: (convId) => {
           setIsStreaming(true);
           setThinkingSteps([]); // Reset thinking steps
@@ -592,6 +618,23 @@ export default function Chat() {
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
     }
+  };
+
+  // Unified send used by the whiteboard v2 Composer / ChatPIP.
+  // Mirrors handleSendMessage but takes text + optional selection directly.
+  const handleSend = (text: string, selection?: ComposerSelection) => {
+    if (!user) return;
+    const trimmed = text.trim();
+    if (!trimmed) return;
+
+    const userMessage: Message = {
+      id: Date.now().toString(),
+      role: 'user',
+      content: trimmed,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    };
+    setMessages(prev => [...prev, userMessage]);
+    sendMessageMutation.mutate({ content: trimmed, file: null, selection });
   };
 
   const handleNewChat = () => {
@@ -869,6 +912,11 @@ export default function Chat() {
         </div>
 
         <div className="flex items-center gap-2">
+          {/* Whiteboard v2: chat/board view switcher (flag-gated) */}
+          {whiteboardEnabled && (
+            <ChatViewSwitcher value={view} onChange={setView} />
+          )}
+
           {/* Chat mode indicator in header */}
           <span className="text-xs font-medium text-muted-foreground bg-muted px-2.5 py-1 rounded-full">
             {chatModes.find(m => m.id === chatMode)?.label || 'Standard Chat'}
@@ -909,8 +957,8 @@ export default function Chat() {
 
       {/* Mode ribbon hidden for spacious layout — mode selector in input bar + menu */}
 
-      {/* 3-Pane Resizable Layout */}
-      <ResizablePanelGroup key={`layout-${rightPaneCollapsed}-${leftPaneCollapsed}`} direction="horizontal" className="flex-1">
+      {/* 3-Pane Resizable Layout — sidebar always renders; middle+right pane content depends on whiteboardEnabled */}
+      <ResizablePanelGroup key={`layout-${rightPaneCollapsed}-${leftPaneCollapsed}-${whiteboardEnabled ? 'wb' : 'legacy'}`} direction="horizontal" className="flex-1">
         {/* Left Pane: Sessions - Always render, control visibility with collapsedSize */}
         <ResizablePanel 
           defaultSize={leftPaneCollapsed ? 4 : 14} 
@@ -1268,8 +1316,27 @@ export default function Chat() {
         </ResizablePanel>
         <ResizableHandle withHandle />
 
-        {/* Middle Pane: Chat */}
-        <ResizablePanel defaultSize={rightPaneCollapsed ? 80 : 50} minSize={30}>
+        {/* Middle Pane: Chat — board view swaps to Whiteboard+PIP; chat view keeps the familiar layout */}
+        <ResizablePanel defaultSize={whiteboardEnabled ? 86 : (rightPaneCollapsed ? 80 : 50)} minSize={30}>
+          {whiteboardEnabled && view === "board" ? (
+            <div className="relative h-full overflow-hidden">
+              {activeConversation ? (
+                <Whiteboard conversationId={activeConversation} />
+              ) : (
+                <div
+                  className="flex flex-col items-center justify-center h-full text-muted-foreground p-8 text-center"
+                  data-testid="whiteboard-no-conversation"
+                >
+                  <p className="text-sm">Start a conversation to populate your whiteboard.</p>
+                </div>
+              )}
+              <ChatPIP
+                messages={messages.map(m => ({ id: m.id, role: m.role, content: m.content }))}
+                byId={artifactsData?.byId ?? {}}
+                onSend={(text, selection) => handleSend(text, selection)}
+              />
+            </div>
+          ) : (
           <div className="flex flex-col h-full">
             <ScrollArea className="flex-1 p-4">
               <div className="max-w-4xl mx-auto space-y-6">
@@ -1304,43 +1371,77 @@ export default function Chat() {
                               {message.content ? (
                                 <ReactMarkdown
                                   remarkPlugins={[remarkMath, remarkGfm]}
-                                  rehypePlugins={[rehypeKatex]}
+                                  rehypePlugins={[rehypeRaw, rehypeArtifactPlaceholder, rehypeKatex]}
                                   components={{
-                                    table: ({ children, ...props }) => (
+                                    // Render mermaid fenced blocks (```mermaid … ```) as actual
+                                    // diagrams via FlowchartArtifact instead of showing the raw
+                                    // code. Other languages fall through to the default <code>.
+                                    code: ({ className, children, ...props }: any) => {
+                                      if (typeof className === "string" && /language-mermaid/.test(className)) {
+                                        const source = Array.isArray(children)
+                                          ? children.join("")
+                                          : String(children ?? "");
+                                        return (
+                                          <div className="my-4 not-prose">
+                                            <FlowchartArtifact payload={{ source }} />
+                                          </div>
+                                        );
+                                      }
+                                      return <code className={className} {...props}>{children}</code>;
+                                    },
+                                    "artifact-placeholder": ({ id }: any) => {
+                                      const artifact = artifactsData?.byId?.[id];
+                                      if (!artifact) {
+                                        return (
+                                          <div className="text-xs text-muted-foreground italic my-2">
+                                            [artifact {id} loading…]
+                                          </div>
+                                        );
+                                      }
+                                      return (
+                                        <div className="my-4 not-prose">
+                                          <ArtifactRenderer
+                                            artifact={artifact}
+                                            conversationId={activeConversation}
+                                          />
+                                        </div>
+                                      );
+                                    },
+                                    table: ({ children, ...props }: any) => (
                                       <div className="my-4 w-full overflow-auto">
                                         <Table {...props}>
                                           {children}
                                         </Table>
                                       </div>
                                     ),
-                                    thead: ({ children, ...props }) => (
+                                    thead: ({ children, ...props }: any) => (
                                       <TableHeader {...props}>
                                         {children}
                                       </TableHeader>
                                     ),
-                                    tbody: ({ children, ...props }) => (
+                                    tbody: ({ children, ...props }: any) => (
                                       <TableBody {...props}>
                                         {children}
                                       </TableBody>
                                     ),
-                                    tr: ({ children, ...props }) => (
+                                    tr: ({ children, ...props }: any) => (
                                       <TableRow {...props}>
                                         {children}
                                       </TableRow>
                                     ),
-                                    th: ({ children, ...props }) => (
+                                    th: ({ children, ...props }: any) => (
                                       <TableHead {...props}>
                                         {children}
                                       </TableHead>
                                     ),
-                                    td: ({ children, ...props }) => (
+                                    td: ({ children, ...props }: any) => (
                                       <TableCell {...props}>
                                         {children}
                                       </TableCell>
                                     ),
-                                  }}
+                                  } as any}
                                 >
-                                  {message.content}
+                                  {normalizeMath(message.content)}
                                 </ReactMarkdown>
                               ) : (
                                 <div className="space-y-2">
@@ -1562,10 +1663,11 @@ export default function Chat() {
               </div>
             </div>
           </div>
+          )}
         </ResizablePanel>
 
-        {/* Right Pane: Output - Always render, control visibility with size */}
-        {!isOutputFullscreen && (
+        {/* Right Pane: Output - only in legacy (flag-off) layout */}
+        {!whiteboardEnabled && !isOutputFullscreen && (
           <>
             <ResizableHandle withHandle />
             <ResizablePanel 

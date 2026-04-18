@@ -25,6 +25,9 @@ export interface FeatureFlags {
   // Experimental features
   EXPERIMENTAL_AGENTS: boolean;
   DEBUG_MODE: boolean;
+
+  // Dynamic chat + whiteboard UX (Phase 9+)
+  WHITEBOARD_V2: boolean;
 }
 
 /**
@@ -65,6 +68,9 @@ export function getFeatureFlags(): FeatureFlags {
     // Experimental
     EXPERIMENTAL_AGENTS: process.env.ENABLE_EXPERIMENTAL_AGENTS === 'true',
     DEBUG_MODE: process.env.NODE_ENV !== 'production' || process.env.DEBUG === 'true',
+
+    // Dynamic chat + whiteboard UX (Phase 9+)
+    WHITEBOARD_V2: process.env.ENABLE_WHITEBOARD_V2 === 'true',
   };
 }
 
@@ -135,5 +141,6 @@ export function getClientFeatures(): Record<string, boolean> {
     expertRoundtable: flags.EXPERT_ROUNDTABLE,
     financialCalculations: flags.FINANCIAL_CALCULATIONS,
     aiSearch: flags.AI_SEARCH,
+    whiteboardV2: flags.WHITEBOARD_V2,
   };
 }

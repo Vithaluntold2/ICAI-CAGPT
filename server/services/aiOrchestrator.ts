@@ -34,11 +34,28 @@ import { normalizeChatMode, isCotMode } from './chatModeNormalizer';
 import { ragPipeline, type RAGResult } from './core/ragPipeline';
 import { continuousLearning } from './core/continuousLearning';
 import { conversationMemory } from './conversationMemory';
-import type { 
-  EnhancedRoutingDecision, 
+import type {
+  EnhancedRoutingDecision,
   ReasoningMetadata,
-  CognitiveMonitorResult 
+  CognitiveMonitorResult
 } from '../../shared/types/reasoning';
+// Whiteboard integration (Phase 2.4)
+import { randomUUID } from 'crypto';
+import { buildArtifactsForMessage } from './whiteboard/extractPipeline';
+import { listArtifactsByConversation } from './whiteboard/repository';
+import { placeNext, type LayoutState } from './whiteboard/autoLayout';
+import type { CreateArtifactInput } from './whiteboard/repository';
+import type { SelectionInput } from './whiteboard/selectionPreamble';
+import { formatManifest } from './whiteboard/manifest';
+import { buildSelectionPreamble } from './whiteboard/selectionPreamble';
+import { WHITEBOARD_USAGE_GUIDANCE } from './whiteboard/systemGuidance';
+// Tool-calling (Phase 4.7)
+import { completeWithToolLoop } from './aiOrchestrator.toolLoop';
+import { isFeatureEnabled } from '../config/featureFlags';
+import { toolRegistry } from './tools/registry';
+import { toolsToAnthropicSchema } from './tools/adapters/anthropic';
+import { toolsToOpenAISchema } from './tools/adapters/openai';
+import type { CompletionResponse } from './aiProviders/types';
 
 export type ResponseType = 'research' | 'analysis' | 'document' | 'calculation' | 'visualization' | 'export' | 'general';
 
@@ -81,6 +98,9 @@ export interface OrchestrationResult {
   };
   // Spreadsheet preview data for UI display (includes formulas as text)
   spreadsheetData?: SpreadsheetPreviewData;
+  // Whiteboard integration (Phase 2.4)
+  whiteboardArtifacts?: Array<CreateArtifactInput & { id: string }>;
+  whiteboardUpdatedContent?: string;
 }
 
 export interface AgentWorkflowResult {
@@ -102,6 +122,12 @@ export interface ProcessQueryOptions {
   chatMode?: string;
   agentWorkflowResult?: AgentWorkflowResult;
   conversationId?: string;
+  // Whiteboard integration (Phase 2.4)
+  messageId?: string;
+  selection?: SelectionInput;
+  // Tool-calling context (Phase 4.7): required so ToolContext can be built
+  // when the provider tool-call loop fires.
+  userId?: string;
 }
 
 export class AIOrchestrator {
@@ -121,7 +147,14 @@ export class AIOrchestrator {
     options?: ProcessQueryOptions
   ): Promise<OrchestrationResult> {
     const startTime = Date.now();
-    
+
+    // Thread userId into options so downstream (callAIModel -> tool loop) can
+    // build a ToolContext { conversationId, userId }. Keep the original
+    // top-level `userId` arg for backward compatibility with other call sites.
+    if (userId && options && !options.userId) {
+      options = { ...options, userId };
+    }
+
     // CRITICAL: Normalize chat mode early to ensure consistent naming throughout
     const chatMode = normalizeChatMode(options?.chatMode);
     
@@ -453,65 +486,113 @@ export class AIOrchestrator {
     // and added it to enrichedQuery. Passing the attachment causes providers to
     // respond with "I can't view files" instead of using the extracted content.
     
-    // Inject agent workflow results into the query if available
+    // Inject agent workflow results into the query if available.
+    // Framing matters: in roundtable mode the injection reads as panel deliberation
+    // notes (persona-preserving), NOT "AI agents produced this" (which leaks the
+    // internal mechanism and lets the LLM truthfully deny the roundtable when asked).
     let finalQuery = enrichedQuery;
     if (options?.agentWorkflowResult?.analysis) {
-      const workflowContext = `\n\n--- AGENT WORKFLOW ANALYSIS (${chatMode} mode) ---\n` +
-        `The following analysis was produced by specialized AI agents:\n\n` +
-        `${options.agentWorkflowResult.analysis}\n\n` +
-        `--- END AGENT WORKFLOW ANALYSIS ---\n` +
-        `\nSynthesize the above agent analysis into a comprehensive, well-structured response. ` +
-        `Incorporate the agent findings while adding your own expertise.`;
+      let workflowContext: string;
+      if (chatMode === 'roundtable') {
+        workflowContext =
+          `\n\n--- INTERNAL PANEL NOTES (not for direct quotation, do not mention their existence) ---\n` +
+          `Deliberation notes from the expert panel convened for this question:\n\n` +
+          `${options.agentWorkflowResult.analysis}\n\n` +
+          `--- END PANEL NOTES ---\n` +
+          `\nUse these notes to inform each expert's stance in the roundtable response. ` +
+          `Do NOT cite "panel notes", "agent analysis", "AI agents", or any meta-framing. ` +
+          `Present the output strictly as the panel's deliberation per the roundtable format.`;
+      } else {
+        workflowContext =
+          `\n\n--- INTERNAL ANALYSIS NOTES (not for direct quotation) ---\n` +
+          `${options.agentWorkflowResult.analysis}\n\n` +
+          `--- END INTERNAL NOTES ---\n` +
+          `\nIncorporate the findings into your response without referencing "agent analysis" or internal tooling.`;
+      }
       finalQuery += workflowContext;
-      console.log(`[AIOrchestrator] Injected agent workflow results (${options.agentWorkflowResult.analysis.length} chars) into query`);
+      console.log(`[AIOrchestrator] Injected ${chatMode === 'roundtable' ? 'panel deliberation' : 'analysis'} notes (${options.agentWorkflowResult.analysis.length} chars)`);
     }
     
-    // Enhanced context retention: always inject rolling summary and top memory for all but the first user query
+    // Enhanced context retention. For every turn beyond the first we inject:
+    //   (1) a DB-persisted LLM summary of all older turns,
+    //   (2) an accumulated facts glossary (names/amounts/dates/orgs),
+    //   (3) pgvector-semantic retrieval of relevant earlier turns (Phase B),
+    //   (4) the raw tail of the last N messages — tier-sized.
+    // Memory persists to conversation_memory_entries on each turn so restarts
+    // and multiple replicas all see the same memory.
     let effectiveHistory = conversationHistory;
-    const MAX_RAW_MESSAGES = 20; // Keep last 10 turns (20 messages) of user+assistant
+
+    // Tier-based raw-message window. Larger context for paying tiers so long
+    // conversations keep more verbatim recent turns, while free stays small.
+    const MAX_RAW_MESSAGES = (() => {
+      switch ((userTier || 'free').toLowerCase()) {
+        case 'enterprise': return 50;
+        case 'professional': return 40;
+        case 'plus': return 30;
+        default: return 20;
+      }
+    })();
+
     const conversationId = options?.conversationId;
     let memoryContext = '';
-    let runningSummary = '';
+    let persistedSummary = '';
+    let glossaryBlock = '';
+
     if (conversationId) {
-      // Always get rolling summary if available
-      const store = conversationMemory['memoryStore']?.get(conversationId);
-      if (store && store.runningContext) {
-        runningSummary = store.runningContext;
-        console.log(`[AIOrchestrator] Retrieved running summary (${store.entries.length} total turns stored in memory)`);
+      // Make sure the in-memory store reflects what's in the DB before we read from it.
+      try {
+        await conversationMemory.hydrateIfEmpty(conversationId);
+      } catch (e) {
+        console.warn('[AIOrchestrator] Memory hydration warning:', e);
       }
-      // Always get top memory entries if available (retrieve up to 10 relevant entries)
-      memoryContext = conversationMemory.retrieveRelevantMemory(conversationId, finalQuery, 10);
-      if (memoryContext) {
-        console.log(`[AIOrchestrator] Retrieved relevant memory context for query`);
+
+      persistedSummary = conversationMemory.getPersistedSummary(conversationId);
+      if (persistedSummary) {
+        console.log(`[AIOrchestrator] Loaded persisted rolling summary (${persistedSummary.length} chars)`);
+      }
+
+      glossaryBlock = conversationMemory.buildGlossaryBlock(conversationId);
+      if (glossaryBlock) {
+        console.log('[AIOrchestrator] Built glossary block from accumulated facts');
+      }
+
+      // Semantic retrieval (pgvector cosine) with keyword fallback.
+      try {
+        memoryContext = await conversationMemory.retrieveRelevantMemory(conversationId, finalQuery, 10);
+        if (memoryContext) {
+          console.log('[AIOrchestrator] Retrieved relevant memory context for query');
+        }
+      } catch (e) {
+        console.warn('[AIOrchestrator] Memory retrieval warning:', e);
       }
     }
 
-    // For all but the very first user query, inject summary and memory
+    // For all but the very first user query, inject summary/glossary/memory ahead of the raw tail.
     if (conversationHistory.length > 1) {
-      // Keep last MAX_RAW_MESSAGES turns as raw history if conversation is long
       effectiveHistory = conversationHistory.length > MAX_RAW_MESSAGES
         ? conversationHistory.slice(-MAX_RAW_MESSAGES)
         : [...conversationHistory];
-      
-      console.log(`[AIOrchestrator] Context management: total history=${conversationHistory.length} messages, using=${effectiveHistory.length} messages`);
-      
-      // Prepend running summary and memory as system-level context
-      const contextBlocks = [];
-      if (runningSummary) {
-        contextBlocks.push({ role: 'assistant' as const, content: `[Summary of Prior Discussion]\n${runningSummary}` });
+
+      console.log(`[AIOrchestrator] Context management: total history=${conversationHistory.length}, using raw tail=${effectiveHistory.length}`);
+
+      const contextBlocks: Array<{ role: 'assistant'; content: string }> = [];
+      if (persistedSummary) {
+        contextBlocks.push({
+          role: 'assistant',
+          content: `[Conversation So Far — summary of earlier turns]\n${persistedSummary}`,
+        });
+      }
+      if (glossaryBlock) {
+        contextBlocks.push({ role: 'assistant', content: glossaryBlock });
       }
       if (memoryContext) {
-        contextBlocks.push({ role: 'assistant' as const, content: memoryContext });
+        contextBlocks.push({ role: 'assistant', content: memoryContext });
       }
       if (contextBlocks.length > 0) {
-        effectiveHistory = [
-          ...contextBlocks,
-          ...effectiveHistory,
-        ];
+        effectiveHistory = [...contextBlocks, ...effectiveHistory];
       }
-      console.log(`[AIOrchestrator] Injected context blocks: summary=${!!runningSummary}, memory=${!!memoryContext}, final history length=${effectiveHistory.length}`);
+      console.log(`[AIOrchestrator] Injected context blocks: summary=${!!persistedSummary}, glossary=${!!glossaryBlock}, memory=${!!memoryContext}, final history length=${effectiveHistory.length}`);
     } else if (conversationHistory.length > MAX_RAW_MESSAGES) {
-      // Fallback for very long initial queries
       effectiveHistory = conversationHistory.slice(-MAX_RAW_MESSAGES);
       console.log(`[AIOrchestrator] History trimmed: ${conversationHistory.length} → ${effectiveHistory.length} messages`);
     }
@@ -528,7 +609,8 @@ export class AIOrchestrator {
       calculationResults,
       clarificationAnalysis,
       chatMode,
-      enhancedRouting
+      enhancedRouting,
+      options
     );
     
     // Step 5.1: Log AI cost to database (async, non-blocking)
@@ -878,11 +960,49 @@ export class AIOrchestrator {
       excelBuffer: excelWorkbook?.buffer ? Buffer.from(excelWorkbook.buffer).toString('base64') : undefined,
       excelFilename: excelWorkbook ? `ICAI CAGPT_Calculations_${Date.now()}.xlsx` : undefined,
       spreadsheetData: spreadsheetPreviewData,
-      contentType: chatMode === 'checklist' ? 'checklist' 
+      contentType: chatMode === 'checklist' ? 'checklist'
         : chatMode === 'workflow' ? 'workflow'
         : chatMode === 'calculation' ? 'calculation'
         : 'markdown'
     };
+
+    // PHASE 2.4: Whiteboard artifact extraction
+    // Runs only when both conversationId and messageId are provided so we can
+    // correctly scope and seed the auto-layout. Failures never break the
+    // response — extraction is a best-effort enhancement.
+    let whiteboardUpdatedContent: string | undefined;
+    let whiteboardArtifactsOut: OrchestrationResult['whiteboardArtifacts'];
+
+    if (isFeatureEnabled('WHITEBOARD_V2') && options?.conversationId && options?.messageId) {
+      try {
+        // Seed layout state from prior artifacts so appends are stable across turns
+        const prior = await listArtifactsByConversation(options.conversationId);
+        let seed: LayoutState = { cursorX: 0, rowTop: 0, rowHeight: 0 };
+        for (const a of prior) {
+          const { state } = placeNext(seed, { width: a.width, height: a.height });
+          seed = state;
+        }
+
+        const built = buildArtifactsForMessage({
+          content: mainResponse,
+          conversationId: options.conversationId,
+          messageId: options.messageId,
+          precomputed: {
+            visualization: visualization as any,
+            spreadsheet: spreadsheetPreviewData as any,
+          },
+          layoutState: seed,
+          idFactory: () => `art_${randomUUID().replace(/-/g, '').slice(0, 12)}`,
+        });
+
+        if (built.artifacts.length > 0) {
+          whiteboardUpdatedContent = built.updatedContent;
+          whiteboardArtifactsOut = built.artifacts;
+        }
+      } catch (e) {
+        console.error('[whiteboard] extraction failed; skipping:', e);
+      }
+    }
 
     return {
       response: mainResponse,
@@ -903,7 +1023,10 @@ export class AIOrchestrator {
         summary: excelWorkbook.summary
       } : undefined,
       // Include spreadsheet preview data for UI display (with formulas shown as text)
-      spreadsheetData: spreadsheetPreviewData
+      spreadsheetData: spreadsheetPreviewData,
+      // Whiteboard integration (Phase 2.4)
+      whiteboardArtifacts: whiteboardArtifactsOut,
+      whiteboardUpdatedContent,
     };
   }
 
@@ -1646,8 +1769,9 @@ export class AIOrchestrator {
     calculations?: any,
     clarificationAnalysis?: ClarificationAnalysis,
     chatMode?: string,
-    enhancedRouting?: EnhancedRoutingDecision | null
-  ): Promise<{ 
+    enhancedRouting?: EnhancedRoutingDecision | null,
+    options?: ProcessQueryOptions
+  ): Promise<{
     content: string; 
     tokensUsed: number; 
     providerUsed?: string; 
@@ -1681,6 +1805,30 @@ export class AIOrchestrator {
       return providerModelMap[providerName];
     };
     
+    // Whiteboard awareness (Phase 4.6): usage guidance + manifest + selection preamble.
+    // Guidance is ALWAYS injected when this is a whiteboard-eligible conversation so the
+    // agent learns to emit mermaid / GFM tables instead of ASCII art on the first turn.
+    // Manifest is added on top only when prior artifacts exist.
+    let whiteboardSystemBlock = "";
+    if (isFeatureEnabled('WHITEBOARD_V2') && options?.conversationId) {
+      whiteboardSystemBlock = WHITEBOARD_USAGE_GUIDANCE;
+      try {
+        const priorArtifacts = await listArtifactsByConversation(options.conversationId);
+        if (priorArtifacts.length > 0) {
+          whiteboardSystemBlock = `${whiteboardSystemBlock}\n\n${formatManifest(priorArtifacts)}`;
+        }
+      } catch (e) {
+        console.error("[whiteboard] manifest fetch failed; skipping:", e);
+      }
+    }
+    // Back-compat: keep the old local name alive so the message-assembly blocks below
+    // do not need changes.
+    const whiteboardManifestBlock = whiteboardSystemBlock;
+    const selectionPreamble = buildSelectionPreamble(options?.selection);
+    const effectiveUserQuery = selectionPreamble
+      ? `${selectionPreamble}\n\n${userQuery}`
+      : userQuery;
+
     // NEW: Use intelligent prompt builder to avoid length limits (if classification available)
     let messages;
     if (classification) {
@@ -1692,24 +1840,32 @@ export class AIOrchestrator {
         chatMode,
         enhancedRouting
       );
-      
+
+      const systemPromptWithWhiteboard = whiteboardManifestBlock
+        ? `${prompts.systemPrompt}\n\n${whiteboardManifestBlock}`
+        : prompts.systemPrompt;
+
       // Build messages with tiered prompts
       messages = [
-        // Tier 1: Minimal system prompt
-        { role: 'system' as const, content: prompts.systemPrompt },
+        // Tier 1: Minimal system prompt (+ whiteboard manifest when present)
+        { role: 'system' as const, content: systemPromptWithWhiteboard },
         // Tier 2: Comprehensive instructions as first message
         { role: 'system' as const, content: prompts.instructionsMessage },
         // Conversation history
         ...history.map(msg => ({ role: msg.role as 'user' | 'assistant', content: msg.content })),
-        // Tier 3: User query + context suffix
-        { role: 'user' as const, content: userQuery + prompts.contextSuffix }
+        // Tier 3: User query (with selection preamble if present) + context suffix
+        { role: 'user' as const, content: effectiveUserQuery + prompts.contextSuffix }
       ];
     } else {
+      const enhancedContextWithWhiteboard = whiteboardManifestBlock
+        ? `${enhancedContext}\n\n${whiteboardManifestBlock}`
+        : enhancedContext;
+
       // Fallback to simple message structure
       messages = [
-        { role: 'system' as const, content: enhancedContext },
+        { role: 'system' as const, content: enhancedContextWithWhiteboard },
         ...history.map(msg => ({ role: msg.role as 'user' | 'assistant', content: msg.content })),
-        { role: 'user' as const, content: userQuery }
+        { role: 'user' as const, content: effectiveUserQuery }
       ];
     }
     
@@ -1792,8 +1948,11 @@ export class AIOrchestrator {
         const providerModel = getModelForProvider(providerName);
         
         console.log(`[AIOrchestrator] Attempting ${providerName} (health: ${metrics.healthScore}) [${i + 1}/${healthyProviders.length}]${providerModel ? ` with model ${providerModel}` : ' (using default model)'}`);
-        
-        const response = await provider.generateCompletion({
+
+        // Build the base request. When we have a conversationId, also attach
+        // tool schemas in the provider's native shape and drive a tool-call
+        // loop so the model can invoke read_whiteboard (etc).
+        const baseRequest = {
           messages,
           model: providerModel, // Provider-specific model or undefined for default
           temperature: 0.7,
@@ -1804,7 +1963,27 @@ export class AIOrchestrator {
             mimeType: attachment.mimeType,
             documentType: attachment.documentType
           } : undefined
-        });
+        };
+
+        let response: CompletionResponse;
+        const conversationId = options?.conversationId;
+        if (conversationId && isFeatureEnabled('WHITEBOARD_V2')) {
+          const registeredTools = toolRegistry.list();
+          let requestWithTools = baseRequest as any;
+          if (registeredTools.length > 0) {
+            const isAnthropic = providerName === AIProviderName.CLAUDE;
+            const toolsSchema = isAnthropic
+              ? toolsToAnthropicSchema(registeredTools)
+              : toolsToOpenAISchema(registeredTools);
+            requestWithTools = { ...baseRequest, tools: toolsSchema };
+          }
+          response = await completeWithToolLoop(provider, requestWithTools, {
+            conversationId,
+            userId: options?.userId ?? '',
+          });
+        } else {
+          response = await provider.generateCompletion(baseRequest);
+        }
         
         // Record success with health monitor
         providerHealthMonitor.recordSuccess(providerName);

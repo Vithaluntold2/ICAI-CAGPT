@@ -56,6 +56,12 @@ export default defineConfig({
       '@shared': path.resolve(__dirname, 'shared'),
       '@server': path.resolve(__dirname, 'server'),
       '@tests': path.resolve(__dirname, 'tests'),
+      // Force single copies so React hooks dispatcher is shared between test
+      // files and transitive deps like @tanstack/react-query (there are two
+      // installs: root node_modules and client/node_modules).
+      react: path.resolve(__dirname, 'node_modules/react'),
+      'react-dom': path.resolve(__dirname, 'node_modules/react-dom'),
+      '@tanstack/react-query': path.resolve(__dirname, 'node_modules/@tanstack/react-query'),
     },
   },
 });

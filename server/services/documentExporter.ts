@@ -1,4 +1,4 @@
-import { Document, Paragraph, TextRun, HeadingLevel, AlignmentType, Table } from 'docx';
+import { Document, Paragraph, TextRun, HeadingLevel, AlignmentType, Table, TableRow, TableCell, WidthType, BorderStyle, ShadingType } from 'docx';
 import PDFDocument from 'pdfkit';
 import ExcelJS from 'exceljs';
 import PptxGenJS from 'pptxgenjs';
@@ -49,12 +49,39 @@ export class DocumentExporter {
   /**
    * Export content to DOCX format with proper markdown parsing
    */
+  /**
+   * Build a docx Table from parsed GFM headers + rows.
+   */
+  private static buildDocxTable(headers: string[], rows: string[][]): Table {
+    const headerCells = headers.map(h => new TableCell({
+      children: [new Paragraph({ children: [new TextRun({ text: this.stripMarkdown(h), bold: true })] })],
+      shading: { type: ShadingType.CLEAR, color: 'auto', fill: 'F3F4F6' },
+    }));
+    const bodyRows = rows.map(r => new TableRow({
+      children: r.map(c => new TableCell({
+        children: [new Paragraph({ children: [new TextRun({ text: this.stripMarkdown(c) })] })],
+      })),
+    }));
+    return new Table({
+      width: { size: 100, type: WidthType.PERCENTAGE },
+      rows: [new TableRow({ children: headerCells, tableHeader: true }), ...bodyRows],
+      borders: {
+        top: { style: BorderStyle.SINGLE, size: 4, color: 'CCCCCC' },
+        bottom: { style: BorderStyle.SINGLE, size: 4, color: 'CCCCCC' },
+        left: { style: BorderStyle.SINGLE, size: 4, color: 'CCCCCC' },
+        right: { style: BorderStyle.SINGLE, size: 4, color: 'CCCCCC' },
+        insideHorizontal: { style: BorderStyle.SINGLE, size: 2, color: 'DDDDDD' },
+        insideVertical: { style: BorderStyle.SINGLE, size: 2, color: 'DDDDDD' },
+      },
+    });
+  }
+
   static async exportToDocx(content: string, title: string = 'CA GPT Output'): Promise<Buffer> {
     const lines = content.split('\n');
-    const paragraphs: Paragraph[] = [];
+    const children: Array<Paragraph | Table> = [];
 
     // Add title
-    paragraphs.push(
+    children.push(
       new Paragraph({
         text: this.stripMarkdown(title),
         heading: HeadingLevel.HEADING_1,
@@ -62,13 +89,54 @@ export class DocumentExporter {
       })
     );
 
-    // Process content
-    for (const line of lines) {
+    // Process content line-by-line, consuming multiple lines for table / code blocks.
+    let i = 0;
+    while (i < lines.length) {
+      const line = lines[i];
       const trimmed = line.trim();
-      
+
+      // --- Fenced code block ---
+      const fenceMatch = /^```(\w*)\s*$/.exec(trimmed);
+      if (fenceMatch) {
+        const lang = fenceMatch[1] || '';
+        const bodyLines: string[] = [];
+        i++;
+        while (i < lines.length && !/^```\s*$/.test(lines[i].trim())) {
+          bodyLines.push(lines[i]);
+          i++;
+        }
+        if (i < lines.length) i++;
+
+        if (lang.toLowerCase() === 'mermaid') {
+          children.push(new Paragraph({
+            children: [new TextRun({ text: '[Diagram — rendered version available in the app]', italics: true, color: '666666' })],
+            spacing: { before: 100, after: 100 },
+          }));
+        } else {
+          // Render as monospace block (one paragraph per code line)
+          for (const codeLine of bodyLines) {
+            children.push(new Paragraph({
+              children: [new TextRun({ text: codeLine, font: 'Courier New', size: 20 })],
+              shading: { type: ShadingType.CLEAR, color: 'auto', fill: 'F5F5F5' },
+            }));
+          }
+          children.push(new Paragraph({ text: '' }));
+        }
+        continue;
+      }
+
+      // --- GFM table block ---
+      const table = this.parseTableBlock(lines, i);
+      if (table) {
+        children.push(this.buildDocxTable(table.headers, table.rows));
+        children.push(new Paragraph({ text: '' }));
+        i = table.end;
+        continue;
+      }
+
       // Handle headers
       if (trimmed.startsWith('# ')) {
-        paragraphs.push(
+        children.push(
           new Paragraph({
             text: this.stripMarkdown(trimmed.replace(/^#\s+/, '')),
             heading: HeadingLevel.HEADING_1,
@@ -76,7 +144,7 @@ export class DocumentExporter {
           })
         );
       } else if (trimmed.startsWith('## ')) {
-        paragraphs.push(
+        children.push(
           new Paragraph({
             text: this.stripMarkdown(trimmed.replace(/^##\s+/, '')),
             heading: HeadingLevel.HEADING_2,
@@ -84,7 +152,7 @@ export class DocumentExporter {
           })
         );
       } else if (trimmed.startsWith('### ')) {
-        paragraphs.push(
+        children.push(
           new Paragraph({
             text: this.stripMarkdown(trimmed.replace(/^###\s+/, '')),
             heading: HeadingLevel.HEADING_3,
@@ -92,7 +160,7 @@ export class DocumentExporter {
           })
         );
       } else if (trimmed.startsWith('#### ')) {
-        paragraphs.push(
+        children.push(
           new Paragraph({
             text: this.stripMarkdown(trimmed.replace(/^####\s+/, '')),
             heading: HeadingLevel.HEADING_4,
@@ -102,7 +170,7 @@ export class DocumentExporter {
       } else if (trimmed.startsWith('- ') || trimmed.startsWith('* ') || trimmed.startsWith('+ ')) {
         // Bullet point
         const bulletText = this.stripMarkdown(trimmed.replace(/^[-*+]\s+/, ''));
-        paragraphs.push(
+        children.push(
           new Paragraph({
             text: bulletText,
             bullet: { level: 0 },
@@ -112,7 +180,7 @@ export class DocumentExporter {
       } else if (/^\d+\.\s+/.test(trimmed)) {
         // Numbered list
         const listText = this.stripMarkdown(trimmed.replace(/^\d+\.\s+/, ''));
-        paragraphs.push(
+        children.push(
           new Paragraph({
             text: listText,
             numbering: { reference: 'default-numbering', level: 0 },
@@ -122,7 +190,7 @@ export class DocumentExporter {
       } else if (trimmed.startsWith('> ')) {
         // Blockquote
         const quoteText = this.stripMarkdown(trimmed.replace(/^>\s+/, ''));
-        paragraphs.push(
+        children.push(
           new Paragraph({
             text: quoteText,
             
@@ -132,7 +200,7 @@ export class DocumentExporter {
         );
       } else if (trimmed === '---' || trimmed === '***' || trimmed === '___') {
         // Horizontal rule - add an empty paragraph with a border
-        paragraphs.push(
+        children.push(
           new Paragraph({
             text: '',
             border: {
@@ -157,7 +225,7 @@ export class DocumentExporter {
           })
         );
         
-        paragraphs.push(
+        children.push(
           new Paragraph({
             children: runs.length > 0 ? runs : [new TextRun({ text: this.stripMarkdown(trimmed) })],
             spacing: { after: 100 },
@@ -165,14 +233,15 @@ export class DocumentExporter {
         );
       } else {
         // Empty line
-        paragraphs.push(new Paragraph({ text: '' }));
+        children.push(new Paragraph({ text: '' }));
       }
+      i++;
     }
 
     const doc = new Document({
       sections: [{
         properties: {},
-        children: paragraphs,
+        children,
       }],
       numbering: {
         config: [
@@ -198,8 +267,49 @@ export class DocumentExporter {
   /**
    * Strip markdown formatting and return plain text
    */
+  /**
+   * Remove emoji / pictographic characters.
+   *
+   * PDFKit's built-in fonts (Helvetica / Times / Courier) only cover Latin-1,
+   * so emoji codepoints render as garbled ANSI punctuation like "Ø=ÜÊ".
+   * DOCX / PPTX / XLSX can technically render emoji if the end-user's Office
+   * install has a colour-emoji font, but results vary wildly. Stripping them
+   * up-front gives us consistent, professional output across every format.
+   */
+  private static stripEmojis(text: string): string {
+    // Covers the main emoji ranges + variation selectors + ZWJ + regional indicators.
+    return text.replace(
+      /[\u{1F300}-\u{1F9FF}\u{1FA00}-\u{1FAFF}\u{2600}-\u{27BF}\u{1F1E6}-\u{1F1FF}\u{2300}-\u{23FF}\u{2B00}-\u{2BFF}\u{FE0F}\u{200D}]/gu,
+      '',
+    ).replace(/\s{2,}/g, ' ');
+  }
+
+  /**
+   * Replace whiteboard <artifact id="..."/> placeholders with a short inline
+   * marker — the rendered diagram cannot be embedded in these export formats,
+   * but a raw tag in the output is worse than a one-line hint.
+   */
+  private static stripArtifactTags(text: string): string {
+    return text.replace(
+      /<artifact\s+id="([^"]+)"\s*\/?>\s*<\/artifact>|<artifact\s+id="([^"]+)"\s*\/>/g,
+      () => '[Diagram — view in the app]',
+    );
+  }
+
+  /**
+   * Sanitize text for export to any document format.
+   *
+   * Returns plain text with markdown syntax stripped, emojis removed (fonts in
+   * PDF/DOCX/PPTX/XLSX vary in pictographic coverage — safer to drop them than
+   * render garbled codepoints), and whiteboard `<artifact>` placeholders
+   * replaced with a one-line hint. ALL exporters reach every user-visible
+   * string through this function via their existing stripMarkdown calls.
+   */
   private static stripMarkdown(text: string): string {
-    return text
+    if (!text) return '';
+    const noArtifacts = this.stripArtifactTags(text);
+    const noEmojis = this.stripEmojis(noArtifacts);
+    return noEmojis
       // Remove bold (**text** or __text__)
       .replace(/\*\*(.*?)\*\*/g, '$1')
       .replace(/__(.*?)__/g, '$1')
@@ -298,9 +408,166 @@ export class DocumentExporter {
   }
 
   /**
-   * Export content to PDF format with proper markdown parsing
+   * Detect a GFM table block starting at `start`.
+   * Returns { rows, end } where `end` is the index AFTER the last table line,
+   * or null when the block at `start` is not a table.
+   */
+  private static parseTableBlock(lines: string[], start: number): { headers: string[]; rows: string[][]; end: number } | null {
+    const headerLine = lines[start]?.trim();
+    const separatorLine = lines[start + 1]?.trim();
+    if (!headerLine || !separatorLine) return null;
+    if (!headerLine.startsWith('|') || !headerLine.endsWith('|')) return null;
+    if (!/^\|\s*:?-+:?\s*(\|\s*:?-+:?\s*)+\|$/.test(separatorLine)) return null;
+
+    const splitRow = (raw: string): string[] =>
+      raw.replace(/^\||\|$/g, '').split('|').map(c => c.trim());
+
+    const headers = splitRow(headerLine);
+    const rows: string[][] = [];
+    let i = start + 2;
+    while (i < lines.length) {
+      const rowLine = lines[i].trim();
+      if (!rowLine.startsWith('|') || !rowLine.endsWith('|')) break;
+      rows.push(splitRow(rowLine));
+      i++;
+    }
+    return { headers, rows, end: i };
+  }
+
+  /**
+   * Render a table block into the PDF using pdfkit primitives.
+   */
+  private static renderPdfTable(
+    doc: PDFKit.PDFDocument,
+    headers: string[],
+    rows: string[][],
+  ): void {
+    const marginLeft = (doc.page.margins?.left ?? 50);
+    const marginRight = (doc.page.margins?.right ?? 50);
+    const tableWidth = doc.page.width - marginLeft - marginRight;
+    const colCount = Math.max(1, headers.length);
+    const colWidth = tableWidth / colCount;
+    const cellPadX = 4;
+    const cellPadY = 3;
+
+    const measureRowHeight = (cells: string[], font: string, size: number): number => {
+      doc.font(font).fontSize(size);
+      let h = 0;
+      for (const c of cells) {
+        const text = DocumentExporter.stripMarkdown(c || '');
+        const textH = doc.heightOfString(text || ' ', { width: colWidth - cellPadX * 2 });
+        if (textH > h) h = textH;
+      }
+      return h + cellPadY * 2;
+    };
+
+    const drawRow = (cells: string[], y: number, height: number, bold: boolean, fill?: string) => {
+      if (fill) {
+        doc.save();
+        doc.rect(marginLeft, y, tableWidth, height).fill(fill);
+        doc.restore();
+      }
+      doc.font(bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(10).fillColor('#000000');
+      for (let c = 0; c < colCount; c++) {
+        const text = DocumentExporter.stripMarkdown(cells[c] ?? '');
+        doc.text(text, marginLeft + c * colWidth + cellPadX, y + cellPadY, {
+          width: colWidth - cellPadX * 2,
+          height: height - cellPadY * 2,
+          ellipsis: false,
+        });
+      }
+      // vertical column separators
+      doc.strokeColor('#dddddd').lineWidth(0.5);
+      for (let c = 0; c <= colCount; c++) {
+        const x = marginLeft + c * colWidth;
+        doc.moveTo(x, y).lineTo(x, y + height).stroke();
+      }
+      // top and bottom
+      doc.moveTo(marginLeft, y).lineTo(marginLeft + tableWidth, y).stroke();
+      doc.moveTo(marginLeft, y + height).lineTo(marginLeft + tableWidth, y + height).stroke();
+    };
+
+    const ensureRoom = (neededH: number) => {
+      const bottom = doc.page.height - (doc.page.margins?.bottom ?? 50);
+      if (doc.y + neededH > bottom) doc.addPage();
+    };
+
+    // header
+    const headerH = measureRowHeight(headers, 'Helvetica-Bold', 10);
+    ensureRoom(headerH);
+    drawRow(headers, doc.y, headerH, true, '#f3f4f6');
+    doc.y = doc.y + headerH;
+
+    // rows
+    for (const row of rows) {
+      const h = measureRowHeight(row, 'Helvetica', 10);
+      ensureRoom(h);
+      drawRow(row, doc.y, h, false);
+      doc.y = doc.y + h;
+    }
+
+    doc.moveDown(0.4);
+    doc.strokeColor('#000000').lineWidth(1); // reset stroke
+    // CRITICAL: reset the text cursor x to the left margin.
+    // drawRow positions text at marginLeft + colOffset; without this reset,
+    // the next doc.text(...) call inherits that column x and renders from
+    // the middle of the page.
+    doc.x = marginLeft;
+  }
+
+  /**
+   * Render a fenced code block. For `mermaid`, a placeholder note is emitted
+   * (the diagram cannot be rendered server-side without a headless browser);
+   * otherwise the block is rendered in a monospace font with a gray background.
+   */
+  private static renderPdfCodeBlock(
+    doc: PDFKit.PDFDocument,
+    lang: string,
+    body: string,
+  ): void {
+    if (lang.toLowerCase() === 'mermaid') {
+      doc.moveDown(0.2);
+      doc.fontSize(10).font('Helvetica-Oblique').fillColor('#666666')
+        .text('[Diagram — rendered version available in the app]');
+      doc.fillColor('#000000');
+      doc.moveDown(0.3);
+      return;
+    }
+
+    const marginLeft = (doc.page.margins?.left ?? 50);
+    const marginRight = (doc.page.margins?.right ?? 50);
+    const blockWidth = doc.page.width - marginLeft - marginRight;
+    const padX = 6;
+    const padY = 4;
+
+    doc.font('Courier').fontSize(9).fillColor('#111111');
+    const textH = doc.heightOfString(body, { width: blockWidth - padX * 2 });
+
+    const bottom = doc.page.height - (doc.page.margins?.bottom ?? 50);
+    if (doc.y + textH + padY * 2 + 6 > bottom) doc.addPage();
+
+    doc.save();
+    doc.rect(marginLeft, doc.y, blockWidth, textH + padY * 2).fill('#f5f5f5');
+    doc.restore();
+
+    doc.font('Courier').fontSize(9).fillColor('#111111')
+      .text(body, marginLeft + padX, doc.y + padY, { width: blockWidth - padX * 2 });
+
+    doc.y = doc.y + padY;
+    doc.fillColor('#000000');
+    doc.moveDown(0.5);
+    // Reset text cursor x so the next paragraph starts at the left margin.
+    doc.x = marginLeft;
+  }
+
+  /**
+   * Export content to PDF format. Block-aware: renders GFM tables as real
+   * tables, fenced code blocks as code (or as a placeholder for mermaid),
+   * and strips whiteboard <artifact/> placeholders.
    */
   static async exportToPdf(content: string, title: string = 'CA GPT Output'): Promise<Buffer> {
+    const cleaned = this.stripArtifactTags(content);
+
     return new Promise((resolve, reject) => {
       const doc = new PDFDocument({ margin: 50 });
       const chunks: Buffer[] = [];
@@ -313,12 +580,36 @@ export class DocumentExporter {
       doc.fontSize(20).font('Helvetica-Bold').text(this.stripMarkdown(title), { align: 'left' });
       doc.moveDown();
 
-      // Process content
-      const lines = content.split('\n');
-      for (const line of lines) {
+      const lines = cleaned.split('\n');
+      let i = 0;
+      while (i < lines.length) {
+        const line = lines[i];
         const trimmed = line.trim();
-        
-        // Handle headers
+
+        // --- Fenced code block ---
+        const fenceMatch = /^```(\w*)\s*$/.exec(trimmed);
+        if (fenceMatch) {
+          const lang = fenceMatch[1] || '';
+          const bodyLines: string[] = [];
+          i++;
+          while (i < lines.length && !/^```\s*$/.test(lines[i].trim())) {
+            bodyLines.push(lines[i]);
+            i++;
+          }
+          if (i < lines.length) i++; // skip closing fence
+          this.renderPdfCodeBlock(doc, lang, bodyLines.join('\n'));
+          continue;
+        }
+
+        // --- GFM table block ---
+        const table = this.parseTableBlock(lines, i);
+        if (table) {
+          this.renderPdfTable(doc, table.headers, table.rows);
+          i = table.end;
+          continue;
+        }
+
+        // --- Headings ---
         if (trimmed.startsWith('# ')) {
           doc.moveDown(0.5);
           doc.fontSize(18).font('Helvetica-Bold').text(this.stripMarkdown(trimmed.replace(/^#\s+/, '')));
@@ -336,31 +627,27 @@ export class DocumentExporter {
           doc.fontSize(12).font('Helvetica-Bold').text(this.stripMarkdown(trimmed.replace(/^####\s+/, '')));
           doc.moveDown(0.1);
         } else if (trimmed.startsWith('- ') || trimmed.startsWith('* ') || trimmed.startsWith('+ ')) {
-          // Bullet points
           const bulletText = this.stripMarkdown(trimmed.replace(/^[-*+]\s+/, ''));
           doc.fontSize(11).font('Helvetica').text('• ' + bulletText, { indent: 20 });
         } else if (/^\d+\.\s+/.test(trimmed)) {
-          // Numbered list
           const listText = this.stripMarkdown(trimmed);
           doc.fontSize(11).font('Helvetica').text(listText, { indent: 20 });
         } else if (trimmed.startsWith('> ')) {
-          // Blockquote
           const quoteText = this.stripMarkdown(trimmed.replace(/^>\s+/, ''));
           doc.fontSize(11).font('Helvetica-Oblique').fillColor('#666666').text(quoteText, { indent: 30 });
           doc.fillColor('#000000');
         } else if (trimmed === '---' || trimmed === '***' || trimmed === '___') {
-          // Horizontal rule
           doc.moveDown(0.3);
           doc.moveTo(50, doc.y).lineTo(doc.page.width - 50, doc.y).stroke();
           doc.moveDown(0.3);
         } else if (trimmed) {
-          // Regular text with inline formatting
           const cleanText = this.stripMarkdown(trimmed);
           doc.fontSize(11).font('Helvetica').text(cleanText, { align: 'left' });
         } else {
-          // Empty line
           doc.moveDown(0.5);
         }
+
+        i++;
       }
 
       doc.end();
@@ -368,11 +655,31 @@ export class DocumentExporter {
   }
 
   /**
+   * Replace fenced code / mermaid blocks with a single-line placeholder so the
+   * raw source doesn't leak into slides/spreadsheets. Also strips GFM table
+   * separator rows (the "|---|---|" dividers) that look like line noise outside
+   * a table-aware renderer. Table cell rows are left intact so they still carry
+   * information as pipe-delimited lines.
+   */
+  private static flattenContentForLinearExport(content: string): string {
+    // Replace fenced code blocks
+    const withoutFences = content.replace(/```(\w*)\s*\n[\s\S]*?\n```/g, (_m, lang) => {
+      if ((lang || '').toLowerCase() === 'mermaid') {
+        return '[Diagram — rendered version available in the app]';
+      }
+      return '[Code block — see the app for syntax-highlighted version]';
+    });
+    // Strip GFM separator rows (they're just noise outside a real table renderer)
+    return withoutFences.replace(/^\s*\|\s*:?-+:?\s*(\|\s*:?-+:?\s*)+\|\s*$/gm, '');
+  }
+
+  /**
    * Export content to PowerPoint format with markdown cleaning
    */
   static async exportToPptx(content: string, title: string = 'CA GPT Output'): Promise<Buffer> {
+    const preprocessed = this.flattenContentForLinearExport(content);
     const pptx = new PptxGenJS();
-    
+
     // Title slide
     const titleSlide = pptx.addSlide();
     titleSlide.addText(this.stripMarkdown(title), {
@@ -399,10 +706,10 @@ export class DocumentExporter {
     const sections: { heading: string; content: string[] }[] = [];
     let currentSection: { heading: string; content: string[] } | null = null;
 
-    const lines = content.split('\n');
+    const lines = preprocessed.split('\n');
     for (const line of lines) {
       const trimmed = line.trim();
-      
+
       if (trimmed.startsWith('# ') || trimmed.startsWith('## ')) {
         if (currentSection) {
           sections.push(currentSection);
@@ -572,14 +879,15 @@ export class DocumentExporter {
    * Export content to Excel format with proper formulas and formatting
    */
   static async exportToExcel(content: string, title: string = 'CA GPT Output'): Promise<Buffer> {
+    const preprocessed = this.flattenContentForLinearExport(content);
     const workbook = new ExcelJS.Workbook();
     workbook.creator = 'CA GPT Agent';
     workbook.created = new Date();
-    
+
     const worksheet = workbook.addWorksheet('Output');
 
     // Process content and identify tables vs text
-    const lines = content.split('\n');
+    const lines = preprocessed.split('\n');
     let currentRow = 1;
     let inTable = false;
     let tableLines: string[] = [];

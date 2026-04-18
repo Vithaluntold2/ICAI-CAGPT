@@ -89,9 +89,21 @@ interface ColorTheme {
 
 const colorThemes: ColorTheme[] = [
   {
+    // Branded, readable default. White canvas, brand-blue accents, crisp contrast
+    // on every node type. Step cells use a soft slate-blue instead of washed-out
+    // pastels so the dark body text is unambiguously legible.
+    name: 'CA GPT Classic',
+    start: 'linear-gradient(135deg, #1e40af 0%, #2563eb 100%)',       // deep brand blue
+    step: 'linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%)',        // slate-50 → slate-200
+    decision: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',    // amber for decisions
+    end: 'linear-gradient(135deg, #059669 0%, #047857 100%)',         // green for completion
+    edge: '#2563eb',
+    background: '#f8fafc'
+  },
+  {
     name: 'Midnight Professional',
     start: 'linear-gradient(135deg, #3C96EE 0%, #764ba2 100%)',
-    step: 'linear-gradient(135deg, #e0e7ff 0%, #cffafe 100%)',
+    step: 'linear-gradient(135deg, #1e293b 0%, #334155 100%)',         // dark slate so white text reads
     decision: 'linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%)',
     end: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
     edge: '#3C96EE',
@@ -153,14 +165,16 @@ const colorThemes: ColorTheme[] = [
   }
 ];
 
-// Dynamic node dimensions based on compact mode
+// Dynamic node dimensions based on compact mode. Slightly more generous so
+// long labels like "Supplies to unregistered persons" can wrap to two or three
+// lines rather than ellipsis-truncating to a single line.
 const getNodeDimensions = (compact: boolean, nodeCount: number) => {
   if (compact || nodeCount > 30) {
-    return { width: 180, height: 60 };
+    return { width: 220, height: 72 };
   } else if (nodeCount > 20) {
-    return { width: 220, height: 80 };
+    return { width: 260, height: 110 };
   }
-  return { width: 280, height: 100 };
+  return { width: 320, height: 130 };
 };
 
 // Default dimensions for layout calculations
@@ -301,15 +315,33 @@ const getNodeStyle = (type: string, theme: ColorTheme) => {
       };
     default:
       backgroundColor = theme.step;
+      // Step nodes often use pastel / light gradients. Pick text color by
+      // sampling the first hex in the gradient: if the luminance is high
+      // (light background) → dark text; else → white text with shadow.
+      const firstHex = backgroundColor.match(/#[0-9a-fA-F]{6}/)?.[0] ?? '#e0e7ff';
+      const isLight = hexLuminance(firstHex) > 0.55;
       return {
         ...baseStyle,
         ...hoverTransform,
         background: backgroundColor,
-        color: '#1e293b',
-        textShadow: 'none',
+        color: isLight ? '#0f172a' : '#ffffff',
+        textShadow: isLight ? 'none' : '0 2px 8px rgba(0,0,0,0.3)',
+        border: isLight ? '1px solid rgba(15,23,42,0.08)' : 'none',
       };
   }
 };
+
+// Relative luminance (WCAG) of a #RRGGBB hex; 0 = black, 1 = white.
+function hexLuminance(hex: string): number {
+  const m = /^#([0-9a-fA-F]{6})$/.exec(hex);
+  if (!m) return 0.5;
+  const n = parseInt(m[1], 16);
+  const r = ((n >> 16) & 255) / 255;
+  const g = ((n >> 8) & 255) / 255;
+  const b = (n & 255) / 255;
+  const lin = (c: number) => (c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
+  return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+}
 
 function WorkflowRendererInner({ nodes, edges, title, layout = 'dagre-tb' }: WorkflowRendererProps) {
   const [selectedTheme, setSelectedTheme] = useState<ColorTheme>(colorThemes[0]);
@@ -348,24 +380,64 @@ function WorkflowRendererInner({ nodes, edges, title, layout = 'dagre-tb' }: Wor
 
   const exportAsImage = useCallback(async (format: 'png' | 'svg') => {
     if (!reactFlowInstance) return;
-    
-    const { getNodes } = reactFlowInstance;
-    const nodesBounds = getNodes().reduce((bounds, node) => {
-      return {
-        minX: Math.min(bounds.minX, node.position.x),
-        minY: Math.min(bounds.minY, node.position.y),
-        maxX: Math.max(bounds.maxX, node.position.x + (node.width || nodeWidth)),
-        maxY: Math.max(bounds.maxY, node.position.y + (node.height || nodeHeight)),
-      };
-    }, { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity });
 
-    const width = nodesBounds.maxX - nodesBounds.minX + 100;
-    const height = nodesBounds.maxY - nodesBounds.minY + 100;
+    // Find the actual rendered viewport. React Flow renders the node graph inside
+    // `.react-flow__viewport`; capturing that element gives us the diagram without
+    // the surrounding toolbars and panels.
+    const viewport = document.querySelector<HTMLElement>('.react-flow__viewport');
+    const fallback = document.querySelector<HTMLElement>('.react-flow');
+    const target = viewport ?? fallback;
+    if (!target) {
+      toast({
+        title: "Export failed",
+        description: "Could not locate the workflow canvas.",
+        variant: "destructive",
+      });
+      return;
+    }
 
     toast({
       title: "Exporting workflow",
-      description: `Generating ${format.toUpperCase()} image...`
+      description: `Generating ${format.toUpperCase()} image…`,
     });
+
+    try {
+      // Fit the diagram into view so the capture includes every node.
+      reactFlowInstance.fitView?.({ padding: 0.1, duration: 0 });
+      // Give React Flow one frame to settle the transform before we snapshot.
+      await new Promise((r) => requestAnimationFrame(() => r(null)));
+
+      const htmlToImage = await import('html-to-image');
+      const options = {
+        pixelRatio: format === 'png' ? 2 : 1,
+        backgroundColor: '#ffffff',
+        cacheBust: true,
+        // html-to-image tries to inline cross-origin images; swallow failures so the
+        // main diagram still renders.
+        filter: (node: HTMLElement) => !node.classList?.contains('react-flow__minimap'),
+      };
+
+      const dataUrl = format === 'png'
+        ? await htmlToImage.toPng(target, options)
+        : await htmlToImage.toSvg(target, options);
+
+      const a = document.createElement('a');
+      a.href = dataUrl;
+      a.download = `workflow-${Date.now()}.${format}`;
+      a.click();
+
+      toast({
+        title: "Export complete",
+        description: `Workflow saved as ${format.toUpperCase()}.`,
+      });
+    } catch (err: any) {
+      console.error('[WorkflowRenderer] export failed', err);
+      toast({
+        title: "Export failed",
+        description: err?.message ?? String(err),
+        variant: "destructive",
+      });
+    }
   }, [reactFlowInstance, toast]);
 
   const playAnimation = useCallback(() => {
@@ -418,35 +490,99 @@ function WorkflowRendererInner({ nodes, edges, title, layout = 'dagre-tb' }: Wor
       const isHighlighted = isAnimating && animationProgress >= (idx / nodes.length) && animationProgress < ((idx + 1) / nodes.length + 0.1);
       const matchesSearch = searchTerm && node.label.toLowerCase().includes(searchTerm.toLowerCase());
       
+      // Build a native tooltip with full label + description so nothing is ever
+      // unreachable, even when CSS line-clamp hides overflow.
+      const fullTooltip = [
+        node.label,
+        node.description ? `\n\n${node.description}` : '',
+        node.substeps && node.substeps.length > 0
+          ? `\n\nSteps:\n${node.substeps.map((s, i) => `  ${i + 1}. ${s}`).join('\n')}`
+          : '',
+      ].join('');
+
       return {
         id: node.id,
         type: 'default',
-        data: { 
+        data: {
           label: compactMode ? (
-            // Compact mode: just show the title, truncated
-            <div className="flex items-center justify-center h-full" style={{ zIndex: 10 }}>
-              <div className={`font-semibold text-xs leading-tight text-center ${isHighlighted ? 'animate-pulse' : ''} ${matchesSearch ? 'underline' : ''}`}
-                   style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: dims.width - 20 }}>
-                {node.label.length > 35 ? node.label.substring(0, 32) + '...' : node.label}
+            // Compact mode: wrap to max 2 lines, then ellipsis. Full text on hover.
+            <div
+              className="flex items-center justify-center h-full w-full"
+              style={{ zIndex: 10 }}
+              title={fullTooltip}
+            >
+              <div
+                className={`font-semibold text-xs leading-snug text-center px-1 ${isHighlighted ? 'animate-pulse' : ''} ${matchesSearch ? 'underline' : ''}`}
+                style={{
+                  display: '-webkit-box',
+                  WebkitBoxOrient: 'vertical',
+                  WebkitLineClamp: 2,
+                  overflow: 'hidden',
+                  overflowWrap: 'anywhere',
+                  wordBreak: 'break-word',
+                  maxWidth: dims.width - 12,
+                }}
+              >
+                {node.label}
               </div>
             </div>
           ) : (
-            // Detailed mode: full content
-            <div className="flex flex-col gap-2" style={{ lineHeight: '1.5', zIndex: 10 }}>
-              <div className={`font-bold text-base leading-tight ${isHighlighted ? 'animate-pulse' : ''} ${matchesSearch ? 'underline' : ''}`}>
+            // Detailed mode: wrap freely; let text span multiple lines. Clamp the
+            // label at 3 lines, description at 2, so the node stays predictable
+            // but no text is hard-truncated by JavaScript.
+            <div
+              className="flex flex-col gap-1.5 w-full"
+              style={{ lineHeight: '1.35', zIndex: 10 }}
+              title={fullTooltip}
+            >
+              <div
+                className={`font-bold text-sm ${isHighlighted ? 'animate-pulse' : ''} ${matchesSearch ? 'underline' : ''}`}
+                style={{
+                  display: '-webkit-box',
+                  WebkitBoxOrient: 'vertical',
+                  WebkitLineClamp: 3,
+                  overflow: 'hidden',
+                  overflowWrap: 'anywhere',
+                  wordBreak: 'break-word',
+                }}
+              >
                 {node.label}
               </div>
               {node.description && (
-                <div className="text-xs opacity-95 leading-snug">{node.description}</div>
+                <div
+                  className="text-xs opacity-90 leading-snug"
+                  style={{
+                    display: '-webkit-box',
+                    WebkitBoxOrient: 'vertical',
+                    WebkitLineClamp: 2,
+                    overflow: 'hidden',
+                    overflowWrap: 'anywhere',
+                  }}
+                >
+                  {node.description}
+                </div>
               )}
               {node.substeps && node.substeps.length > 0 && (
-                <div className="text-xs text-left mt-2 space-y-1 leading-tight">
-                  {node.substeps.map((step, i) => (
+                <div className="text-[11px] text-left space-y-0.5 leading-tight opacity-95">
+                  {node.substeps.slice(0, 3).map((step, i) => (
                     <div key={i} className="flex items-start gap-1.5">
                       <span className="mt-0.5">•</span>
-                      <span>{step}</span>
+                      <span
+                        style={{
+                          display: '-webkit-box',
+                          WebkitBoxOrient: 'vertical',
+                          WebkitLineClamp: 1,
+                          overflow: 'hidden',
+                          overflowWrap: 'anywhere',
+                        }}
+                      >
+                        {step}
+                      </span>
                     </div>
                   ))}
+                  {node.substeps.length > 3 && (
+                    <div className="italic opacity-70">+{node.substeps.length - 3} more…</div>
+                  )}
                 </div>
               )}
             </div>

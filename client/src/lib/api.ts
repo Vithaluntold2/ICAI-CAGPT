@@ -114,15 +114,19 @@ export const conversationApi = {
 export const chatApi = {
   // SSE Streaming version
   streamMessage: async (
-    data: { 
-      conversationId?: string; 
-      query: string; 
+    data: {
+      conversationId?: string;
+      query: string;
       profileId?: string | null;
       chatMode?: string;
       documentAttachment?: {
         data: string;
         type: string;
         filename: string;
+      };
+      selection?: {
+        artifactIds: string[];
+        highlightedText?: string;
       };
     },
     callbacks: {
@@ -144,6 +148,7 @@ export const chatApi = {
         profileId: data.profileId,
         chatMode: data.chatMode,
         documentAttachment: data.documentAttachment,
+        selection: data.selection,
       }),
       credentials: 'include',
     });

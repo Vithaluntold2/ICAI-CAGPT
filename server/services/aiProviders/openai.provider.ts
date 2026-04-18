@@ -14,6 +14,7 @@ import {
   CostEstimate,
   ProviderError,
 } from './types';
+import { parseOpenAIToolCall } from '../tools/adapters/openai';
 
 export class OpenAIProvider extends AIProvider {
   private client: OpenAI;
@@ -158,6 +159,14 @@ export class OpenAIProvider extends AIProvider {
         );
       }
 
+      // Normalize tool calls into the shared ParsedToolCall shape so the
+      // orchestrator-level tool loop can execute them uniformly across providers.
+      const toolCalls = parseOpenAIToolCall(choice.message as any);
+      const hasToolCalls = toolCalls.length > 0;
+      const finishReason: CompletionResponse['finishReason'] = hasToolCalls
+        ? 'tool_calls'
+        : this.mapFinishReason(choice.finish_reason);
+
       return {
         content: choice.message.content || '',
         tokensUsed: {
@@ -167,9 +176,9 @@ export class OpenAIProvider extends AIProvider {
         },
         model,
         provider: this.getName(),
-        finishReason: this.mapFinishReason(choice.finish_reason),
+        finishReason,
         metadata: {
-          toolCalls: choice.message.tool_calls,
+          toolCalls: hasToolCalls ? toolCalls : undefined,
           extractedFromPdf: request.attachment?.mimeType === 'application/pdf',
         },
       };

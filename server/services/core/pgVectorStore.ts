@@ -184,19 +184,28 @@ export class PgVectorStore {
         expiryDate: vectorEmbeddings.expiryDate,
         tags: vectorEmbeddings.tags,
         metadata: vectorEmbeddings.metadata,
-        // Cosine similarity: 1 - cosine distance
-        similarity: sql<number>`1 - (${vectorEmbeddings.embedding} <=> ${embeddingVector}::vector)`,
+        // Cosine similarity: 1 - cosine distance.
+        // vector_embeddings.embedding is a TEXT column holding a JSON array like
+        // "[0.1, 0.2, ...]"; cast to vector on both sides so the <=> operator resolves.
+        similarity: sql<number>`1 - (${vectorEmbeddings.embedding}::vector <=> ${embeddingVector}::vector)`,
       })
       .from(vectorEmbeddings)
       .where(conditions.length > 0 ? and(...conditions) : undefined)
-      .orderBy(sql`${vectorEmbeddings.embedding} <=> ${embeddingVector}::vector`)
+      .orderBy(sql`${vectorEmbeddings.embedding}::vector <=> ${embeddingVector}::vector`)
       .limit(limit * 2); // Fetch extra to filter by similarity
     } catch (err: any) {
-      // pgvector extension isn't installed on this Postgres instance.
-      // Log once, disable further vector search for the remainder of the process.
-      if (err?.code === '42704' && /type "vector" does not exist/i.test(String(err?.message || ''))) {
+      // Known "environment isn't ready" errors — short-circuit for the rest of the
+      // process so we don't spam logs on every chat turn. Two variants seen:
+      //   42704 — pgvector extension not installed at all
+      //   42883 — operator mismatch (e.g. text <=> vector without a cast)
+      const msg = String(err?.message || '');
+      const code = err?.code;
+      const pgvectorMissing =
+        (code === '42704' && /type "vector" does not exist/i.test(msg)) ||
+        (code === '42883' && /operator does not exist: text <=> vector/i.test(msg));
+      if (pgvectorMissing) {
         if (!PgVectorStore.pgvectorUnavailable) {
-          console.warn('[PgVectorStore] pgvector extension not installed on the database — semantic search disabled. Install pgvector (or use pgvector/pgvector:pg16 image) to enable RAG retrieval.');
+          console.warn(`[PgVectorStore] Vector search disabled: ${msg}. Fix: either keep pgvector installed + ensure casts match, or ignore (RAG simply returns empty).`);
         }
         PgVectorStore.pgvectorUnavailable = true;
         return [];

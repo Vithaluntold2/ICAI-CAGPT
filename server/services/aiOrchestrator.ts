@@ -46,6 +46,8 @@ import { listArtifactsByConversation } from './whiteboard/repository';
 import { placeNext, type LayoutState } from './whiteboard/autoLayout';
 import type { CreateArtifactInput } from './whiteboard/repository';
 import type { SelectionInput } from './whiteboard/selectionPreamble';
+import { formatManifest } from './whiteboard/manifest';
+import { buildSelectionPreamble } from './whiteboard/selectionPreamble';
 
 export type ResponseType = 'research' | 'analysis' | 'document' | 'calculation' | 'visualization' | 'export' | 'general';
 
@@ -575,7 +577,8 @@ export class AIOrchestrator {
       calculationResults,
       clarificationAnalysis,
       chatMode,
-      enhancedRouting
+      enhancedRouting,
+      options
     );
     
     // Step 5.1: Log AI cost to database (async, non-blocking)
@@ -1734,8 +1737,9 @@ export class AIOrchestrator {
     calculations?: any,
     clarificationAnalysis?: ClarificationAnalysis,
     chatMode?: string,
-    enhancedRouting?: EnhancedRoutingDecision | null
-  ): Promise<{ 
+    enhancedRouting?: EnhancedRoutingDecision | null,
+    options?: ProcessQueryOptions
+  ): Promise<{
     content: string; 
     tokensUsed: number; 
     providerUsed?: string; 
@@ -1769,6 +1773,23 @@ export class AIOrchestrator {
       return providerModelMap[providerName];
     };
     
+    // Whiteboard awareness (Phase 4.6): manifest + selection preamble
+    let whiteboardManifestBlock = "";
+    if (options?.conversationId) {
+      try {
+        const priorArtifacts = await listArtifactsByConversation(options.conversationId);
+        if (priorArtifacts.length > 0) {
+          whiteboardManifestBlock = formatManifest(priorArtifacts);
+        }
+      } catch (e) {
+        console.error("[whiteboard] manifest fetch failed; skipping:", e);
+      }
+    }
+    const selectionPreamble = buildSelectionPreamble(options?.selection);
+    const effectiveUserQuery = selectionPreamble
+      ? `${selectionPreamble}\n\n${userQuery}`
+      : userQuery;
+
     // NEW: Use intelligent prompt builder to avoid length limits (if classification available)
     let messages;
     if (classification) {
@@ -1780,24 +1801,32 @@ export class AIOrchestrator {
         chatMode,
         enhancedRouting
       );
-      
+
+      const systemPromptWithWhiteboard = whiteboardManifestBlock
+        ? `${prompts.systemPrompt}\n\n${whiteboardManifestBlock}`
+        : prompts.systemPrompt;
+
       // Build messages with tiered prompts
       messages = [
-        // Tier 1: Minimal system prompt
-        { role: 'system' as const, content: prompts.systemPrompt },
+        // Tier 1: Minimal system prompt (+ whiteboard manifest when present)
+        { role: 'system' as const, content: systemPromptWithWhiteboard },
         // Tier 2: Comprehensive instructions as first message
         { role: 'system' as const, content: prompts.instructionsMessage },
         // Conversation history
         ...history.map(msg => ({ role: msg.role as 'user' | 'assistant', content: msg.content })),
-        // Tier 3: User query + context suffix
-        { role: 'user' as const, content: userQuery + prompts.contextSuffix }
+        // Tier 3: User query (with selection preamble if present) + context suffix
+        { role: 'user' as const, content: effectiveUserQuery + prompts.contextSuffix }
       ];
     } else {
+      const enhancedContextWithWhiteboard = whiteboardManifestBlock
+        ? `${enhancedContext}\n\n${whiteboardManifestBlock}`
+        : enhancedContext;
+
       // Fallback to simple message structure
       messages = [
-        { role: 'system' as const, content: enhancedContext },
+        { role: 'system' as const, content: enhancedContextWithWhiteboard },
         ...history.map(msg => ({ role: msg.role as 'user' | 'assistant', content: msg.content })),
-        { role: 'user' as const, content: userQuery }
+        { role: 'user' as const, content: effectiveUserQuery }
       ];
     }
     

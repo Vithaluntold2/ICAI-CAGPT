@@ -4,6 +4,7 @@ dist
 server/public
 vite.config.ts.*
 *.tar.gz
+.superpowers/
 
 # Environment variables - ALL .env files except examples
 .env

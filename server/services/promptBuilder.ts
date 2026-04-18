@@ -51,7 +51,61 @@ export class PromptBuilder {
       `case escape the dollar sign as \\$ so it is not interpreted as a math delimiter ` +
       `(e.g., "$\\$10{,}000 \\times 0.095$").\n` +
       `- Tables use GFM pipe syntax with a header separator row (|---|---|). Every cell containing math must wrap ` +
-      `the math in $...$. The goal: a reader of the rendered markdown sees clean formulas, not escape characters.`;
+      `the math in $...$. The goal: a reader of the rendered markdown sees clean formulas, not escape characters.\n` +
+      `- Flowcharts, process diagrams, decision trees, state machines, sequence diagrams: ALWAYS emit a fenced ` +
+      '```mermaid' + ` block using valid mermaid syntax — NEVER use ASCII art with arrows like ↓, │, ├, └, ─, → ` +
+      `or indentation-based pseudo-diagrams. The chat renderer displays the mermaid block as a real rendered ` +
+      `diagram; ASCII art stays as unrendered text. Wrap node labels that contain parentheses, commas, colons, ` +
+      `or #/quotes in double quotes (e.g., A["Collect Documents (Form 16, AIS)"]). Use <br/> (not \\n) for line ` +
+      `breaks inside labels. Example for "give me a flowchart of X":\n` +
+      '  ```mermaid\n' +
+      `  flowchart TD\n` +
+      `    A[Start] --> B{"Does condition apply?"}\n` +
+      `    B -- Yes --> C["Action A"]\n` +
+      `    B -- No --> D["Action B"]\n` +
+      `    C --> E[End]\n` +
+      `    D --> E\n` +
+      '  ```';
+
+    // Live Excel engine — applies to every mode. The server runs an Excel-
+    // compatible formula engine on your output and inlines computed values,
+    // so you MUST produce computable formulas rather than refusing to compute.
+    systemPrompt +=
+      `\n\nLIVE CALCULATION ENGINE (applies in EVERY mode):\n` +
+      `An Excel-compatible engine runs on every response. It evaluates your formulas ` +
+      `and the user sees the computed numbers. You are NOT doing arithmetic yourself — ` +
+      `you are WRITING formulas the engine will execute. Do NOT refuse to compute; do NOT ` +
+      `write "Excel will do that" as if it's a different tool. The engine IS inside your response.\n\n` +
+      `• Single value (NPV, EMI, ratio, compound interest, etc.): write an inline formula with ` +
+      `all inputs inlined (no cell refs). Example: \`=FV(0.06, 5, 0, -10000)\` — the user will see ` +
+      `\`=FV(0.06, 5, 0, -10000)\` → **13,382.26** automatically.\n` +
+      `• Any multi-row / multi-column output (cashflow schedule, amortisation, scenario table, ` +
+      `DCF, sensitivity, comparison matrix): emit a \`\`\`sheet\`\`\` fenced block. Format:\n\n` +
+      '    ```sheet\n' +
+      '    title: <short title>\n' +
+      '    description: <1-line description>\n' +
+      '    ---\n' +
+      '    <CSV header row>\n' +
+      '    <CSV data rows, formulas start with = and use cell refs A1, B2:B4, etc.>\n' +
+      '    ```\n\n' +
+      `The engine evaluates every formula in the block and renders the computed sheet in the ` +
+      `right-side Output Panel with proper column headers, formulas column, and download. ` +
+      `Don't repeat the sheet's contents in prose — the panel IS the presentation.\n\n` +
+      `CRITICAL CELL-REFERENCE RULES inside sheet blocks:\n` +
+      `• Row 1 is ALWAYS the header row. The FIRST data row is therefore row 2.\n` +
+      `• If your first data row represents "Year 0" (initial investment / t=0), then Year 1 is row 3, ` +
+      `Year 2 is row 4, Year N is row N+2. Count deliberately — off-by-one errors here produce silently wrong results.\n` +
+      `• Before emitting a formula, re-read its cell refs out loud: "B3 = Revenue Year 1 = 1,200,000; ` +
+      `C3 = Operating Cost Year 1 = 400,000" — if the referenced cell holds the wrong concept, fix it.\n` +
+      `• For running totals (cumulative cashflow, payback, reconciliations) use a HELPER COLUMN with ` +
+      `simple additive formulas like \`=I2\` then \`=J2+I3\` then \`=J3+I4\`. Do NOT use LAMBDA, REDUCE, ` +
+      `SCAN, MAP, BYROW, MAKEARRAY — the engine does not support those. Plain SUM, IF, INDEX, MATCH, ` +
+      `VLOOKUP, XLOOKUP, NPV, IRR, PMT, FV, PV, SUMIFS, COUNTIFS all work.\n` +
+      `• For payback period with a cumulative column J: \`=MATCH(TRUE, J2:J7>=0, 0)\` (plus adjustment ` +
+      `for the offset) works and is portable.\n\n` +
+      `NEVER write: "I cannot calculate", "Excel will compute this", "you'll need to run this ` +
+      `in Excel", "the formula computes but I won't", or similar. The engine is always on. ` +
+      `Write the formula; the user sees the number.`;
 
     // Mode-specific persona locks.
     // In roundtable mode, the response is always presented as the output of a panel

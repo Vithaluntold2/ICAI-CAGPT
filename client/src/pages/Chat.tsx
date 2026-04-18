@@ -42,7 +42,9 @@ import remarkGfm from "remark-gfm";
 import rehypeKatex from "rehype-katex";
 import rehypeRaw from "rehype-raw";
 import { rehypeArtifactPlaceholder } from "@/components/chat/rehypeArtifactPlaceholder";
+import { normalizeMath } from "@/lib/mathNormalizer";
 import { ArtifactRenderer } from "@/components/chat/artifacts/ArtifactRenderer";
+import { FlowchartArtifact } from "@/components/chat/artifacts/FlowchartArtifact";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { 
   Table, 
@@ -1371,6 +1373,22 @@ export default function Chat() {
                                   remarkPlugins={[remarkMath, remarkGfm]}
                                   rehypePlugins={[rehypeRaw, rehypeArtifactPlaceholder, rehypeKatex]}
                                   components={{
+                                    // Render mermaid fenced blocks (```mermaid … ```) as actual
+                                    // diagrams via FlowchartArtifact instead of showing the raw
+                                    // code. Other languages fall through to the default <code>.
+                                    code: ({ className, children, ...props }: any) => {
+                                      if (typeof className === "string" && /language-mermaid/.test(className)) {
+                                        const source = Array.isArray(children)
+                                          ? children.join("")
+                                          : String(children ?? "");
+                                        return (
+                                          <div className="my-4 not-prose">
+                                            <FlowchartArtifact payload={{ source }} />
+                                          </div>
+                                        );
+                                      }
+                                      return <code className={className} {...props}>{children}</code>;
+                                    },
                                     "artifact-placeholder": ({ id }: any) => {
                                       const artifact = artifactsData?.byId?.[id];
                                       if (!artifact) {
@@ -1423,7 +1441,7 @@ export default function Chat() {
                                     ),
                                   } as any}
                                 >
-                                  {message.content}
+                                  {normalizeMath(message.content)}
                                 </ReactMarkdown>
                               ) : (
                                 <div className="space-y-2">

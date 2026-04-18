@@ -40,6 +40,9 @@ import ReactMarkdown from "react-markdown";
 import remarkMath from "remark-math";
 import remarkGfm from "remark-gfm";
 import rehypeKatex from "rehype-katex";
+import rehypeRaw from "rehype-raw";
+import { rehypeArtifactPlaceholder } from "@/components/chat/rehypeArtifactPlaceholder";
+import { ArtifactRenderer } from "@/components/chat/artifacts/ArtifactRenderer";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { 
   Table, 
@@ -1366,41 +1369,59 @@ export default function Chat() {
                               {message.content ? (
                                 <ReactMarkdown
                                   remarkPlugins={[remarkMath, remarkGfm]}
-                                  rehypePlugins={[rehypeKatex]}
+                                  rehypePlugins={[rehypeRaw, rehypeArtifactPlaceholder, rehypeKatex]}
                                   components={{
-                                    table: ({ children, ...props }) => (
+                                    "artifact-placeholder": ({ id }: any) => {
+                                      const artifact = artifactsData?.byId?.[id];
+                                      if (!artifact) {
+                                        return (
+                                          <div className="text-xs text-muted-foreground italic my-2">
+                                            [artifact {id} loading…]
+                                          </div>
+                                        );
+                                      }
+                                      return (
+                                        <div className="my-4 not-prose">
+                                          <ArtifactRenderer
+                                            artifact={artifact}
+                                            conversationId={activeConversation}
+                                          />
+                                        </div>
+                                      );
+                                    },
+                                    table: ({ children, ...props }: any) => (
                                       <div className="my-4 w-full overflow-auto">
                                         <Table {...props}>
                                           {children}
                                         </Table>
                                       </div>
                                     ),
-                                    thead: ({ children, ...props }) => (
+                                    thead: ({ children, ...props }: any) => (
                                       <TableHeader {...props}>
                                         {children}
                                       </TableHeader>
                                     ),
-                                    tbody: ({ children, ...props }) => (
+                                    tbody: ({ children, ...props }: any) => (
                                       <TableBody {...props}>
                                         {children}
                                       </TableBody>
                                     ),
-                                    tr: ({ children, ...props }) => (
+                                    tr: ({ children, ...props }: any) => (
                                       <TableRow {...props}>
                                         {children}
                                       </TableRow>
                                     ),
-                                    th: ({ children, ...props }) => (
+                                    th: ({ children, ...props }: any) => (
                                       <TableHead {...props}>
                                         {children}
                                       </TableHead>
                                     ),
-                                    td: ({ children, ...props }) => (
+                                    td: ({ children, ...props }: any) => (
                                       <TableCell {...props}>
                                         {children}
                                       </TableCell>
                                     ),
-                                  }}
+                                  } as any}
                                 >
                                   {message.content}
                                 </ReactMarkdown>

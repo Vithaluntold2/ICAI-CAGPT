@@ -36,7 +36,7 @@ import { getClientFeatures, isFeatureEnabled } from "./config/featureFlags";
 import { documentIngestion } from "./services/core/documentIngestion";
 import { continuousLearning } from "./services/core/continuousLearning";
 import { voiceService } from "./services/voice/voiceService";
-import { listArtifactsByConversation } from "./services/whiteboard/repository";
+import { listArtifactsByConversation, createArtifact } from "./services/whiteboard/repository";
 import { buildBoardXlsxBuffer } from "./services/whiteboard/exportXlsx";
 import { buildBoardPptxBuffer } from "./services/whiteboard/exportPptx";
 import { buildBoardPdfBuffer } from "./services/whiteboard/exportPdf";
@@ -1276,6 +1276,10 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
         }
       }
       
+      // Generate the assistant message id up-front so the orchestrator can
+      // anchor any whiteboard artifacts to this exact message row (Phase 2.4).
+      const assistantMessageId = crypto.randomUUID();
+
       // Process query through AI orchestrator with chat mode
       const result = await aiOrchestrator.processQuery(
         message,
@@ -1290,13 +1294,19 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
             documentType: attachmentMetadata.documentType
           },
           chatMode: chatMode || 'standard',
-          agentWorkflowResult // Pass agent results to orchestrator
+          agentWorkflowResult, // Pass agent results to orchestrator
+          conversationId: conversation.id,
+          messageId: assistantMessageId,
+          selection: (req.body as any)?.selection,
         } : {
           chatMode: chatMode || 'standard',
-          agentWorkflowResult
+          agentWorkflowResult,
+          conversationId: conversation.id,
+          messageId: assistantMessageId,
+          selection: (req.body as any)?.selection,
         }
       );
-      
+
       // Prepare Excel data if generated
       let excelData: { filename: string; buffer: string } | undefined;
       if (result.excelWorkbook) {
@@ -1306,12 +1316,18 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
         };
         console.log(`[Excel] Generated workbook: ${excelData.filename} (${result.excelWorkbook.buffer.length} bytes)`);
       }
-      
+
+      // Whiteboard artifact wiring (Phase 2.4): prefer the pipeline-updated
+      // content (with <artifact /> placeholders) and capture ids for the row.
+      const assistantContent = result.whiteboardUpdatedContent ?? result.response;
+      const artifactIds = result.whiteboardArtifacts?.map(a => a.id) ?? [];
+
       // Save assistant message with full metadata
       const assistantMessage = await storage.createMessage({
+        id: assistantMessageId,
         conversationId: conversation.id,
         role: 'assistant',
-        content: result.response,
+        content: assistantContent,
         modelUsed: result.modelUsed,
         routingDecision: JSON.parse(JSON.stringify(result.routingDecision)),
         calculationResults: result.calculationResults,
@@ -1325,8 +1341,18 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
           hasExcel: !!excelData,
           // Include spreadsheet preview data with formulas for UI display
           spreadsheetData: result.spreadsheetData
-        }))
+        })),
+        artifactIds,
       });
+
+      // Persist any extracted whiteboard artifacts (best-effort; never fatal)
+      for (const art of result.whiteboardArtifacts ?? []) {
+        try {
+          await createArtifact(art);
+        } catch (e) {
+          console.error('[whiteboard] failed to persist artifact:', art.id, e);
+        }
+      }
       
       // Create routing log
       await storage.createRoutingLog({
@@ -4664,6 +4690,10 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
         sendThinking('analyzing', 'Interpreting your message...');
         await new Promise(resolve => setTimeout(resolve, 100));
         
+        // Generate the assistant message id up-front so the orchestrator can
+        // anchor any whiteboard artifacts to this exact message row (Phase 2.4).
+        const assistantMessageId = crypto.randomUUID();
+
         // Check cache first for non-file queries
         let fullResponse = '';
         let result: any;
@@ -4802,10 +4832,12 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
             conversationHistory,
             userTier,
             userId, // For AI cost tracking
-            { 
+            {
               chatMode,
               agentWorkflowResult,
               conversationId: conversation.id,
+              messageId: assistantMessageId,
+              selection: (req.body as any)?.selection,
               attachment: attachmentBuffer && attachmentMetadata ? {
                 buffer: attachmentBuffer,
                 filename: attachmentMetadata.filename,
@@ -4932,17 +4964,33 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
           spreadsheetData: metadata.spreadsheetData ? '[SPREADSHEET DATA]' : undefined
         }, null, 2));
 
+        // Whiteboard artifact wiring (Phase 2.4): prefer the pipeline-updated
+        // content (with <artifact /> placeholders) and capture ids for the row.
+        const assistantContent = result.whiteboardUpdatedContent ?? fullResponse;
+        const artifactIds = result.whiteboardArtifacts?.map((a: { id: string }) => a.id) ?? [];
+
         // Save assistant message with metadata
         const assistantMessage = await storage.createMessage({
+          id: assistantMessageId,
           conversationId: conversation.id,
           role: 'assistant',
-          content: fullResponse,
+          content: assistantContent,
           modelUsed: result.modelUsed,
           routingDecision: result.routingDecision,
           calculationResults: result.calculationResults,
           tokensUsed: result.tokensUsed,
-          metadata: Object.keys(metadata).length > 0 ? metadata : null
+          metadata: Object.keys(metadata).length > 0 ? metadata : null,
+          artifactIds,
         });
+
+        // Persist any extracted whiteboard artifacts (best-effort; never fatal)
+        for (const art of result.whiteboardArtifacts ?? []) {
+          try {
+            await createArtifact(art);
+          } catch (e) {
+            console.error('[whiteboard] failed to persist artifact:', art.id, e);
+          }
+        }
 
         // Process assistant message analytics (non-blocking)
         AnalyticsProcessor.processMessage({

@@ -34,11 +34,18 @@ import { normalizeChatMode, isCotMode } from './chatModeNormalizer';
 import { ragPipeline, type RAGResult } from './core/ragPipeline';
 import { continuousLearning } from './core/continuousLearning';
 import { conversationMemory } from './conversationMemory';
-import type { 
-  EnhancedRoutingDecision, 
+import type {
+  EnhancedRoutingDecision,
   ReasoningMetadata,
-  CognitiveMonitorResult 
+  CognitiveMonitorResult
 } from '../../shared/types/reasoning';
+// Whiteboard integration (Phase 2.4)
+import { randomUUID } from 'crypto';
+import { buildArtifactsForMessage } from './whiteboard/extractPipeline';
+import { listArtifactsByConversation } from './whiteboard/repository';
+import { placeNext, type LayoutState } from './whiteboard/autoLayout';
+import type { CreateArtifactInput } from './whiteboard/repository';
+import type { SelectionInput } from './whiteboard/selectionPreamble';
 
 export type ResponseType = 'research' | 'analysis' | 'document' | 'calculation' | 'visualization' | 'export' | 'general';
 
@@ -81,6 +88,9 @@ export interface OrchestrationResult {
   };
   // Spreadsheet preview data for UI display (includes formulas as text)
   spreadsheetData?: SpreadsheetPreviewData;
+  // Whiteboard integration (Phase 2.4)
+  whiteboardArtifacts?: Array<CreateArtifactInput & { id: string }>;
+  whiteboardUpdatedContent?: string;
 }
 
 export interface AgentWorkflowResult {
@@ -102,6 +112,9 @@ export interface ProcessQueryOptions {
   chatMode?: string;
   agentWorkflowResult?: AgentWorkflowResult;
   conversationId?: string;
+  // Whiteboard integration (Phase 2.4)
+  messageId?: string;
+  selection?: SelectionInput;
 }
 
 export class AIOrchestrator {
@@ -912,11 +925,49 @@ export class AIOrchestrator {
       excelBuffer: excelWorkbook?.buffer ? Buffer.from(excelWorkbook.buffer).toString('base64') : undefined,
       excelFilename: excelWorkbook ? `ICAI CAGPT_Calculations_${Date.now()}.xlsx` : undefined,
       spreadsheetData: spreadsheetPreviewData,
-      contentType: chatMode === 'checklist' ? 'checklist' 
+      contentType: chatMode === 'checklist' ? 'checklist'
         : chatMode === 'workflow' ? 'workflow'
         : chatMode === 'calculation' ? 'calculation'
         : 'markdown'
     };
+
+    // PHASE 2.4: Whiteboard artifact extraction
+    // Runs only when both conversationId and messageId are provided so we can
+    // correctly scope and seed the auto-layout. Failures never break the
+    // response — extraction is a best-effort enhancement.
+    let whiteboardUpdatedContent: string | undefined;
+    let whiteboardArtifactsOut: OrchestrationResult['whiteboardArtifacts'];
+
+    if (options?.conversationId && options?.messageId) {
+      try {
+        // Seed layout state from prior artifacts so appends are stable across turns
+        const prior = await listArtifactsByConversation(options.conversationId);
+        let seed: LayoutState = { cursorX: 0, rowTop: 0, rowHeight: 0 };
+        for (const a of prior) {
+          const { state } = placeNext(seed, { width: a.width, height: a.height });
+          seed = state;
+        }
+
+        const built = buildArtifactsForMessage({
+          content: mainResponse,
+          conversationId: options.conversationId,
+          messageId: options.messageId,
+          precomputed: {
+            visualization: visualization as any,
+            spreadsheet: spreadsheetPreviewData as any,
+          },
+          layoutState: seed,
+          idFactory: () => `art_${randomUUID().replace(/-/g, '').slice(0, 12)}`,
+        });
+
+        if (built.artifacts.length > 0) {
+          whiteboardUpdatedContent = built.updatedContent;
+          whiteboardArtifactsOut = built.artifacts;
+        }
+      } catch (e) {
+        console.error('[whiteboard] extraction failed; skipping:', e);
+      }
+    }
 
     return {
       response: mainResponse,
@@ -937,7 +988,10 @@ export class AIOrchestrator {
         summary: excelWorkbook.summary
       } : undefined,
       // Include spreadsheet preview data for UI display (with formulas shown as text)
-      spreadsheetData: spreadsheetPreviewData
+      spreadsheetData: spreadsheetPreviewData,
+      // Whiteboard integration (Phase 2.4)
+      whiteboardArtifacts: whiteboardArtifactsOut,
+      whiteboardUpdatedContent,
     };
   }
 

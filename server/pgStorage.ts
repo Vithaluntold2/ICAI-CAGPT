@@ -419,7 +419,9 @@ export class PostgresStorage implements IStorage {
     return result[0];
   }
 
-  async createMessage(data: InsertMessage): Promise<Message> {
+  async createMessage(
+    data: InsertMessage & { id?: string; artifactIds?: string[] }
+  ): Promise<Message> {
     const result = await db.insert(messages).values(data).returning();
     return result[0];
   }

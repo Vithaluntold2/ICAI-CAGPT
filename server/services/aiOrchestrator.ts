@@ -469,12 +469,23 @@ export class AIOrchestrator {
     // Enhanced context retention. For every turn beyond the first we inject:
     //   (1) a DB-persisted LLM summary of all older turns,
     //   (2) an accumulated facts glossary (names/amounts/dates/orgs),
-    //   (3) topical/term memory matches across the full conversation,
-    //   (4) the raw tail of the last N messages.
-    // Memory is hydrated from the messages table on first access so server
-    // restarts don't wipe context.
+    //   (3) pgvector-semantic retrieval of relevant earlier turns (Phase B),
+    //   (4) the raw tail of the last N messages — tier-sized.
+    // Memory persists to conversation_memory_entries on each turn so restarts
+    // and multiple replicas all see the same memory.
     let effectiveHistory = conversationHistory;
-    const MAX_RAW_MESSAGES = 20; // last 10 turns kept as raw messages
+
+    // Tier-based raw-message window. Larger context for paying tiers so long
+    // conversations keep more verbatim recent turns, while free stays small.
+    const MAX_RAW_MESSAGES = (() => {
+      switch ((userTier || 'free').toLowerCase()) {
+        case 'enterprise': return 50;
+        case 'professional': return 40;
+        case 'plus': return 30;
+        default: return 20;
+      }
+    })();
+
     const conversationId = options?.conversationId;
     let memoryContext = '';
     let persistedSummary = '';
@@ -498,9 +509,14 @@ export class AIOrchestrator {
         console.log('[AIOrchestrator] Built glossary block from accumulated facts');
       }
 
-      memoryContext = conversationMemory.retrieveRelevantMemory(conversationId, finalQuery, 10);
-      if (memoryContext) {
-        console.log('[AIOrchestrator] Retrieved relevant memory context for query');
+      // Semantic retrieval (pgvector cosine) with keyword fallback.
+      try {
+        memoryContext = await conversationMemory.retrieveRelevantMemory(conversationId, finalQuery, 10);
+        if (memoryContext) {
+          console.log('[AIOrchestrator] Retrieved relevant memory context for query');
+        }
+      } catch (e) {
+        console.warn('[AIOrchestrator] Memory retrieval warning:', e);
       }
     }
 

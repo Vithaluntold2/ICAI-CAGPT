@@ -336,6 +336,29 @@ export const conversationSummaries = pgTable("conversation_summaries", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
+/**
+ * Per-turn conversation memory store with semantic-search embeddings.
+ * Enables pgvector-based retrieval across the full history so long conversations
+ * can surface relevant earlier turns by meaning, not just keywords.
+ * The embedding column uses halfvec(3072) to match text-embedding-3-large
+ * dimensionality while staying under pgvector's HNSW ~4000-dim ceiling.
+ */
+export const conversationMemoryEntries = pgTable("conversation_memory_entries", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  conversationId: varchar("conversation_id")
+    .notNull()
+    .references(() => conversations.id, { onDelete: "cascade" }),
+  turnIndex: integer("turn_index").notNull(),
+  userMessage: text("user_message").notNull(),
+  assistantMessage: text("assistant_message").notNull(),
+  summary: text("summary").notNull(),
+  topics: jsonb("topics").$type<string[]>().default([]),
+  // embedding column is halfvec(3072) in DB; drizzle lacks a halfvec type so we
+  // reference it as text and rely on raw SQL for inserts/queries.
+  embedding: text("embedding"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
 export const whiteboardArtifacts = pgTable("whiteboard_artifacts", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   conversationId: varchar("conversation_id")

@@ -15,10 +15,11 @@
  */
 
 import { db } from '../db';
-import { messages as messagesTable, conversationSummaries } from '@shared/schema';
-import { eq, asc } from 'drizzle-orm';
+import { messages as messagesTable, conversationSummaries, conversationMemoryEntries } from '@shared/schema';
+import { eq, asc, sql } from 'drizzle-orm';
 import { aiProviderRegistry } from './aiProviders/registry';
 import { AIProviderName } from './aiProviders/types';
+import { embeddingService } from './embeddingService';
 
 interface MemoryEntry {
   turnIndex: number;
@@ -162,34 +163,56 @@ export class ConversationMemoryService {
     };
 
     try {
-      // Load messages (oldest first) and pair into turns
-      const rows = await db
-        .select({
-          role: messagesTable.role,
-          content: messagesTable.content,
-          createdAt: messagesTable.createdAt,
-        })
-        .from(messagesTable)
-        .where(eq(messagesTable.conversationId, conversationId))
-        .orderBy(asc(messagesTable.createdAt));
+      // Prefer loading from conversation_memory_entries — these already have
+      // summaries + topics + embeddings, so hydration is cheap and semantic
+      // search works immediately. Fall back to messages table only if none exist
+      // (legacy conversations created before Phase B or race-condition gaps).
+      let pairedTurns: Array<{ user: string; assistant: string; ts: number }> = [];
 
-      // Only rebuild if the DB has more turns than what's already in memory
-      const pairedTurns: Array<{ user: string; assistant: string; ts: number }> = [];
-      for (let i = 0; i < rows.length - 1; i++) {
-        const a = rows[i];
-        const b = rows[i + 1];
-        if (a.role === 'user' && b.role === 'assistant') {
-          pairedTurns.push({
-            user: a.content,
-            assistant: b.content,
-            ts: new Date(b.createdAt).getTime(),
-          });
-          i++; // skip the assistant row we just consumed
+      const memRows = await db
+        .select({
+          turnIndex: conversationMemoryEntries.turnIndex,
+          userMessage: conversationMemoryEntries.userMessage,
+          assistantMessage: conversationMemoryEntries.assistantMessage,
+          createdAt: conversationMemoryEntries.createdAt,
+        })
+        .from(conversationMemoryEntries)
+        .where(eq(conversationMemoryEntries.conversationId, conversationId))
+        .orderBy(asc(conversationMemoryEntries.turnIndex));
+
+      if (memRows.length > 0) {
+        pairedTurns = memRows.map(r => ({
+          user: r.userMessage,
+          assistant: r.assistantMessage,
+          ts: new Date(r.createdAt).getTime(),
+        }));
+      } else {
+        // Legacy path: pair raw messages by role order
+        const rows = await db
+          .select({
+            role: messagesTable.role,
+            content: messagesTable.content,
+            createdAt: messagesTable.createdAt,
+          })
+          .from(messagesTable)
+          .where(eq(messagesTable.conversationId, conversationId))
+          .orderBy(asc(messagesTable.createdAt));
+
+        for (let i = 0; i < rows.length - 1; i++) {
+          const a = rows[i];
+          const b = rows[i + 1];
+          if (a.role === 'user' && b.role === 'assistant') {
+            pairedTurns.push({
+              user: a.content,
+              assistant: b.content,
+              ts: new Date(b.createdAt).getTime(),
+            });
+            i++;
+          }
         }
       }
 
       if (pairedTurns.length > store.entries.length) {
-        // Replay turns that aren't in memory yet, preserving turnIndex order
         store.entries = pairedTurns.map((t, idx) => ({
           turnIndex: idx,
           userMessage: t.user,
@@ -282,6 +305,70 @@ export class ConversationMemoryService {
     this.maybeRegenerateSummary(conversationId).catch(err =>
       console.error('[ConversationMemory] Summary regen failed:', err)
     );
+
+    // Persist turn + embedding to DB so semantic search works across restarts
+    // and across multiple replicas. Fire-and-forget — must not block streaming.
+    this.persistTurnWithEmbedding(conversationId, entry).catch(err =>
+      console.error('[ConversationMemory] Embedding persist failed:', err)
+    );
+  }
+
+  /**
+   * Compute embedding for the turn and upsert into conversation_memory_entries.
+   * Unique (conversation_id, turn_index) ensures idempotency.
+   */
+  private async persistTurnWithEmbedding(
+    conversationId: string,
+    entry: MemoryEntry
+  ): Promise<void> {
+    let embeddingVector: number[] | null = null;
+    try {
+      // Initialize embedding service if needed (safe to call repeatedly)
+      if (!embeddingService['initialized']) embeddingService.initialize();
+      const result = await embeddingService.generateEmbedding(
+        `${entry.userMessage}\n\n${entry.assistantMessage}`.slice(0, 8000)
+      );
+      embeddingVector = result.embedding;
+    } catch (err) {
+      console.warn('[ConversationMemory] Embedding generation failed, persisting without vector:', (err as Error).message);
+    }
+
+    const embeddingLiteral = embeddingVector
+      ? `[${embeddingVector.join(',')}]`
+      : null;
+
+    try {
+      if (embeddingLiteral) {
+        await db.execute(sql`
+          INSERT INTO conversation_memory_entries
+            (conversation_id, turn_index, user_message, assistant_message, summary, topics, embedding)
+          VALUES
+            (${conversationId}, ${entry.turnIndex}, ${entry.userMessage}, ${entry.assistantMessage},
+             ${entry.summary}, ${JSON.stringify(entry.topics)}::jsonb, ${embeddingLiteral}::halfvec(3072))
+          ON CONFLICT (conversation_id, turn_index) DO UPDATE SET
+            user_message = EXCLUDED.user_message,
+            assistant_message = EXCLUDED.assistant_message,
+            summary = EXCLUDED.summary,
+            topics = EXCLUDED.topics,
+            embedding = EXCLUDED.embedding
+        `);
+      } else {
+        await db.execute(sql`
+          INSERT INTO conversation_memory_entries
+            (conversation_id, turn_index, user_message, assistant_message, summary, topics)
+          VALUES
+            (${conversationId}, ${entry.turnIndex}, ${entry.userMessage}, ${entry.assistantMessage},
+             ${entry.summary}, ${JSON.stringify(entry.topics)}::jsonb)
+          ON CONFLICT (conversation_id, turn_index) DO UPDATE SET
+            user_message = EXCLUDED.user_message,
+            assistant_message = EXCLUDED.assistant_message,
+            summary = EXCLUDED.summary,
+            topics = EXCLUDED.topics
+        `);
+      }
+    } catch (err) {
+      console.error('[ConversationMemory] DB upsert failed:', err);
+    }
   }
 
   /**
@@ -449,10 +536,73 @@ Write the updated summary:`;
   }
 
   /**
-   * Retrieve relevant conversation memory for a new query.
-   * Returns a compact text block with only the relevant past context.
+   * Semantic retrieval via pgvector cosine similarity.
+   * Returns top-K turns whose embedding best matches the query embedding.
+   * Falls back to [] if embeddings aren't available yet for this conversation.
    */
-  retrieveRelevantMemory(
+  async retrieveRelevantMemorySemantic(
+    conversationId: string,
+    query: string,
+    maxEntries: number = 8
+  ): Promise<string> {
+    if (!conversationId || !query) return '';
+    try {
+      if (!embeddingService['initialized']) embeddingService.initialize();
+      const { embedding } = await embeddingService.generateEmbedding(query);
+      const literal = `[${embedding.join(',')}]`;
+
+      const rows = await db.execute<{ turn_index: number; summary: string; similarity: number }>(sql`
+        SELECT turn_index, summary,
+               1 - (embedding <=> ${literal}::halfvec(3072)) AS similarity
+        FROM conversation_memory_entries
+        WHERE conversation_id = ${conversationId}
+          AND embedding IS NOT NULL
+        ORDER BY embedding <=> ${literal}::halfvec(3072)
+        LIMIT ${maxEntries}
+      `);
+
+      // Drizzle's db.execute returns { rows: ... } on node-postgres
+      const results = (rows as any).rows ?? rows ?? [];
+      const relevant = results
+        .filter((r: any) => r.similarity >= 0.25)  // cosine similarity threshold
+        .sort((a: any, b: any) => a.turn_index - b.turn_index); // read in conversation order
+
+      if (relevant.length === 0) return '';
+
+      const formatted = relevant
+        .map((r: any) => `(turn ${r.turn_index + 1}, sim ${Number(r.similarity).toFixed(2)}) ${r.summary}`)
+        .join('\n\n');
+
+      console.log(`[ConversationMemory] Semantic retrieval found ${relevant.length} matches (threshold 0.25) for query in ${conversationId}`);
+      return `**Semantically relevant earlier turns (${relevant.length}):**\n${formatted}`;
+    } catch (err) {
+      console.warn('[ConversationMemory] Semantic retrieval failed, falling back to keyword:', (err as Error).message);
+      return '';
+    }
+  }
+
+  /**
+   * Retrieve relevant conversation memory for a new query.
+   * Tries semantic search first (pgvector cosine), falls back to keyword/topic
+   * matching if semantic returns nothing or the embedding service is unavailable.
+   * Callers can stay synchronous (keyword-only) by calling retrieveRelevantMemoryKeyword.
+   */
+  async retrieveRelevantMemory(
+    conversationId: string,
+    query: string,
+    maxEntries: number = 8
+  ): Promise<string> {
+    const semantic = await this.retrieveRelevantMemorySemantic(conversationId, query, maxEntries);
+    if (semantic) return semantic;
+    return this.retrieveRelevantMemoryKeyword(conversationId, query, maxEntries);
+  }
+
+  /**
+   * Legacy keyword/topic-based retrieval — kept as a fallback when the
+   * embedding service is down, when no embeddings exist yet (new conversation),
+   * or when semantic results don't clear the similarity threshold.
+   */
+  retrieveRelevantMemoryKeyword(
     conversationId: string,
     query: string,
     maxEntries: number = 5

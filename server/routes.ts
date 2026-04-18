@@ -4874,6 +4874,21 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
           }
         }
 
+        // Sanitize ```mermaid``` fenced blocks: auto-quote node / edge labels
+        // that contain parentheses, commas, colons, or #. Mermaid's parser
+        // rejects those unless the label is wrapped in double quotes, and the
+        // LLM forgets to quote frequently. Non-destructive on any error.
+        try {
+          const { sanitizeMermaidInText } = await import('./services/mermaid/mermaidSanitizer');
+          const res = sanitizeMermaidInText(fullResponse);
+          if (res.blocksSanitized > 0) {
+            fullResponse = res.content;
+            console.log(`[SSE] Sanitised ${res.blocksSanitized} mermaid block(s), quoted ~${res.labelsQuoted} label(s)`);
+          }
+        } catch (err) {
+          console.warn('[SSE] Mermaid sanitisation skipped:', (err as Error).message);
+        }
+
         // Extract ```sheet``` blocks the AI emitted, evaluate their formulas,
         // and promote the result into metadata.spreadsheetData so OutputPane
         // renders the sheet on the right. Replaces the raw block in chat text

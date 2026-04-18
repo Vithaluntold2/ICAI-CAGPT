@@ -36,6 +36,7 @@ import { getClientFeatures, isFeatureEnabled } from "./config/featureFlags";
 import { documentIngestion } from "./services/core/documentIngestion";
 import { continuousLearning } from "./services/core/continuousLearning";
 import { voiceService } from "./services/voice/voiceService";
+import { listArtifactsByConversation } from "./services/whiteboard/repository";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import multer from "multer";
@@ -969,6 +970,18 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch messages" });
     }
+  });
+
+  // Whiteboard artifacts for a conversation (read-only)
+  app.get("/api/conversations/:id/whiteboard", requireAuth, async (req, res) => {
+    const userId = getCurrentUserId(req);
+    if (!userId) return res.status(401).json({ error: "Not authenticated" });
+    const { id } = req.params;
+    const conversation = await storage.getConversation(id);
+    if (!conversation) return res.status(404).json({ error: "Conversation not found" });
+    if (conversation.userId !== userId) return res.status(403).json({ error: "Access denied" });
+    const artifacts = await listArtifactsByConversation(id);
+    res.json({ artifacts });
   });
 
   // Download Excel file for a specific message

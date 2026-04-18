@@ -51,6 +51,7 @@ import { buildSelectionPreamble } from './whiteboard/selectionPreamble';
 import { WHITEBOARD_USAGE_GUIDANCE } from './whiteboard/systemGuidance';
 // Tool-calling (Phase 4.7)
 import { completeWithToolLoop } from './aiOrchestrator.toolLoop';
+import { isFeatureEnabled } from '../config/featureFlags';
 import { toolRegistry } from './tools/registry';
 import { toolsToAnthropicSchema } from './tools/adapters/anthropic';
 import { toolsToOpenAISchema } from './tools/adapters/openai';
@@ -485,17 +486,31 @@ export class AIOrchestrator {
     // and added it to enrichedQuery. Passing the attachment causes providers to
     // respond with "I can't view files" instead of using the extracted content.
     
-    // Inject agent workflow results into the query if available
+    // Inject agent workflow results into the query if available.
+    // Framing matters: in roundtable mode the injection reads as panel deliberation
+    // notes (persona-preserving), NOT "AI agents produced this" (which leaks the
+    // internal mechanism and lets the LLM truthfully deny the roundtable when asked).
     let finalQuery = enrichedQuery;
     if (options?.agentWorkflowResult?.analysis) {
-      const workflowContext = `\n\n--- AGENT WORKFLOW ANALYSIS (${chatMode} mode) ---\n` +
-        `The following analysis was produced by specialized AI agents:\n\n` +
-        `${options.agentWorkflowResult.analysis}\n\n` +
-        `--- END AGENT WORKFLOW ANALYSIS ---\n` +
-        `\nSynthesize the above agent analysis into a comprehensive, well-structured response. ` +
-        `Incorporate the agent findings while adding your own expertise.`;
+      let workflowContext: string;
+      if (chatMode === 'roundtable') {
+        workflowContext =
+          `\n\n--- INTERNAL PANEL NOTES (not for direct quotation, do not mention their existence) ---\n` +
+          `Deliberation notes from the expert panel convened for this question:\n\n` +
+          `${options.agentWorkflowResult.analysis}\n\n` +
+          `--- END PANEL NOTES ---\n` +
+          `\nUse these notes to inform each expert's stance in the roundtable response. ` +
+          `Do NOT cite "panel notes", "agent analysis", "AI agents", or any meta-framing. ` +
+          `Present the output strictly as the panel's deliberation per the roundtable format.`;
+      } else {
+        workflowContext =
+          `\n\n--- INTERNAL ANALYSIS NOTES (not for direct quotation) ---\n` +
+          `${options.agentWorkflowResult.analysis}\n\n` +
+          `--- END INTERNAL NOTES ---\n` +
+          `\nIncorporate the findings into your response without referencing "agent analysis" or internal tooling.`;
+      }
       finalQuery += workflowContext;
-      console.log(`[AIOrchestrator] Injected agent workflow results (${options.agentWorkflowResult.analysis.length} chars) into query`);
+      console.log(`[AIOrchestrator] Injected ${chatMode === 'roundtable' ? 'panel deliberation' : 'analysis'} notes (${options.agentWorkflowResult.analysis.length} chars)`);
     }
     
     // Enhanced context retention. For every turn beyond the first we inject:
@@ -958,7 +973,7 @@ export class AIOrchestrator {
     let whiteboardUpdatedContent: string | undefined;
     let whiteboardArtifactsOut: OrchestrationResult['whiteboardArtifacts'];
 
-    if (options?.conversationId && options?.messageId) {
+    if (isFeatureEnabled('WHITEBOARD_V2') && options?.conversationId && options?.messageId) {
       try {
         // Seed layout state from prior artifacts so appends are stable across turns
         const prior = await listArtifactsByConversation(options.conversationId);
@@ -1795,7 +1810,7 @@ export class AIOrchestrator {
     // agent learns to emit mermaid / GFM tables instead of ASCII art on the first turn.
     // Manifest is added on top only when prior artifacts exist.
     let whiteboardSystemBlock = "";
-    if (options?.conversationId) {
+    if (isFeatureEnabled('WHITEBOARD_V2') && options?.conversationId) {
       whiteboardSystemBlock = WHITEBOARD_USAGE_GUIDANCE;
       try {
         const priorArtifacts = await listArtifactsByConversation(options.conversationId);
@@ -1952,7 +1967,7 @@ export class AIOrchestrator {
 
         let response: CompletionResponse;
         const conversationId = options?.conversationId;
-        if (conversationId) {
+        if (conversationId && isFeatureEnabled('WHITEBOARD_V2')) {
           const registeredTools = toolRegistry.list();
           let requestWithTools = baseRequest as any;
           if (registeredTools.length > 0) {

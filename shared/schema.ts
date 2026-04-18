@@ -303,6 +303,7 @@ export const messages = pgTable("messages", {
   tokensUsed: integer("tokens_used"),
   excelFilename: text("excel_filename"),
   excelBuffer: text("excel_buffer"),
+  artifactIds: jsonb("artifact_ids").$type<string[]>().default([]),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (table) => ({
   // NEW: Index for fetching conversation messages with pagination
@@ -310,6 +311,42 @@ export const messages = pgTable("messages", {
   // NEW: Index for analytics queries by user
   roleCreatedIdx: index("messages_role_created_idx").on(table.role, table.createdAt),
 }));
+
+export const whiteboardArtifacts = pgTable("whiteboard_artifacts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  conversationId: varchar("conversation_id")
+    .notNull()
+    .references(() => conversations.id, { onDelete: "cascade" }),
+  messageId: varchar("message_id")
+    .notNull()
+    .references(() => messages.id, { onDelete: "cascade" }),
+  sequence: integer("sequence").notNull(),
+  kind: text("kind").notNull(), // 'chart' | 'workflow' | 'mindmap' | 'flowchart' | 'spreadsheet'
+  title: text("title").notNull(),
+  summary: text("summary").notNull(),
+  payload: jsonb("payload").notNull(),
+  canvasX: integer("canvas_x").notNull(),
+  canvasY: integer("canvas_y").notNull(),
+  width: integer("width").notNull(),
+  height: integer("height").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  conversationSequenceIdx: index("whiteboard_conv_seq_idx")
+    .on(table.conversationId, table.sequence),
+  messageIdx: index("whiteboard_message_idx").on(table.messageId),
+}));
+
+export type WhiteboardArtifact = typeof whiteboardArtifacts.$inferSelect;
+export type InsertWhiteboardArtifact = typeof whiteboardArtifacts.$inferInsert;
+
+export const whiteboardArtifactKinds = [
+  "chart",
+  "workflow",
+  "mindmap",
+  "flowchart",
+  "spreadsheet",
+] as const;
+export type WhiteboardArtifactKind = typeof whiteboardArtifactKinds[number];
 
 export const modelRoutingLogs = pgTable("model_routing_logs", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),

@@ -8,6 +8,13 @@
       "when": 1775849371864,
       "tag": "0000_violet_fenris",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1776534566500,
+      "tag": "0001_whiteboard_artifacts",
+      "breakpoints": true
     }
   ]
 }

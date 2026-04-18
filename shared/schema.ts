@@ -312,6 +312,30 @@ export const messages = pgTable("messages", {
   roleCreatedIdx: index("messages_role_created_idx").on(table.role, table.createdAt),
 }));
 
+/**
+ * Rolling LLM-generated summary of older turns + an accumulated facts glossary.
+ * One row per conversation. Regenerated every ~10 new turns so long conversations
+ * don't lose early context when the raw-message window slides past turn 1.
+ */
+export const conversationSummaries = pgTable("conversation_summaries", {
+  conversationId: varchar("conversation_id")
+    .primaryKey()
+    .references(() => conversations.id, { onDelete: "cascade" }),
+  // LLM-generated paragraph summarising turns 1..coveredUpToTurn
+  summaryText: text("summary_text").notNull(),
+  // Highest turn index fully covered by the summary (0-based)
+  coveredUpToTurn: integer("covered_up_to_turn").notNull(),
+  // Accumulated entities/facts pulled from every turn so far
+  //   { names: string[], amounts: string[], dates: string[], orgs: string[] }
+  glossary: jsonb("glossary").$type<{
+    names?: string[];
+    amounts?: string[];
+    dates?: string[];
+    orgs?: string[];
+  }>().default({}),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
 export const whiteboardArtifacts = pgTable("whiteboard_artifacts", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   conversationId: varchar("conversation_id")

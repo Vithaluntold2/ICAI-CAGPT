@@ -1077,10 +1077,30 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
         }
       }
       
-      // Fallback: Check if Excel file exists in message (old method - base64 in metadata)
+      // AI-authored sheet fallback: if the message has spreadsheetData (produced
+      // by the ```sheet``` block parser) but no pre-generated Excel buffer,
+      // synthesise the xlsx on-the-fly from the evaluated sheet data. This path
+      // covers every calculation-mode response that emits sheet blocks instead
+      // of going through the legacy excelModelGenerator pipeline.
+      if (metadata?.spreadsheetData?.sheets?.length) {
+        try {
+          const { buildXlsxFromSpreadsheetData } = await import('./services/excel/spreadsheetToXlsx');
+          const { buffer, filename } = await buildXlsxFromSpreadsheetData(metadata.spreadsheetData);
+          console.log('[Excel Download] Built xlsx on-the-fly from AI sheet data:', filename, buffer.length, 'bytes');
+          res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+          res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+          res.setHeader('Content-Length', buffer.length);
+          return res.send(buffer);
+        } catch (err) {
+          console.error('[Excel Download] On-the-fly build failed:', err);
+          // fall through to legacy base64 path below
+        }
+      }
+
+      // Legacy: Check if Excel file exists in message (old method - base64 in metadata)
       const excelBuffer = metadata?.excelBuffer;
       const excelFilename = metadata?.excelFilename;
-      
+
       if (!excelBuffer || !excelFilename) {
         return res.status(404).json({ error: "Excel file not found or expired. Please regenerate the spreadsheet." });
       }

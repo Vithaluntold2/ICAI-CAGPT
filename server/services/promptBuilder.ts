@@ -386,18 +386,36 @@ export class PromptBuilder {
         break;
         
       case 'workflow':
-        modeInstructions += `Create TWO comprehensive outputs:\n\n`;
-        modeInstructions += `### DELIVERABLE (for visualization):\n`;
-        modeInstructions += `Detailed workflow with 15-25+ steps:\n`;
-        modeInstructions += `Step 1: [Title]\n- [Detailed substep]\n- [Another substep]\n- [Documentation required]\n\n`;
-        modeInstructions += `Include decision points, approval gates, parallel processes\n\n`;
-        modeInstructions += `### REASONING (for chat):\n`;
-        modeInstructions += `Comprehensive explanation (800+ words) of:\n`;
-        modeInstructions += `- Workflow design rationale\n`;
-        modeInstructions += `- Control points and why they matter\n`;
-        modeInstructions += `- Industry best practices applied\n`;
-        modeInstructions += `- Alternative approaches considered\n\n`;
-        modeInstructions += `Format:\n\`\`\`\n<DELIVERABLE>\n[workflow here]\n</DELIVERABLE>\n\n<REASONING>\n[detailed explanation here]\n</REASONING>\n\`\`\`\n\n`;
+        modeInstructions += `# 🔀 WORKFLOW MODE — STRUCTURED PROCESS DIAGRAM\n\n`;
+
+        modeInstructions += `## 🚨 OUTPUT FORMAT — READ CAREFULLY, NO DEVIATION\n\n`;
+        modeInstructions += `You MUST return EXACTLY two blocks, in this order, wrapped in the tags shown:\n\n`;
+        modeInstructions += `\`\`\`\n<DELIVERABLE>\nStart: [short label]\nStep 1: [Imperative action — verb first]\n- [Substep / sub-action]\n- [Document or form involved]\n- [Approver / system / role]\nStep 2: Decision — [Yes/No question, e.g. "Are there any errors?"]\n- If Yes: go to Step 4\n- If No: go to Step 3\nStep 3: [Next action]\n...\nEnd: [Terminal label, e.g. "Return Filed"]\n</DELIVERABLE>\n\n<REASONING>\n[600+ words explaining rationale, controls, best practices.]\n</REASONING>\n\`\`\`\n\n`;
+
+        modeInstructions += `## 🔒 MANDATORY DELIVERABLE RULES\n\n`;
+        modeInstructions += `1. The DELIVERABLE is plain text with step headings, not prose, not mermaid, not JSON, not a markdown bullet list with paragraphs. Every numbered line MUST begin with "Step N:" (or "Start:" / "End:"). The parser that turns this into a diagram ONLY detects those three prefixes.\n`;
+        modeInstructions += `2. The workflow MUST begin with a single "Start:" line and end with a single "End:" line. These become the terminal (oval) nodes in the diagram.\n`;
+        modeInstructions += `3. Any step that involves a yes/no or accepted/rejected or on-time/late choice MUST be a decision step. Write its title as "Step N: Decision — [question ending in ?]". Directly below, add substeps "- If Yes: go to Step X" and "- If No: go to Step Y". The parser uses the word "Decision", the question mark, or the "If Yes/If No" substeps to render that node as a diamond.\n`;
+        modeInstructions += `4. Minimum step counts:\n`;
+        modeInstructions += `   - Simple procedural workflows: at least 8 steps (plus Start/End).\n`;
+        modeInstructions += `   - Compliance / filing workflows (GST, TDS, ROC, audit): at least 12 steps.\n`;
+        modeInstructions += `   - Multi-path workflows (with appeals, penalties, rework): at least 15 steps AND at least 2 decision nodes.\n`;
+        modeInstructions += `5. Every decision node's Yes/No branches must eventually converge back into the main flow or reach a distinct End — never leave a dangling branch.\n`;
+        modeInstructions += `6. Do NOT skip domain-critical steps. Example checkpoints the user expects for common asks:\n`;
+        modeInstructions += `   - **GSTR-3B filing (India):** Login → Choose period → Auto-populate from GSTR-1 → Fill 3.1–3.7 tables → ITC reconciliation → Tax liability → Payment challan → Offset liability → Preview → Submit → DSC/EVC → ARN.\n`;
+        modeInstructions += `   - **Private Limited incorporation (India):** Obtain DSC → Apply DIN → Name reservation (RUN/SPICe+) → Draft MoA/AoA → File SPICe+ (INC-32) with AGILE-PRO → MCA verification → Certificate of Incorporation → PAN/TAN → Bank account.\n`;
+        modeInstructions += `   - **TDS compliance:** Identify payment → Determine section/rate → Deduct on time? (decision) → Deposit by due date? (decision, with late branch to interest u/s 201(1A) and penalty) → File quarterly TDS return (24Q/26Q) → Issue TDS certificates → Year-end reconciliation.\n`;
+        modeInstructions += `   - **Statutory audit:** Engagement acceptance → Engagement letter → Risk assessment → Materiality → Audit planning → Fieldwork/substantive testing → Internal control testing → Documentation → Partner review → Management representation letter → Draft audit report → Final audit report.\n`;
+        modeInstructions += `   - **GST assessment / appeals:** Notice issued → Reply filed? (decision) → Hearing → Order passed → Aggrieved? (decision) → First appellate authority → Appeal accepted? (decision) → Tribunal → High Court.\n`;
+        modeInstructions += `7. If the user asks for a domain not listed above, apply the same discipline: explicit Start/End, decision nodes for every branch, realistic step count.\n\n`;
+
+        modeInstructions += `## ✍️ REASONING BLOCK\n\n`;
+        modeInstructions += `600+ words covering: workflow design rationale, why each decision point matters as a control, relevant regulations/sections, common pitfalls, and alternative routes (e.g. manual vs digital filing).\n\n`;
+
+        modeInstructions += `## ❌ DO NOT\n\n`;
+        modeInstructions += `- Do NOT output a plain paragraph summary, a bulleted list without "Step N:" prefixes, or an unescorted mermaid block. The visual renderer cannot consume any of those.\n`;
+        modeInstructions += `- Do NOT collapse multiple actions into one step; each action that has a distinct responsible party or checkpoint gets its own step.\n`;
+        modeInstructions += `- Do NOT omit the Start: or End: lines.\n\n`;
         break;
         
       case 'audit-plan':
@@ -436,6 +454,37 @@ export class PromptBuilder {
         modeInstructions += `### How the engine renders your formula:\n`;
         modeInstructions += `Write: \`\`\`=FV(0.06, 5, 0, -10000)\`\`\`\n`;
         modeInstructions += `User sees: \`\`=FV(0.06, 5, 0, -10000)\`\` → **13,382.26**\n\n`;
+
+        modeInstructions += `## 📊 MULTI-CELL / TABULAR RESULTS — EMIT A SHEET BLOCK\n\n`;
+        modeInstructions += `For anything that has more than 2-3 numbers (amortisation schedules, scenario tables, cash-flow statements, sensitivity analyses, ratio breakdowns), **emit a dedicated sheet block**. The server evaluates every formula in it, renders the result as a full spreadsheet in the right-side Output Panel, and replaces the raw block in chat with a one-line pointer.\n\n`;
+
+        modeInstructions += `**Exact format — a fenced code block with language \`sheet\`:**\n\n`;
+        modeInstructions += '```text\n';
+        modeInstructions += '```sheet\n';
+        modeInstructions += 'title: NPV at 10% discount (3-year cashflow)\n';
+        modeInstructions += 'description: Present value of year-by-year inflows, with total\n';
+        modeInstructions += '---\n';
+        modeInstructions += 'Year,Cashflow,Discount Factor,PV\n';
+        modeInstructions += '1,400,=1/(1+0.1)^A2,=B2*C2\n';
+        modeInstructions += '2,500,=1/(1+0.1)^A3,=B3*C3\n';
+        modeInstructions += '3,600,=1/(1+0.1)^A4,=B4*C4\n';
+        modeInstructions += 'Total,=SUM(B2:B4),,=SUM(D2:D4)\n';
+        modeInstructions += '```\n';
+        modeInstructions += '```\n\n';
+
+        modeInstructions += `### Sheet block rules — MUST follow exactly:\n`;
+        modeInstructions += `1. **Language tag is \`sheet\`** (or \`spreadsheet\`).\n`;
+        modeInstructions += `2. **Optional front-matter** lines \`title: ...\`, \`description: ...\`, \`name: ...\` — one per line, followed by a \`---\` separator on its own line.\n`;
+        modeInstructions += `3. **CSV body**: first data line is the column header; subsequent lines are data + formula rows. Columns are zero-indent, comma-separated.\n`;
+        modeInstructions += `4. **Formulas start with \`=\`** and use real cell refs (A1, B2:B4, etc.). Row 2 is the first data row; header is row 1.\n`;
+        modeInstructions += `5. **Empty cells** are just an empty comma-separated slot (e.g., \`Total,=SUM(B2:B4),,=SUM(D2:D4)\` — third column empty).\n`;
+        modeInstructions += `6. **Emit AT MOST 3 sheet blocks per response**. Each becomes a tab in the Output Panel.\n`;
+        modeInstructions += `7. **Do NOT repeat the sheet's contents in chat prose** — the spreadsheet panel IS the presentation.\n\n`;
+
+        modeInstructions += `### When to use which format:\n`;
+        modeInstructions += `- **Single value** (NPV, EMI, a ratio, compound-interest answer): use inline formula \`\`=FV(...)\`\` style.\n`;
+        modeInstructions += `- **Schedule / table / scenario** (multi-row, multi-column): use \`\`\`sheet\`\`\` block.\n`;
+        modeInstructions += `- **Both**: emit the headline inline formula first, then the sheet block for detail.\n\n`;
         
         modeInstructions += `## 📋 REQUIRED OUTPUT FORMAT\n\n`;
         

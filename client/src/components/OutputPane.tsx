@@ -270,7 +270,7 @@ export default function OutputPane({
                 onExport={(format) => handleExport(format as any)}
               />
             ) : contentType === 'workflow' && content ? (
-              <div className="bg-card border rounded-lg p-4">
+              <div className="bg-card border rounded-lg overflow-hidden" style={{ height: '70vh', minHeight: 560 }}>
                 {(() => {
                   const workflowData = parseWorkflowContent(content);
                   return (

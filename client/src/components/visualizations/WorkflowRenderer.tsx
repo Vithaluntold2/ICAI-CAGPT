@@ -348,24 +348,64 @@ function WorkflowRendererInner({ nodes, edges, title, layout = 'dagre-tb' }: Wor
 
   const exportAsImage = useCallback(async (format: 'png' | 'svg') => {
     if (!reactFlowInstance) return;
-    
-    const { getNodes } = reactFlowInstance;
-    const nodesBounds = getNodes().reduce((bounds, node) => {
-      return {
-        minX: Math.min(bounds.minX, node.position.x),
-        minY: Math.min(bounds.minY, node.position.y),
-        maxX: Math.max(bounds.maxX, node.position.x + (node.width || nodeWidth)),
-        maxY: Math.max(bounds.maxY, node.position.y + (node.height || nodeHeight)),
-      };
-    }, { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity });
 
-    const width = nodesBounds.maxX - nodesBounds.minX + 100;
-    const height = nodesBounds.maxY - nodesBounds.minY + 100;
+    // Find the actual rendered viewport. React Flow renders the node graph inside
+    // `.react-flow__viewport`; capturing that element gives us the diagram without
+    // the surrounding toolbars and panels.
+    const viewport = document.querySelector<HTMLElement>('.react-flow__viewport');
+    const fallback = document.querySelector<HTMLElement>('.react-flow');
+    const target = viewport ?? fallback;
+    if (!target) {
+      toast({
+        title: "Export failed",
+        description: "Could not locate the workflow canvas.",
+        variant: "destructive",
+      });
+      return;
+    }
 
     toast({
       title: "Exporting workflow",
-      description: `Generating ${format.toUpperCase()} image...`
+      description: `Generating ${format.toUpperCase()} image…`,
     });
+
+    try {
+      // Fit the diagram into view so the capture includes every node.
+      reactFlowInstance.fitView?.({ padding: 0.1, duration: 0 });
+      // Give React Flow one frame to settle the transform before we snapshot.
+      await new Promise((r) => requestAnimationFrame(() => r(null)));
+
+      const htmlToImage = await import('html-to-image');
+      const options = {
+        pixelRatio: format === 'png' ? 2 : 1,
+        backgroundColor: '#ffffff',
+        cacheBust: true,
+        // html-to-image tries to inline cross-origin images; swallow failures so the
+        // main diagram still renders.
+        filter: (node: HTMLElement) => !node.classList?.contains('react-flow__minimap'),
+      };
+
+      const dataUrl = format === 'png'
+        ? await htmlToImage.toPng(target, options)
+        : await htmlToImage.toSvg(target, options);
+
+      const a = document.createElement('a');
+      a.href = dataUrl;
+      a.download = `workflow-${Date.now()}.${format}`;
+      a.click();
+
+      toast({
+        title: "Export complete",
+        description: `Workflow saved as ${format.toUpperCase()}.`,
+      });
+    } catch (err: any) {
+      console.error('[WorkflowRenderer] export failed', err);
+      toast({
+        title: "Export failed",
+        description: err?.message ?? String(err),
+        variant: "destructive",
+      });
+    }
   }, [reactFlowInstance, toast]);
 
   const playAnimation = useCallback(() => {

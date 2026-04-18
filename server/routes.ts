@@ -37,6 +37,7 @@ import { documentIngestion } from "./services/core/documentIngestion";
 import { continuousLearning } from "./services/core/continuousLearning";
 import { voiceService } from "./services/voice/voiceService";
 import { listArtifactsByConversation } from "./services/whiteboard/repository";
+import { buildBoardXlsxBuffer } from "./services/whiteboard/exportXlsx";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import multer from "multer";
@@ -982,6 +983,38 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
     if (conversation.userId !== userId) return res.status(403).json({ error: "Access denied" });
     const artifacts = await listArtifactsByConversation(id);
     res.json({ artifacts });
+  });
+
+  app.post("/api/conversations/:id/whiteboard/export", requireAuth, async (req, res) => {
+    const userId = getCurrentUserId(req);
+    if (!userId) return res.status(401).json({ error: "Not authenticated" });
+    const { id } = req.params;
+    const conversation = await storage.getConversation(id);
+    if (!conversation) return res.status(404).json({ error: "Conversation not found" });
+    if (conversation.userId !== userId) return res.status(403).json({ error: "Access denied" });
+
+    const { format, artifactIds, renderedImages } = (req.body ?? {}) as {
+      format?: "pdf" | "pptx" | "xlsx";
+      artifactIds?: string[];
+      renderedImages?: Record<string, string>;
+    };
+    if (!format || !["pdf", "pptx", "xlsx"].includes(format)) {
+      return res.status(400).json({ error: "bad_format" });
+    }
+
+    const all = await listArtifactsByConversation(id);
+    const subset = artifactIds && artifactIds.length > 0
+      ? all.filter(a => artifactIds.includes(a.id))
+      : all;
+
+    if (format === "xlsx") {
+      const buf = await buildBoardXlsxBuffer(subset);
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      res.setHeader("Content-Disposition", `attachment; filename="whiteboard-${id}.xlsx"`);
+      return res.send(buf);
+    }
+    // PPTX + PDF handlers added in Phase 10.2 / 10.3
+    return res.status(501).json({ error: "format_not_yet_implemented", format });
   });
 
   // Download Excel file for a specific message

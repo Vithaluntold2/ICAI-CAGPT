@@ -45,6 +45,7 @@ import { rehypeArtifactPlaceholder } from "@/components/chat/rehypeArtifactPlace
 import { normalizeMath } from "@/lib/mathNormalizer";
 import { ArtifactRenderer } from "@/components/chat/artifacts/ArtifactRenderer";
 import { FlowchartArtifact } from "@/components/chat/artifacts/FlowchartArtifact";
+import { MindmapArtifact } from "@/components/chat/artifacts/MindmapArtifact";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { 
   Table, 
@@ -1373,9 +1374,10 @@ export default function Chat() {
                                   remarkPlugins={[remarkMath, remarkGfm]}
                                   rehypePlugins={[rehypeRaw, rehypeArtifactPlaceholder, rehypeKatex]}
                                   components={{
-                                    // Render mermaid fenced blocks (```mermaid … ```) as actual
-                                    // diagrams via FlowchartArtifact instead of showing the raw
-                                    // code. Other languages fall through to the default <code>.
+                                    // Render fenced diagram blocks as actual diagrams instead of
+                                    // raw code. Currently handled languages: ```mermaid (flowcharts
+                                    // via FlowchartArtifact) and ```mindmap (JSON → MindmapArtifact).
+                                    // Other languages fall through to the default <code>.
                                     code: ({ className, children, ...props }: any) => {
                                       if (typeof className === "string" && /language-mermaid/.test(className)) {
                                         const source = Array.isArray(children)
@@ -1386,6 +1388,27 @@ export default function Chat() {
                                             <FlowchartArtifact payload={{ source }} />
                                           </div>
                                         );
+                                      }
+                                      if (typeof className === "string" && /language-mindmap/.test(className)) {
+                                        const raw = Array.isArray(children)
+                                          ? children.join("")
+                                          : String(children ?? "");
+                                        try {
+                                          const payload = JSON.parse(raw);
+                                          return (
+                                            <div className="my-4 not-prose">
+                                              <MindmapArtifact payload={payload} />
+                                            </div>
+                                          );
+                                        } catch (err: any) {
+                                          return (
+                                            <div className="my-4 not-prose text-xs">
+                                              <div className="font-medium text-red-600 mb-1">Mindmap JSON invalid</div>
+                                              <div className="text-muted-foreground">{err?.message ?? "parse error"}</div>
+                                              <pre className="mt-2 p-2 bg-muted rounded whitespace-pre-wrap break-all">{raw}</pre>
+                                            </div>
+                                          );
+                                        }
                                       }
                                       return <code className={className} {...props}>{children}</code>;
                                     },

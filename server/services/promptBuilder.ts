@@ -65,7 +65,28 @@ export class PromptBuilder {
       `    B -- No --> D["Action B"]\n` +
       `    C --> E[End]\n` +
       `    D --> E\n` +
-      '  ```';
+      '  ```\n' +
+      `- Mindmaps: ALWAYS emit a fenced ` + '```mindmap' + ` block containing ONE valid JSON object with this ` +
+      `exact shape (no prose before/after the fence, no trailing commas, all strings double-quoted):\n` +
+      '  ```mindmap\n' +
+      `  {\n` +
+      `    "type": "mindmap",\n` +
+      `    "title": "Short Title",\n` +
+      `    "subtitle": "Optional one-liner",\n` +
+      `    "layout": "radial",\n` +
+      `    "nodes": [\n` +
+      `      { "id": "root", "label": "Central Topic", "type": "root" },\n` +
+      `      { "id": "b1", "label": "Branch 1", "type": "primary" },\n` +
+      `      { "id": "b1-1", "label": "Leaf", "type": "secondary" }\n` +
+      `    ],\n` +
+      `    "edges": [\n` +
+      `      { "id": "e1", "source": "root", "target": "b1" },\n` +
+      `      { "id": "e2", "source": "b1", "target": "b1-1" }\n` +
+      `    ]\n` +
+      `  }\n` +
+      '  ```\n' +
+      `  The chat renderer parses that JSON and draws a real radial mindmap. Never emit mindmap JSON as a plain ` +
+      `code block or as raw text — only inside the \`\`\`mindmap fence.`;
 
     // Live Excel engine — applies to every mode. The server runs an Excel-
     // compatible formula engine on your output and inlines computed values,
@@ -105,7 +126,19 @@ export class PromptBuilder {
       `for the offset) works and is portable.\n\n` +
       `NEVER write: "I cannot calculate", "Excel will compute this", "you'll need to run this ` +
       `in Excel", "the formula computes but I won't", or similar. The engine is always on. ` +
-      `Write the formula; the user sees the number.`;
+      `Write the formula; the user sees the number.\n\n` +
+      `CRITICAL — DO NOT DOUBLE-STATE RESULTS:\n` +
+      `• After writing a formula, DO NOT write your own numeric answer on a new line. The engine ` +
+      `appends the computed value next to the formula automatically — if you also write ` +
+      `"➡️ Result: ₹18,11,900" or "≈ 13,382.26" or "Answer: Rs. X", the user sees TWO numbers ` +
+      `and they may disagree (your approximation vs the engine's exact value).\n` +
+      `• Your job: write the formula and optionally explain what the RESULT MEANS in words ` +
+      `("which means the savings will roughly double"), but never state the numeric result ` +
+      `itself as a separate line.\n` +
+      `• GOOD:   \`=FV(0.075/4, 32, 0, -1000000)\` — this is your maturity value under quarterly compounding.\n` +
+      `• BAD:    \`=FV(0.075/4, 32, 0, -1000000)\`\\n          ➡️ Result: ₹18,11,900  ← forbidden duplicate\n` +
+      `• BAD:    The answer is approximately ₹18,11,900.  ← forbidden prose number\n` +
+      `Trust the engine. One formula, one number, shown automatically.`;
 
     // Mode-specific persona locks.
     // In roundtable mode, the response is always presented as the output of a panel

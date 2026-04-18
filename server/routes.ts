@@ -39,6 +39,7 @@ import { voiceService } from "./services/voice/voiceService";
 import { listArtifactsByConversation } from "./services/whiteboard/repository";
 import { buildBoardXlsxBuffer } from "./services/whiteboard/exportXlsx";
 import { buildBoardPptxBuffer } from "./services/whiteboard/exportPptx";
+import { buildBoardPdfBuffer } from "./services/whiteboard/exportPdf";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import multer from "multer";
@@ -1021,8 +1022,14 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
       res.setHeader("Content-Disposition", `attachment; filename="whiteboard-${id}.pptx"`);
       return res.send(buf);
     }
-    // PDF handler added in Phase 10.3
-    return res.status(501).json({ error: "format_not_yet_implemented", format });
+    if (format === "pdf") {
+      if (!renderedImages) return res.status(400).json({ error: "rendered_images_required" });
+      const buf = await buildBoardPdfBuffer(subset, renderedImages);
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `attachment; filename="whiteboard-${id}.pdf"`);
+      return res.send(buf);
+    }
+    return res.status(400).json({ error: "bad_format", format });
   });
 
   // Download Excel file for a specific message

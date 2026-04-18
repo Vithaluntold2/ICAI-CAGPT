@@ -1,4 +1,4 @@
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "path";
 
@@ -6,23 +6,23 @@ import path from "path";
 // chevrotain-allstar requires chevrotain@^12 which lives at
 // node_modules/langium/node_modules/chevrotain. Vite / esbuild's default
 // resolution finds the hoisted v7 first and blows up on missing exports.
-// This plugin redirects ONLY chevrotain-allstar's `import "chevrotain"` to
-// the nested v12, leaving fast-formula-parser's imports untouched.
+// This plugin redirects ONLY chevrotain-allstar's (and langium's) `import "chevrotain"`
+// to the nested v12, leaving fast-formula-parser's imports untouched.
 const CHEVROTAIN_V12 = path.resolve(
   import.meta.dirname,
   "node_modules/langium/node_modules/chevrotain",
 );
 
-function chevrotainVersionPin() {
+function chevrotainVersionPin(): Plugin {
   return {
     name: "chevrotain-version-pin",
-    enforce: "pre" as const,
-    resolveId(id: string, importer: string | undefined) {
+    enforce: "pre",
+    async resolveId(id, importer) {
       if (id !== "chevrotain") return null;
       if (!importer) return null;
       if (importer.includes("chevrotain-allstar") || importer.includes("/langium/")) {
-        // Point at the package root — Vite will resolve the main field from there.
-        return this.resolve?.(CHEVROTAIN_V12, importer, { skipSelf: true }) ?? CHEVROTAIN_V12;
+        const resolved = await this.resolve(CHEVROTAIN_V12, importer, { skipSelf: true });
+        return resolved ?? CHEVROTAIN_V12;
       }
       return null;
     },

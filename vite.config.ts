@@ -11,6 +11,7 @@ export default defineConfig({
       "@": path.resolve(import.meta.dirname, "client", "src"),
       "@shared": path.resolve(import.meta.dirname, "shared"),
       "@assets": path.resolve(import.meta.dirname, "attached_assets"),
+      "highlight.js": path.resolve(import.meta.dirname, "node_modules/highlight.js"),
     },
   },
   root: path.resolve(import.meta.dirname, "client"),

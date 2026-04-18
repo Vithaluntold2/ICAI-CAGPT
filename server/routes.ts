@@ -4874,9 +4874,42 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
           }
         }
 
+        // Extract ```sheet``` blocks the AI emitted, evaluate their formulas,
+        // and promote the result into metadata.spreadsheetData so OutputPane
+        // renders the sheet on the right. Replaces the raw block in chat text
+        // with a compact pointer. Must run BEFORE inline formula evaluation so
+        // we don't double-decorate formulas that are also inside sheet blocks.
+        let aiSpreadsheetData: any = null;
+        try {
+          const { extractAndEvaluateSheetBlocks } = await import('./services/excel/sheetBlockParser');
+          const extracted = extractAndEvaluateSheetBlocks(fullResponse);
+          if (extracted.blockCount > 0 && extracted.spreadsheetData) {
+            fullResponse = extracted.text;
+            aiSpreadsheetData = extracted.spreadsheetData;
+            console.log(`[SSE] Extracted ${extracted.blockCount} sheet block(s) into spreadsheetData`);
+          }
+        } catch (err) {
+          console.warn('[SSE] Sheet-block extraction skipped:', (err as Error).message);
+        }
+
+        // Evaluate any Excel formulas the AI emitted INLINE in prose and inline
+        // their results next to each formula. Non-destructive: fails silently on
+        // any formula error, preserving the original text.
+        try {
+          const { inlineFormulaResults } = await import('./services/excel/formulaInliner');
+          const before = fullResponse.length;
+          const { content: rewritten, stats } = inlineFormulaResults(fullResponse);
+          if (stats.succeeded > 0) {
+            fullResponse = rewritten;
+            console.log(`[SSE] Inlined ${stats.succeeded}/${stats.attempted} formula results (added ${fullResponse.length - before} chars)`);
+          }
+        } catch (err) {
+          console.warn('[SSE] Formula inlining skipped:', (err as Error).message);
+        }
+
         // Stream response in chunks - use word-based streaming for natural feel
         console.log(`[SSE] Streaming ${fullResponse.length} chars...`);
-        
+
         // Split by words but keep punctuation attached
         const words = fullResponse.split(/(\s+)/);
         let wordBuffer = '';
@@ -4951,11 +4984,17 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
           metadata.excelCacheKey = excelCacheKey;
           console.log('[SSE] Excel workbook cached:', result.excelWorkbook.filename, 'key:', excelCacheKey);
         }
-        // Include spreadsheet preview data for Output Pane rendering
-        if (result.spreadsheetData) {
+        // Include spreadsheet preview data for Output Pane rendering.
+        // Prefer the AI-authored sheet blocks (lightweight, any mode) when present;
+        // otherwise use the Excel generator's structured output.
+        if (aiSpreadsheetData) {
+          metadata.spreadsheetData = aiSpreadsheetData;
+          metadata.showInOutputPane = true;
+          console.log(`[SSE] AI-authored spreadsheetData attached (${aiSpreadsheetData.sheets?.length || 0} sheet(s))`);
+        } else if (result.spreadsheetData) {
           metadata.spreadsheetData = result.spreadsheetData;
           metadata.showInOutputPane = true;
-          console.log('[SSE] Spreadsheet preview data attached');
+          console.log('[SSE] Spreadsheet preview data attached (from generator)');
         }
 
         // Debug log metadata (without large buffers)

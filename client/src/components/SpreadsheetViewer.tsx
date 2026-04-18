@@ -115,16 +115,16 @@ export default function SpreadsheetViewer({
     const resolvedAlign = style?.align || (!isHeader && isNumericValue(cellValue) ? 'right' : 'left');
 
     return {
-      fontWeight: style.font?.bold ? 'bold' : 'normal',
-      fontStyle: style.font?.italic ? 'italic' : 'normal',
-      color: style.font?.color || 'inherit',
-      fontSize: style.font?.size ? `${style.font.size}px` : 'inherit',
-      backgroundColor: style.background || 'transparent',
+      fontWeight: style?.font?.bold ? 'bold' : 'normal',
+      fontStyle: style?.font?.italic ? 'italic' : 'normal',
+      color: style?.font?.color || 'inherit',
+      fontSize: style?.font?.size ? `${style.font.size}px` : 'inherit',
+      backgroundColor: style?.background || 'transparent',
       textAlign: resolvedAlign,
-      borderTop: style.border?.top ? '1px solid #e2e8f0' : 'none',
-      borderBottom: style.border?.bottom ? '1px solid #e2e8f0' : 'none',
-      borderLeft: style.border?.left ? '1px solid #e2e8f0' : 'none',
-      borderRight: style.border?.right ? '1px solid #e2e8f0' : 'none',
+      borderTop: style?.border?.top ? '1px solid #e2e8f0' : 'none',
+      borderBottom: style?.border?.bottom ? '1px solid #e2e8f0' : 'none',
+      borderLeft: style?.border?.left ? '1px solid #e2e8f0' : 'none',
+      borderRight: style?.border?.right ? '1px solid #e2e8f0' : 'none',
     };
   };
 
@@ -178,70 +178,78 @@ export default function SpreadsheetViewer({
       ref={containerRef}
       className={`flex flex-col ${isFullscreen ? 'fixed inset-0 z-50 h-screen bg-background' : 'w-full'}`}
     >
-      {/* Spreadsheet Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b bg-muted/30">
-        <div className="flex items-center gap-3">
-          <FileSpreadsheet className="h-5 w-5 text-green-600" />
-          <div>
-            <h3 className="font-semibold text-sm">
+      {/* Spreadsheet Header — wrap-friendly so toolbar stays visible in narrow panels */}
+      <div className="flex flex-wrap items-start justify-between gap-3 px-4 py-3 border-b bg-muted/30 sticky top-0 z-10">
+        <div className="flex items-start gap-3 min-w-0 flex-1">
+          <FileSpreadsheet className="h-5 w-5 text-green-600 shrink-0 mt-0.5" />
+          <div className="min-w-0">
+            <h3 className="font-semibold text-sm truncate">
               {data.metadata?.title || 'Financial Calculations'}
             </h3>
             {data.metadata?.description && (
-              <p className="text-xs text-muted-foreground">
+              <p className="text-xs text-muted-foreground line-clamp-2">
                 {data.metadata.description}
               </p>
             )}
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setZoom(Math.max(50, zoom - 10))}
-            disabled={zoom <= 50}
-          >
-            −
-          </Button>
-          <span className="text-sm font-medium min-w-[3rem] text-center">
-            {zoom}%
-          </span>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setZoom(Math.min(200, zoom + 10))}
-            disabled={zoom >= 200}
-          >
-            +
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setZoom(100)}
-          >
-            <RefreshCw className="h-4 w-4" />
-          </Button>
+        <div className="flex items-center gap-1.5 flex-wrap shrink-0">
+          {/* Primary action — always visible, green, prominent */}
           {conversationId && messageId && (
             <Button
               variant="default"
               size="sm"
               onClick={handleDownloadExcel}
-              className="bg-green-600 hover:bg-green-700"
+              className="bg-green-600 hover:bg-green-700 h-8"
+              title="Download full workbook as .xlsx"
             >
-              <Download className="h-4 w-4 mr-2" />
-              Download Excel
+              <Download className="h-4 w-4 mr-1.5" />
+              <span className="hidden sm:inline">Download</span>
+              <span className="sm:hidden">.xlsx</span>
             </Button>
           )}
+          {/* Zoom — secondary; hide labels on narrow screens but keep buttons */}
+          <div className="flex items-center gap-0.5 border rounded-md h-8 bg-background">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 w-7 p-0"
+              onClick={() => setZoom(Math.max(50, zoom - 10))}
+              disabled={zoom <= 50}
+              title="Zoom out"
+            >
+              −
+            </Button>
+            <span className="text-xs font-medium min-w-[2.5rem] text-center">{zoom}%</span>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 w-7 p-0"
+              onClick={() => setZoom(Math.min(200, zoom + 10))}
+              disabled={zoom >= 200}
+              title="Zoom in"
+            >
+              +
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 w-7 p-0"
+              onClick={() => setZoom(100)}
+              title="Reset zoom"
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+            </Button>
+          </div>
           {onFullscreen && (
             <Button
               variant="outline"
               size="sm"
+              className="h-8 w-8 p-0"
               onClick={onFullscreen}
+              title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
             >
-              {isFullscreen ? (
-                <Minimize2 className="h-4 w-4" />
-              ) : (
-                <Maximize2 className="h-4 w-4" />
-              )}
+              {isFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
             </Button>
           )}
         </div>
@@ -265,48 +273,76 @@ export default function SpreadsheetViewer({
         </div>
       )}
 
-      {/* Spreadsheet Container */}
-      <div className={`${isFullscreen ? 'flex-1 overflow-auto min-h-0' : 'overflow-visible'} bg-background`}>
-        <div 
-          className="inline-block min-w-full p-4"
-          style={{ 
+      {/* Spreadsheet Container — proper horizontal scroll + Excel-style grid */}
+      <div
+        className={`bg-background ${isFullscreen ? 'flex-1 overflow-auto min-h-0' : 'max-w-full overflow-auto'}`}
+        style={{ maxHeight: isFullscreen ? undefined : '60vh' }}
+      >
+        <div
+          className="p-4"
+          style={{
             zoom: `${zoom}%`,
-            transformOrigin: 'top left'
+            transformOrigin: 'top left',
+            // `zoom` doesn't play well with `inline-block min-w-full`; let the
+            // child table drive its own width so overflow-x-auto on the parent
+            // actually produces a scrollbar instead of letting the table bleed.
+            width: 'max-content',
+            minWidth: '100%',
           }}
         >
-          <div className="border rounded-lg overflow-hidden shadow-sm bg-white dark:bg-gray-900">
-            <table className="w-full border-collapse">
+          <div className="border border-gray-300 dark:border-gray-700 rounded-md overflow-hidden shadow-sm bg-white dark:bg-gray-950">
+            <table className="border-collapse text-sm" style={{ borderSpacing: 0 }}>
               <tbody>
-                {currentSheet.data.map((row, rowIdx) => (
-                  <tr key={rowIdx} className="hover:bg-muted/20">
-                    {row.map((cell, colIdx) => {
-                      if (isCellMerged(rowIdx, colIdx)) {
-                        return null;
+                {currentSheet.data.map((row, rowIdx) => {
+                  const isHeader = rowIdx === 0;
+                  return (
+                    <tr
+                      key={rowIdx}
+                      className={
+                        isHeader
+                          ? 'bg-gray-100 dark:bg-gray-800 sticky top-0 z-10'
+                          : rowIdx % 2 === 0
+                            ? 'bg-white dark:bg-gray-950 hover:bg-blue-50 dark:hover:bg-blue-950/20'
+                            : 'bg-gray-50 dark:bg-gray-900 hover:bg-blue-50 dark:hover:bg-blue-950/20'
                       }
+                    >
+                      {row.map((cell, colIdx) => {
+                        if (isCellMerged(rowIdx, colIdx)) {
+                          return null;
+                        }
 
-                      const span = getCellSpan(rowIdx, colIdx);
-                      const isHeader = rowIdx === 0;
-                      const style = getCellStyle(rowIdx, colIdx, cell, isHeader);
-                      const cellIsFormula = isFormula(cell);
+                        const span = getCellSpan(rowIdx, colIdx);
+                        const style = getCellStyle(rowIdx, colIdx, cell, isHeader);
+                        const cellIsFormula = isFormula(cell);
+                        const isErr = typeof cell === 'string' && cell.startsWith('#ERR');
 
-                      return (
-                        <td
-                          key={colIdx}
-                          className={`
-                            px-3 py-2 border text-sm
-                            ${isHeader ? 'font-semibold bg-muted/40' : ''}
-                            ${cellIsFormula ? 'bg-emerald-50 dark:bg-emerald-900/20 font-mono text-emerald-700 dark:text-emerald-400 text-xs' : ''}
-                          `}
-                          style={style}
-                          title={cellIsFormula ? `Formula: ${cell}` : undefined}
-                          {...span}
-                        >
-                          {getDisplayValue(cell, rowIdx)}
-                        </td>
-                      );
-                    })}
-                  </tr>
-                ))}
+                        return (
+                          <td
+                            key={colIdx}
+                            className={
+                              // Excel-style grid: thin gray border on every side of every cell.
+                              'px-3 py-1.5 border border-gray-300 dark:border-gray-700 whitespace-nowrap align-middle ' +
+                              (isHeader
+                                ? 'font-semibold text-xs uppercase tracking-wide text-gray-700 dark:text-gray-300 '
+                                : '') +
+                              (cellIsFormula
+                                ? 'bg-emerald-50 dark:bg-emerald-950/30 font-mono text-emerald-700 dark:text-emerald-400 text-xs '
+                                : '') +
+                              (isErr
+                                ? 'bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400 font-mono text-xs '
+                                : '')
+                            }
+                            style={style}
+                            title={cellIsFormula ? `Formula: ${cell}` : isErr ? 'Formula could not be evaluated' : undefined}
+                            {...span}
+                          >
+                            {getDisplayValue(cell, rowIdx)}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

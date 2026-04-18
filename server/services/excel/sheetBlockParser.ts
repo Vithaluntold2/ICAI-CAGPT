@@ -1,0 +1,247 @@
+/**
+ * Sheet Block Parser
+ *
+ * Extracts AI-emitted spreadsheet blocks from chat messages, evaluates any
+ * embedded formulas server-side with HyperFormula, and produces a
+ * SpreadsheetData payload that the OutputPane + SpreadsheetViewer already know
+ * how to render. The block in the chat text is then replaced with a short
+ * pointer so the chat body stays readable while the sheet appears on the right.
+ *
+ * AI contract — expected format:
+ *
+ *     ```sheet
+ *     title: NPV at 10% (3-year cashflow)
+ *     description: Present value of year-by-year inflows
+ *     ---
+ *     Year,Cashflow,Discount Factor,PV
+ *     1,400,=1/(1+0.1)^A2,=B2*C2
+ *     2,500,=1/(1+0.1)^A3,=B3*C3
+ *     3,600,=1/(1+0.1)^A4,=B4*C4
+ *     Total,=SUM(B2:B4),,=SUM(D2:D4)
+ *     ```
+ *
+ * Rules:
+ *   - Language tag is `sheet` or `spreadsheet`
+ *   - Optional front-matter (title/description) followed by `---` separator
+ *   - Body is CSV; formulas start with `=` and reference cells (A1, B2:B4…)
+ *   - Row 1 of the body is the header row
+ *   - Data + formulas live in rows 2..N
+ *
+ * Output:
+ *   - `SpreadsheetData` with rendered values (formulas evaluated) in `data`
+ *   - Formulas also collected into `formulas[]` for display
+ *   - Placeholder inline in text pointing the user at the output panel
+ */
+
+import { evaluateSheet } from './formulaEvaluator';
+
+const SHEET_BLOCK_RE = /```(?:sheet|spreadsheet)\s*\n([\s\S]*?)\n```/g;
+
+export interface SheetData {
+  name: string;
+  data: (string | number | null)[][];
+  formulas?: string[];
+}
+
+export interface SpreadsheetData {
+  sheets: SheetData[];
+  metadata?: {
+    title?: string;
+    description?: string;
+    calculations?: string[];
+  };
+}
+
+interface ExtractResult {
+  text: string;                        // content with sheet blocks replaced
+  spreadsheetData: SpreadsheetData | null;
+  blockCount: number;
+}
+
+export function extractAndEvaluateSheetBlocks(content: string): ExtractResult {
+  if (!content) return { text: '', spreadsheetData: null, blockCount: 0 };
+
+  const sheets: SheetData[] = [];
+  const titles: string[] = [];
+  const descriptions: string[] = [];
+  const allFormulas: string[] = [];
+
+  const rewritten = content.replace(SHEET_BLOCK_RE, (_match, body: string) => {
+    const parsed = parseSheetBlock(body);
+    if (!parsed) return _match; // couldn't parse — leave original
+    sheets.push(parsed.sheet);
+    if (parsed.title) titles.push(parsed.title);
+    if (parsed.description) descriptions.push(parsed.description);
+    allFormulas.push(...(parsed.sheet.formulas ?? []));
+
+    const label = parsed.title ? ` — ${parsed.title}` : '';
+    return `> 📊 **Spreadsheet${label}** rendered in the output panel →`;
+  });
+
+  if (sheets.length === 0) {
+    return { text: content, spreadsheetData: null, blockCount: 0 };
+  }
+
+  return {
+    text: rewritten,
+    blockCount: sheets.length,
+    spreadsheetData: {
+      sheets,
+      metadata: {
+        title: titles[0],
+        description: descriptions.join(' · ') || undefined,
+        calculations: allFormulas.length > 0 ? dedupe(allFormulas).slice(0, 20) : undefined,
+      },
+    },
+  };
+}
+
+interface ParsedBlock {
+  sheet: SheetData;
+  title?: string;
+  description?: string;
+}
+
+function parseSheetBlock(body: string): ParsedBlock | null {
+  // Split optional front-matter on first --- separator
+  const sepIdx = body.indexOf('\n---');
+  let header: Record<string, string> = {};
+  let csvPart = body;
+  if (sepIdx !== -1) {
+    const headerPart = body.slice(0, sepIdx).trim();
+    csvPart = body.slice(sepIdx + 4).replace(/^\n+/, '');
+    for (const line of headerPart.split('\n')) {
+      const m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_ -]*?)\s*:\s*(.+?)\s*$/);
+      if (m) header[m[1].toLowerCase().trim()] = m[2];
+    }
+  }
+
+  // Parse CSV body
+  const lines = csvPart.split('\n').map(l => l.trimEnd()).filter(l => l.length > 0);
+  if (lines.length < 2) return null; // need header + at least one row
+
+  const rows = lines.map(splitCsvLine);
+  if (rows.length === 0) return null;
+
+  // Build the raw grid
+  const maxCols = rows.reduce((m, r) => Math.max(m, r.length), 0);
+  const grid: (string | number | null)[][] = rows.map(r => {
+    const padded = [...r];
+    while (padded.length < maxCols) padded.push('');
+    return padded.map(coerceCell);
+  });
+
+  // Evaluate formulas: collect (addr → formula) and (addr → literal value)
+  // starting from row 1 (0-indexed) because row 0 is the header.
+  const cellLiterals: Record<string, any> = {};
+  const cellFormulas: Record<string, string> = {};
+  const formulaList: string[] = [];
+  for (let r = 0; r < grid.length; r++) {
+    for (let c = 0; c < maxCols; c++) {
+      const v = grid[r][c];
+      if (v === '' || v === null) continue;
+      const addr = cellAddress(r, c);
+      if (typeof v === 'string' && v.trim().startsWith('=')) {
+        cellFormulas[addr] = v.trim();
+        formulaList.push(v.trim());
+      } else {
+        cellLiterals[addr] = v;
+      }
+    }
+  }
+
+  // Evaluate (if there are any formulas); leave raw values in data otherwise
+  if (Object.keys(cellFormulas).length > 0) {
+    const evalResult = evaluateSheet({ cells: cellLiterals, formulas: cellFormulas });
+    for (const [addr, computed] of Object.entries(evalResult.values)) {
+      const parsed = parseAddr(addr);
+      if (parsed) grid[parsed.row][parsed.col] = coerceCell(computed);
+    }
+    for (const [addr, _err] of Object.entries(evalResult.errors)) {
+      const parsed = parseAddr(addr);
+      if (parsed) grid[parsed.row][parsed.col] = '#ERR';
+    }
+  }
+
+  return {
+    title: header['title'],
+    description: header['description'],
+    sheet: {
+      name: (header['name'] || header['title'] || 'Sheet 1').slice(0, 40),
+      data: grid,
+      formulas: formulaList.length > 0 ? dedupe(formulaList).slice(0, 30) : undefined,
+    },
+  };
+}
+
+/* ───────────────────────── helpers ───────────────────────── */
+
+/**
+ * CSV splitter that respects BOTH quoted fields AND formula paren depth.
+ * The AI doesn't reliably quote cells containing commas inside Excel formulas,
+ * so when we're inside a formula's parentheses (e.g. `=IF(a, b, c)`,
+ * `=NPV(rate, range)`, `=LAMBDA(a, b, a+b)`), commas are literal, not
+ * separators.
+ */
+function splitCsvLine(line: string): string[] {
+  const out: string[] = [];
+  let cur = '';
+  let inQuotes = false;
+  let parenDepth = 0;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inQuotes) {
+      if (ch === '"' && line[i + 1] === '"') { cur += '"'; i++; }
+      else if (ch === '"') { inQuotes = false; }
+      else { cur += ch; }
+    } else {
+      if (ch === '"') { inQuotes = true; }
+      else if (ch === '(') { parenDepth++; cur += ch; }
+      else if (ch === ')') { if (parenDepth > 0) parenDepth--; cur += ch; }
+      else if (ch === ',' && parenDepth === 0) { out.push(cur); cur = ''; }
+      else { cur += ch; }
+    }
+  }
+  out.push(cur);
+  return out.map(s => s.trim());
+}
+
+function coerceCell(v: unknown): string | number | null {
+  if (v === null || v === undefined) return null;
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  if (typeof v === 'boolean') return v ? 'TRUE' : 'FALSE';
+  const s = String(v).trim();
+  if (s === '') return null;
+  // formulas stay as strings until evaluated
+  if (s.startsWith('=')) return s;
+  // numeric literals (incl. negatives, decimals, grouping)
+  const cleaned = s.replace(/[,₹$€£]/g, '').replace(/%$/, '');
+  const n = Number(cleaned);
+  if (!isNaN(n) && cleaned !== '' && /^[+-]?\d/.test(cleaned)) {
+    return s.endsWith('%') ? n / 100 : n;
+  }
+  return s;
+}
+
+function cellAddress(row: number, col: number): string {
+  let letters = '';
+  let n = col;
+  while (true) {
+    letters = String.fromCharCode(65 + (n % 26)) + letters;
+    n = Math.floor(n / 26) - 1;
+    if (n < 0) break;
+  }
+  return `${letters}${row + 1}`;
+}
+
+function parseAddr(addr: string): { row: number; col: number } | null {
+  const m = addr.match(/^([A-Z]+)(\d+)$/);
+  if (!m) return null;
+  let col = 0;
+  for (const ch of m[1]) col = col * 26 + (ch.charCodeAt(0) - 64);
+  return { row: parseInt(m[2], 10) - 1, col: col - 1 };
+}
+
+function dedupe<T>(arr: T[]): T[] {
+  return Array.from(new Set(arr));
+}

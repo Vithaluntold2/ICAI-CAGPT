@@ -210,47 +210,81 @@ export class QueryTriageService {
   }
 
   private detectJurisdiction(query: string, conversationHistory?: Array<{ role: 'user' | 'assistant'; content: string }>): string[] {
-    const jurisdictions: string[] = [];
-    
+    // Each keyword is compiled to a WORD-BOUNDARY regex so that short tokens
+    // like 'us', 'uk', 'eu', 'hk', 'ato' don't match inside words like
+    // "business", "trust", "use", "european", "indicator", "Plato".
+    // Anchors (Section 139, ITR-1, GSTR, Form 1040, HMRC, SPICe+ etc.) make
+    // jurisdiction detection robust against false positives from common English
+    // words that happen to contain the 2-letter country code as a substring.
     const jurisdictionMap: Record<string, string[]> = {
-      'us': ['united states', 'usa', 'u.s.', 'irs', 'delaware', 'california', 'new york', 'federal tax', '1040', 'w-2', 'w2', '401k', '401(k)'],
-      'canada': ['canada', 'canadian', 'cra'],
-      'uk': ['uk', 'united kingdom', 'britain', 'hmrc'],
-      'eu': ['eu', 'european union', 'europe'],
-      'australia': ['australia', 'australian', 'ato'],
-      'india': ['india', 'indian', 'gst india', 'income tax india', 'section 80', 'section 10', 'fy 2024', 'fy 2025', 'assessment year', 'cbdt', 'it act', 'income tax act'],
-      'china': ['china', 'chinese', 'prc'],
-      'singapore': ['singapore'],
-      'hong_kong': ['hong kong', 'hk']
+      // India FIRST so robust anchors beat loose US substrings on later turns.
+      'india': [
+        'india', 'indian',
+        'income[- ]?tax act', 'it act',
+        'cbdt', 'cbic',
+        'itr[- ]?[1-7]?', 'itr\\s*form',
+        'gstr[- ]?[0-9a-z]+', 'gstin',
+        'tds', 'tcs',
+        'section\\s*(10|80[a-z]*|139|194[a-z]*|234[abc]|44a[a-z]*|87a|54[a-z]*|115bac)',
+        'assessment\\s*year', 'ay\\s*20\\d{2}[- ]?2?\\d?',
+        'fy\\s*20\\d{2}[- ]?2?\\d?',
+        'rupees?', '₹',
+        'aadhaar', 'pan\\s*card',
+        'spice\\+', 'roc', 'mca',
+        'din(?:\\s*number)?', 'dsc',
+        'evc', 'form\\s*26as', 'ais', 'tis'
+      ],
+      'us': [
+        'united states', 'u\\.s\\.a?', 'usa',
+        'irs', 'internal revenue service',
+        'form\\s*1040', 'w-?2', '1099-[a-z]+', '401\\s*\\(?k\\)?',
+        'delaware', 'california', 'new york',
+        'federal\\s*tax', 'fica', 'ssn'
+      ],
+      'canada': ['canada', 'canadian', 'cra', 'cpp', 'rrsp', 't4\\s*slip'],
+      'uk': ['united kingdom', 'britain', 'british', 'hmrc', 'paye', 'vat\\s*uk', 'self\\s*assessment', 'sa100'],
+      'eu': ['european union', 'eu\\s*directive', 'europe\\s*vat'],
+      'australia': ['australia', 'australian', 'ato', 'mygov', 'mytax', 'abn', 'paygw?', 'stp'],
+      'china': ['china', 'chinese', 'prc\\s*tax'],
+      'singapore': ['singapore', 'iras\\s*singapore'],
+      'hong_kong': ['hong\\s*kong', 'hksar', 'ird\\s*hk']
     };
-    
-    // First, check current query for jurisdiction keywords
-    for (const [jurisdiction, keywords] of Object.entries(jurisdictionMap)) {
-      if (keywords.some(kw => query.includes(kw))) {
-        jurisdictions.push(jurisdiction);
+
+    // Build compiled patterns ONCE (word-boundary where applicable).
+    // \b doesn't work around non-ASCII like ₹, so we allow either word-boundary
+    // OR surrounding whitespace/punctuation.
+    const compiled: Array<[string, RegExp[]]> = Object.entries(jurisdictionMap).map(([j, kws]) => [
+      j,
+      kws.map(kw => new RegExp(`(?:^|\\W)(?:${kw})(?:$|\\W)`, 'i')),
+    ]);
+
+    const scanText = (text: string): string | null => {
+      for (const [jurisdiction, patterns] of compiled) {
+        if (patterns.some(re => re.test(text))) return jurisdiction;
       }
-    }
-    
-    // If no jurisdiction found in current query, check conversation history
-    if (jurisdictions.length === 0 && conversationHistory && conversationHistory.length > 0) {
-      // Look through conversation history (most recent first) to find jurisdiction context
+      return null;
+    };
+
+    // 1) Current query
+    const fromQuery = scanText(query);
+    if (fromQuery) return [fromQuery];
+
+    // 2) Conversation history, most recent first. Assistant messages matter
+    //    just as much as user messages — an assistant Turn 1 full of
+    //    India-specific anchors is strong signal the conversation is Indian.
+    if (conversationHistory && conversationHistory.length > 0) {
       for (let i = conversationHistory.length - 1; i >= 0; i--) {
-        const message = conversationHistory[i];
-        const messageContent = message.content.toLowerCase();
-        
-        for (const [jurisdiction, keywords] of Object.entries(jurisdictionMap)) {
-          if (keywords.some(kw => messageContent.includes(kw))) {
-            jurisdictions.push(jurisdiction);
-            console.log(`[QueryTriage] Jurisdiction '${jurisdiction}' inferred from conversation history`);
-            break; // Found jurisdiction from history, stop searching
-          }
+        const msg = conversationHistory[i];
+        const found = scanText(msg.content || '');
+        if (found) {
+          console.log(`[QueryTriage] Jurisdiction '${found}' inferred from conversation history (turn ${i}, role ${msg.role})`);
+          return [found];
         }
-        
-        if (jurisdictions.length > 0) break; // Stop if we found a jurisdiction
       }
     }
-    
-    return jurisdictions.length > 0 ? jurisdictions : []; // Do not assume US by default
+
+    // 3) No signal — return empty; prompt builder handles the missing case.
+    return [];
   }
 
   private assessComplexity(query: string): QueryClassification['complexity'] {

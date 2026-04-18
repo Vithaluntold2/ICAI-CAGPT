@@ -30,5 +30,9 @@ export default defineConfig({
     // chevrotain-allstar which mis-resolves against the root chevrotain@7 instead
     // of the nested v12 it needs.
     exclude: ["mermaid"],
+    // Mermaid depends on dayjs / khroma / lodash-es at runtime. When mermaid is
+    // excluded, these need to be pre-bundled individually so esbuild supplies
+    // the CJS→ESM default-export interop they lack on their own.
+    include: ["dayjs", "khroma", "lodash-es"],
   },
 });

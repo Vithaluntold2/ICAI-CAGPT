@@ -14,12 +14,12 @@ This conversation has a visual whiteboard. When the user asks for a diagram, cha
 
 Use these formats:
 
-- Flowcharts / process diagrams / decision trees / state diagrams → a fenced \`\`\`mermaid code block using mermaid flowchart syntax. Example:
+- Flowcharts / process diagrams / decision trees / state diagrams → a fenced \`\`\`mermaid code block using mermaid flowchart syntax. **Always wrap node labels in double quotes if they contain any of: parentheses ( ), commas, colons, semicolons, #, or quotes. Unquoted labels with these characters cause mermaid parse errors.** Use \`<br/>\` (not \`\\n\`) for line breaks inside labels. Example:
   \`\`\`mermaid
   flowchart TD
-    A[Start] --> B{Is condition met?}
-    B -- Yes --> C[Action 1]
-    B -- No --> D[Action 2]
+    A[Start] --> B{"Is condition met?"}
+    B -- Yes --> C["Action 1 (with detail)"]
+    B -- No --> D["Action 2<br/>multi-line label"]
   \`\`\`
 
 - Data tables / side-by-side comparisons → a GFM markdown table (| col | col | / |---|---|). These render inline.

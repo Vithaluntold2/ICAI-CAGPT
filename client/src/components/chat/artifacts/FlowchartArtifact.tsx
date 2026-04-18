@@ -31,12 +31,34 @@ async function ensureMermaid() {
 /**
  * Normalise common mermaid-source mistakes the LLM makes:
  *   - `\n` (literal two-char escape) inside node labels → `<br/>`
+ *   - square-bracket labels with unquoted `(`, `)`, `,`, `:`, `#` etc. get wrapped in double quotes
+ *   - same for `(...)`, `{...}`, `((...))`, `{{...}}` node shapes
  *   - leading/trailing whitespace
  */
+const SPECIAL_IN_LABEL = /[(),:;#"]/;
+
+function quoteIfNeeded(content: string): string {
+  const trimmed = content.trim();
+  if (trimmed.startsWith('"') && trimmed.endsWith('"')) return content;
+  if (!SPECIAL_IN_LABEL.test(content)) return content;
+  return `"${content.replace(/"/g, '\\"')}"`;
+}
+
 function normalizeMermaidSource(src: string): string {
-  return src
-    .replace(/\\n/g, "<br/>") // literal backslash-n → HTML line break
-    .trim();
+  let out = src.replace(/\\n/g, "<br/>");
+
+  // Node shape: IDENTIFIER[...]
+  out = out.replace(/(\b\w+)\[([^\]]+)\]/g, (_m, id, content) => `${id}[${quoteIfNeeded(content)}]`);
+  // Circle: IDENTIFIER((...))
+  out = out.replace(/(\b\w+)\(\(([^)]+)\)\)/g, (_m, id, content) => `${id}((${quoteIfNeeded(content)}))`);
+  // Rounded: IDENTIFIER(...)
+  out = out.replace(/(\b\w+)\(([^)]+)\)/g, (_m, id, content) => `${id}(${quoteIfNeeded(content)})`);
+  // Hexagon: IDENTIFIER{{...}}
+  out = out.replace(/(\b\w+)\{\{([^}]+)\}\}/g, (_m, id, content) => `${id}{{${quoteIfNeeded(content)}}}`);
+  // Diamond: IDENTIFIER{...}
+  out = out.replace(/(\b\w+)\{([^}]+)\}/g, (_m, id, content) => `${id}{${quoteIfNeeded(content)}}`);
+
+  return out.trim();
 }
 
 export function FlowchartArtifact({ payload }: { payload: { source: string } }) {

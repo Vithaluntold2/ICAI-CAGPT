@@ -93,6 +93,14 @@ import { ConversationListSkeleton } from "@/components/ui/LoadingSkeleton";
 import { VoiceModeEnhanced, MessageSpeakButton } from "@/components/voice/VoiceModeEnhanced";
 import type { SpeakControls } from "@/components/voice/VoiceModeEnhanced";
 import { ThinkingBlock } from "@/components/ThinkingBlock";
+import { useFeatureFlags } from "@/lib/featureFlags";
+import { ChatViewSwitcher, useChatView } from "@/components/chat/ChatViewSwitcher";
+import { ChatMessageRich } from "@/components/chat/ChatMessageRich";
+import { Whiteboard } from "@/components/chat/whiteboard/Whiteboard";
+import { ChatPIP } from "@/components/chat/pip/ChatPIP";
+import { Composer } from "@/components/chat/Composer";
+import { useConversationArtifacts } from "@/hooks/useConversationArtifacts";
+import type { ComposerSelection } from "@/components/chat/Composer";
 
 // Helper function to get appropriate status message based on chat mode
 const getStatusForMode = (mode: string): string => {
@@ -186,6 +194,13 @@ export default function Chat() {
   const { user, logout, isLoading } = useAuth();
   const [, setLocation] = useLocation();
   const { toast } = useToast();
+
+  // Feature flag: whiteboard v2 (rich rendering + whiteboard view + PIP).
+  const { data: features } = useFeatureFlags();
+  const whiteboardEnabled = !!features?.whiteboardV2;
+  const [view, setView] = useChatView();
+  // Artifacts for PIP chip lookup / rich message rendering when flag is ON.
+  const { data: artifactsData } = useConversationArtifacts(activeConversation);
 
   const chatModes = [
     { id: 'standard', label: 'Standard Chat', icon: MessageSquare, description: 'General accounting advice', gradient: 'from-slate-500 to-slate-600' },
@@ -390,7 +405,7 @@ export default function Chat() {
   }, [messagesData, isStreaming]);
 
   const sendMessageMutation = useMutation({
-    mutationFn: async ({ content, file }: { content: string; file: File | null }) => {
+    mutationFn: async ({ content, file, selection }: { content: string; file: File | null; selection?: ComposerSelection }) => {
       // Determine which profile to use for new conversations
       let profileIdToUse: string | null | undefined = undefined;
       if (!activeConversation) {
@@ -467,8 +482,14 @@ export default function Chat() {
           data: fileData.base64Data,
           type: fileData.type,
           filename: fileData.name
-        } : undefined
-      }, {
+        } : undefined,
+        // selection is forwarded when whiteboard v2 is on; api.ts passes
+        // only declared fields today, so the server will still receive it
+        // once api.ts is extended. Kept on the mutation variables so call
+        // sites from Composer / ChatPIP can round-trip the whiteboard
+        // context. See routes.ts — `req.body.selection` is already read.
+        ...(selection ? { selection } : {}),
+      } as Parameters<typeof chatApi.streamMessage>[0], {
         onStart: (convId) => {
           setIsStreaming(true);
           setThinkingSteps([]); // Reset thinking steps
@@ -592,6 +613,23 @@ export default function Chat() {
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
     }
+  };
+
+  // Unified send used by the whiteboard v2 Composer / ChatPIP.
+  // Mirrors handleSendMessage but takes text + optional selection directly.
+  const handleSend = (text: string, selection?: ComposerSelection) => {
+    if (!user) return;
+    const trimmed = text.trim();
+    if (!trimmed) return;
+
+    const userMessage: Message = {
+      id: Date.now().toString(),
+      role: 'user',
+      content: trimmed,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    };
+    setMessages(prev => [...prev, userMessage]);
+    sendMessageMutation.mutate({ content: trimmed, file: null, selection });
   };
 
   const handleNewChat = () => {
@@ -869,6 +907,11 @@ export default function Chat() {
         </div>
 
         <div className="flex items-center gap-2">
+          {/* Whiteboard v2: chat/board view switcher (flag-gated) */}
+          {whiteboardEnabled && (
+            <ChatViewSwitcher value={view} onChange={setView} />
+          )}
+
           {/* Chat mode indicator in header */}
           <span className="text-xs font-medium text-muted-foreground bg-muted px-2.5 py-1 rounded-full">
             {chatModes.find(m => m.id === chatMode)?.label || 'Standard Chat'}
@@ -909,7 +952,91 @@ export default function Chat() {
 
       {/* Mode ribbon hidden for spacious layout — mode selector in input bar + menu */}
 
-      {/* 3-Pane Resizable Layout */}
+      {whiteboardEnabled ? (
+        view === "board" ? (
+          /* Whiteboard v2 BOARD VIEW: canvas + floating chat PIP */
+          <div className="flex-1 relative overflow-hidden">
+            {activeConversation ? (
+              <Whiteboard conversationId={activeConversation} />
+            ) : (
+              <div
+                className="flex flex-col items-center justify-center h-full text-muted-foreground p-8 text-center"
+                data-testid="whiteboard-no-conversation"
+              >
+                <p className="text-sm">Start a conversation to populate your whiteboard.</p>
+              </div>
+            )}
+            <ChatPIP
+              messages={messages.map(m => ({ id: m.id, role: m.role, content: m.content }))}
+              byId={artifactsData?.byId ?? {}}
+              onSend={(text, selection) => handleSend(text, selection)}
+            />
+          </div>
+        ) : (
+          /* Whiteboard v2 CHAT VIEW (flag ON): stacked message list with rich rendering */
+          <div className="flex-1 flex flex-col h-full min-h-0">
+            <ScrollArea className="flex-1" data-testid="chat-messages-rich">
+              <div className="max-w-4xl mx-auto p-4 space-y-4">
+                {messages.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center h-full text-center py-16">
+                    <h2 className="text-2xl font-medium text-foreground/80">What are you working on?</h2>
+                  </div>
+                ) : (
+                  <>
+                    {messages
+                      .filter(m => !(m.role === 'assistant' && m.metadata?.showInOutputPane))
+                      .map(message => (
+                      <div
+                        key={message.id}
+                        className={message.role === 'user' ? 'flex justify-end' : 'flex justify-start'}
+                      >
+                        <div
+                          className={
+                            message.role === 'user'
+                              ? 'bg-primary text-primary-foreground rounded-lg px-3 py-2 max-w-2xl'
+                              : 'bg-card border rounded-lg px-3 py-2 max-w-3xl w-full'
+                          }
+                        >
+                          {message.role === 'assistant' ? (
+                            message.content ? (
+                              <ChatMessageRich
+                                content={message.content}
+                                conversationId={activeConversation}
+                              />
+                            ) : (
+                              isStreaming && message.id.startsWith('streaming-') ? (
+                                <ThinkingBlock
+                                  steps={thinkingSteps}
+                                  isActive={true}
+                                  currentStatus={cagptStatus || 'Thinking'}
+                                />
+                              ) : (
+                                <span className="text-sm text-muted-foreground italic">Loading...</span>
+                              )
+                            )
+                          ) : (
+                            <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                    <div ref={messagesEndRef} />
+                  </>
+                )}
+              </div>
+            </ScrollArea>
+            <div className="border-t p-4 bg-background/95">
+              <div className="max-w-4xl mx-auto">
+                <Composer
+                  onSend={(text, selection) => handleSend(text, selection)}
+                  disabled={sendMessageMutation.isPending}
+                />
+              </div>
+            </div>
+          </div>
+        )
+      ) : (
+      /* 3-Pane Resizable Layout */
       <ResizablePanelGroup key={`layout-${rightPaneCollapsed}-${leftPaneCollapsed}`} direction="horizontal" className="flex-1">
         {/* Left Pane: Sessions - Always render, control visibility with collapsedSize */}
         <ResizablePanel 
@@ -1613,6 +1740,7 @@ export default function Chat() {
           </>
         )}
       </ResizablePanelGroup>
+      )}
 
       {/* Rename Dialog */}
       <Dialog open={renameDialogOpen} onOpenChange={setRenameDialogOpen}>

@@ -179,9 +179,9 @@ class ContinuousLearningService extends EventEmitter {
    * Uses existing interactionLogs schema
    */
   async logInteraction(params: {
-    userId: number;
-    conversationId: number;
-    messageId?: number;
+    userId: string | number;
+    conversationId: string | number;
+    messageId?: string | number;
     query: string;
     response: string;
     classification?: QueryClassification;
@@ -189,11 +189,18 @@ class ContinuousLearningService extends EventEmitter {
     retrievalTimeMs?: number;
     totalTimeMs?: number;
     contextUsed?: string[];
-  }): Promise<string> {
+  }): Promise<string | null> {
+    // Guard: UUID columns reject '0'/empty/NaN values and fail the FK.
+    // Silently skip the log rather than throw — learning is best-effort.
+    const convId = params.conversationId ? String(params.conversationId) : '';
+    const userId = params.userId ? String(params.userId) : '';
+    if (!convId || convId === '0' || !userId || userId === '0') {
+      return null;
+    }
     try {
       const [result] = await db.insert(interactionLogs).values({
-        userId: String(params.userId),
-        conversationId: String(params.conversationId),
+        userId,
+        conversationId: convId,
         messageId: params.messageId ? String(params.messageId) : null,
         query: params.query,
         response: params.response,

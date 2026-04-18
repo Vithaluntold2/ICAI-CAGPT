@@ -6,31 +6,23 @@
  * Usage: npx tsx scripts/create-test-user.ts
  */
 
-import { Pool, neonConfig } from '@neondatabase/serverless';
+import { Pool } from 'pg';
 import bcrypt from 'bcryptjs';
-import { readFileSync } from 'fs';
-import { join } from 'path';
-import ws from 'ws';
 import { randomUUID } from 'crypto';
 
-// Configure WebSocket for Neon
-neonConfig.webSocketConstructor = ws;
-
-// Load DATABASE_URL from .env file
-const envPath = join(process.cwd(), '.env');
-const envContent = readFileSync(envPath, 'utf-8');
-const dbUrlMatch = envContent.match(/^DATABASE_URL=(.+)$/m);
-if (!dbUrlMatch) {
-  throw new Error('DATABASE_URL not found in .env file');
+if (!process.env.DATABASE_URL) {
+  throw new Error('DATABASE_URL not set. Run with: tsx --env-file=.env scripts/create-test-user.ts');
 }
-const DATABASE_URL = dbUrlMatch[1].trim();
 
-const pool = new Pool({ connectionString: DATABASE_URL });
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.DB_SSL === 'false' ? false : { rejectUnauthorized: false },
+});
 
 const TEST_USER = {
   name: 'Pro Tester',
   email: 'test@professional.com',
-  password: 'test123',
+  password: 'Test1234',
   subscriptionTier: 'professional',
   isAdmin: true,
 };
@@ -47,8 +39,8 @@ async function createTestUser() {
       
       const hashedPassword = await bcrypt.hash(TEST_USER.password, 10);
       const result = await pool.query(
-        `UPDATE users 
-         SET password = $1, name = $2, subscription_tier = $3, is_admin = $4, email_verified = true, email_verified_at = NOW()
+        `UPDATE users
+         SET password = $1, name = $2, subscription_tier = $3, is_admin = $4
          WHERE email = $5
          RETURNING id, email, name, subscription_tier, is_admin`,
         [
@@ -72,8 +64,8 @@ async function createTestUser() {
       
       const hashedPassword = await bcrypt.hash(TEST_USER.password, 10);
       const result = await pool.query(
-        `INSERT INTO users (id, email, password, name, subscription_tier, is_admin, email_verified, email_verified_at, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+        `INSERT INTO users (id, email, password, name, subscription_tier, is_admin, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, NOW())
          RETURNING id, email, name, subscription_tier, is_admin`,
         [
           randomUUID(),
@@ -82,8 +74,6 @@ async function createTestUser() {
           TEST_USER.name,
           TEST_USER.subscriptionTier,
           TEST_USER.isAdmin,
-          true,
-          new Date(),
         ]
       );
 

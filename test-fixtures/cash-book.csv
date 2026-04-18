@@ -1,0 +1,21 @@
+Date,Vendor,Amount,Description
+2026-03-02,Acme Consulting,9500,Professional services
+2026-03-03,Bright Solutions,1234.56,Software subscription
+2026-03-05,Delta Logistics,48750,Freight delivery
+2026-03-06,Elite Services,9800,Consulting
+2026-03-08,Forge Metals,11500,Raw material supply - AMOUNT MISMATCH
+2026-03-09,Global Traders,50000,Bulk procurement
+2026-03-10,Horizon Tech,9750,Hardware maintenance
+2026-03-11,Iris Media,9950,Marketing agency
+2026-03-14,Jasper LLP,47500,Legal advisory - TIMING MISMATCH (bank 03-12)
+2026-03-15,Lima Corp,9850,Consulting
+2026-03-17,Noble Enterprises,9990,Admin services
+2026-03-19,Pine Traders,49500,Procurement
+2026-03-23,Titan Industries,10000,Round number order
+2026-03-25,Vertex Labs,9940,R&D consulting
+2026-03-27,Xenon Corp,9960,Integration services
+2026-03-30,Acme Consulting,9500,Services contract
+2026-03-31,Beta Networks,48000,Network procurement
+2026-04-01,Gamma Systems,47250,Infrastructure
+2026-04-03,Phantom Vendor,18000,Entry only in cash book - UNMATCHED
+2026-04-09,Omega Corp,9750,Services

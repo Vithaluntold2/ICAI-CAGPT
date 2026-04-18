@@ -45,7 +45,19 @@ export class DocumentAnalyzerAgent {
     mimeType: string
   ): Promise<DocumentAnalysisResult> {
     console.log(`[DocumentAnalyzer] Starting analysis of ${filename} (${mimeType}), ${buffer.length} bytes`);
-    
+
+    // Tabular formats: parse to structured rows directly; Azure DI is not suited for row-level extraction.
+    if (this.isTabular(mimeType, filename)) {
+      try {
+        const tabular = await this.parseTabular(buffer, filename, mimeType);
+        console.log(`[DocumentAnalyzer] Tabular parse extracted ${tabular.analysis.structuredData?.items?.length || 0} rows`);
+        return tabular;
+      } catch (error: any) {
+        console.error('[DocumentAnalyzer] Tabular parse failed:', error.message);
+        // fall through to generic fallback
+      }
+    }
+
     let azureResult: DocumentAnalysisResult | null = null;
     let pdfParseResult: DocumentAnalysisResult | null = null;
     
@@ -167,13 +179,16 @@ export class DocumentAnalyzerAgent {
         throw new Error('Azure Document Intelligence provider not available');
       }
 
-      // Use Azure DI provider's generateCompletion with attachment
+      // Use Azure DI provider's generateCompletion with attachment.
+      // Pass a filename-based documentType hint so specialized models (receipt,
+      // invoice, W-2, 1040, ...) are selected when the filename indicates one.
       const request: CompletionRequest = {
         messages: [{ role: 'user', content: 'Please analyze this document comprehensively.' }],
         attachment: {
           buffer,
           filename,
           mimeType,
+          documentType: this.hintDocumentType(filename),
         }
       };
 
@@ -191,19 +206,30 @@ export class DocumentAnalyzerAgent {
         };
       }
 
-      console.log(`[DocumentAnalyzer] Azure response received: ${azureResponse.content?.length || 0} chars, metadata:`, azureResponse.metadata);
+      console.log(`[DocumentAnalyzer] Azure response received: ${azureResponse.content?.length || 0} chars, tables=${azureResponse.metadata?.tables?.length ?? 0}, kvPairs=${azureResponse.metadata?.keyValuePairs?.length ?? 0}`);
 
       // Extract comprehensive data from Azure response
       // The content from Azure DI is already formatted markdown with extracted text
       const extractedText = azureResponse.content || '';
-      
+      const tables = this.extractTables(azureResponse.metadata);
+      const keyValuePairs = this.extractKeyValuePairs(azureResponse.metadata);
+      const items = this.synthesizeItemsFromTables(tables);
+
       const analysis = {
         documentType: this.detectDocumentType(filename, azureResponse.metadata),
         extractedText: extractedText,
-        structuredData: azureResponse.metadata,
+        // structuredData carries downstream-useful shapes: items (for per-row forensic
+        // detection), tables (for evidence provenance), keyValuePairs (for key findings).
+        structuredData: {
+          ...(azureResponse.metadata || {}),
+          items,
+          rowCount: items.length,
+          tables,
+          keyValuePairs,
+        },
         keyFindings: this.extractKeyFindings(azureResponse.metadata),
-        tables: this.extractTables(azureResponse.metadata),
-        keyValuePairs: this.extractKeyValuePairs(azureResponse.metadata),
+        tables,
+        keyValuePairs,
       };
 
       // FIXED: Lowered threshold from 50 to 10 chars to be less strict
@@ -238,6 +264,201 @@ export class DocumentAnalyzerAgent {
   }
 
   /**
+   * Pick an Azure DI document-type hint from filename so specialised models
+   * run when we have evidence the file is an invoice / receipt / tax form.
+   * Undefined means "use the provider default" (layout).
+   */
+  private hintDocumentType(filename: string): string | undefined {
+    const lower = (filename || '').toLowerCase();
+    if (lower.includes('receipt')) return 'receipt';
+    if (lower.includes('invoice')) return 'invoice';
+    if (lower.includes('w-2') || lower.includes('w2')) return 'w2';
+    if (lower.includes('1040')) return '1040';
+    if (lower.includes('1098')) return '1098';
+    if (lower.includes('1099')) return '1099';
+    return undefined;
+  }
+
+  private isTabular(mimeType: string, filename: string): boolean {
+    const mt = (mimeType || '').toLowerCase();
+    const fn = (filename || '').toLowerCase();
+    return (
+      mt === 'text/csv' ||
+      mt === 'application/vnd.ms-excel' ||
+      mt === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
+      fn.endsWith('.csv') ||
+      fn.endsWith('.xls') ||
+      fn.endsWith('.xlsx')
+    );
+  }
+
+  /**
+   * Parse CSV / XLSX / XLS into structured rows.
+   * Returns structuredData.items so forensic agents can iterate transactions.
+   */
+  private async parseTabular(
+    buffer: Buffer,
+    filename: string,
+    mimeType: string
+  ): Promise<DocumentAnalysisResult> {
+    const fn = filename.toLowerCase();
+    const isCSV = mimeType === 'text/csv' || fn.endsWith('.csv');
+    const rawRows: Array<Record<string, any>> = isCSV
+      ? this.parseCSV(buffer)
+      : await this.parseXLSX(buffer);
+
+    const rows = rawRows.map(r => this.normalizeRow(r));
+
+    if (rows.length === 0) {
+      return {
+        success: true,
+        analysis: {
+          documentType: 'tabular',
+          extractedText: `[Empty tabular file: ${filename}]`,
+          structuredData: { items: [], rowCount: 0 },
+          keyFindings: [],
+        },
+        provider: 'fallback-extraction',
+      };
+    }
+
+    const headers = Object.keys(rows[0]);
+    const preview = rows.slice(0, 20);
+    const previewText = [
+      headers.join(' | '),
+      ...preview.map(r => headers.map(h => String(r[h] ?? '')).join(' | ')),
+    ].join('\n');
+
+    return {
+      success: true,
+      analysis: {
+        documentType: 'tabular',
+        extractedText:
+          `Tabular data from ${filename}: ${rows.length} rows, ${headers.length} columns\n` +
+          `Columns: ${headers.join(', ')}\n\n` +
+          `Preview (first 20 rows):\n${previewText}`,
+        structuredData: {
+          items: rows,
+          rowCount: rows.length,
+          headers,
+        },
+        keyFindings: [`Parsed ${rows.length} rows across ${headers.length} columns`],
+      },
+      provider: 'fallback-extraction',
+    };
+  }
+
+  /**
+   * Add canonical aliases (Amount / Date / Vendor) on top of existing columns
+   * so the forensic agents can find values across heterogeneous column names.
+   */
+  private normalizeRow(row: Record<string, any>): Record<string, any> {
+    const amountKeys = ['amount', 'txnamount', 'transactionamount', 'value', 'debit', 'credit', 'total', 'totalamount', 'amt', 'grossamount', 'netamount'];
+    const dateKeys = ['date', 'transactiondate', 'txndate', 'postdate', 'postingdate', 'valuedate', 'invoicedate', 'entrydate'];
+    const vendorKeys = ['vendor', 'vendorname', 'payee', 'beneficiary', 'supplier', 'counterparty', 'party', 'description', 'narration'];
+
+    const out: Record<string, any> = { ...row };
+    const lookup: Record<string, any> = {};
+    for (const [k, v] of Object.entries(row)) {
+      lookup[String(k).toLowerCase().replace(/[^a-z0-9]/g, '')] = v;
+    }
+
+    const pick = (aliases: string[]): any => {
+      for (const a of aliases) {
+        const v = lookup[a];
+        if (v !== undefined && v !== null && v !== '') return v;
+      }
+      return undefined;
+    };
+
+    const amt = pick(amountKeys);
+    if (amt !== undefined && out.Amount === undefined) out.Amount = amt;
+    if (amt !== undefined && out.totalAmount === undefined) {
+      const parsed = typeof amt === 'number' ? amt : parseFloat(String(amt).replace(/[^0-9.\-]/g, ''));
+      if (!isNaN(parsed)) out.totalAmount = parsed;
+    }
+
+    const dt = pick(dateKeys);
+    if (dt !== undefined && out.Date === undefined) out.Date = dt;
+    if (dt !== undefined && out.transactionDate === undefined) out.transactionDate = dt;
+
+    const vn = pick(vendorKeys);
+    if (vn !== undefined && out.Vendor === undefined) out.Vendor = vn;
+    if (vn !== undefined && out.vendor === undefined) out.vendor = vn;
+
+    return out;
+  }
+
+  private parseCSV(buffer: Buffer): Array<Record<string, any>> {
+    const text = buffer.toString('utf-8').replace(/^\uFEFF/, '');
+    const lines = text.split(/\r?\n/).filter(l => l.length > 0);
+    if (lines.length < 2) return [];
+
+    const splitCsvLine = (line: string): string[] => {
+      const out: string[] = [];
+      let cur = '';
+      let inQuotes = false;
+      for (let i = 0; i < line.length; i++) {
+        const ch = line[i];
+        if (inQuotes) {
+          if (ch === '"' && line[i + 1] === '"') { cur += '"'; i++; }
+          else if (ch === '"') { inQuotes = false; }
+          else { cur += ch; }
+        } else {
+          if (ch === '"') { inQuotes = true; }
+          else if (ch === ',') { out.push(cur); cur = ''; }
+          else { cur += ch; }
+        }
+      }
+      out.push(cur);
+      return out.map(s => s.trim());
+    };
+
+    const headers = splitCsvLine(lines[0]);
+    const rows: Array<Record<string, any>> = [];
+    for (let i = 1; i < lines.length; i++) {
+      const values = splitCsvLine(lines[i]);
+      const row: Record<string, any> = {};
+      headers.forEach((h, idx) => {
+        row[h] = values[idx] ?? '';
+      });
+      rows.push(row);
+    }
+    return rows;
+  }
+
+  private async parseXLSX(buffer: Buffer): Promise<Array<Record<string, any>>> {
+    const ExcelJS = (await import('exceljs')).default;
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buffer);
+    const sheet = wb.worksheets[0];
+    if (!sheet) return [];
+
+    const headerRow = sheet.getRow(1);
+    const headers: string[] = [];
+    headerRow.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+      headers[colNumber - 1] = String(cell.value ?? `col${colNumber}`).trim();
+    });
+
+    const rows: Array<Record<string, any>> = [];
+    for (let r = 2; r <= sheet.rowCount; r++) {
+      const row = sheet.getRow(r);
+      const obj: Record<string, any> = {};
+      let anyValue = false;
+      headers.forEach((h, idx) => {
+        const cell = row.getCell(idx + 1);
+        let v: any = cell.value;
+        if (v && typeof v === 'object' && 'text' in v) v = (v as any).text;
+        if (v && typeof v === 'object' && 'result' in v) v = (v as any).result;
+        if (v !== null && v !== undefined && v !== '') anyValue = true;
+        obj[h] = v ?? '';
+      });
+      if (anyValue) rows.push(obj);
+    }
+    return rows;
+  }
+
+  /**
    * Fallback extraction using pdf-parse for PDFs or basic text extraction
    */
   private async fallbackExtraction(
@@ -250,8 +471,11 @@ export class DocumentAnalyzerAgent {
 
       // For PDFs, use pdf-parse
       if (mimeType === 'application/pdf') {
-        // pdf-parse v1.x - simple function call
-        const pdfParse = (await import('pdf-parse')).default;
+        // Import the internal module directly. pdf-parse's top-level index.js
+        // has a "debug mode" check (`!module.parent`) that reads a nonexistent
+        // test PDF under ESM dynamic import, causing ENOENT. The actual parser
+        // lives in lib/pdf-parse.js and has no such side effect.
+        const pdfParse = (await import('pdf-parse/lib/pdf-parse.js' as any)).default;
         const pdfData = await pdfParse(buffer);
         extractedText = pdfData.text || '';
         console.log(`[DocumentAnalyzer] PDF parsed: ${extractedText.length} characters extracted`);
@@ -346,22 +570,79 @@ export class DocumentAnalyzerAgent {
   }
 
   /**
-   * Extract tables from Azure DI response
+   * Convert Azure DI tables into a {headers, rows} representation.
+   * Azure returns `cells: [{ rowIndex, columnIndex, content, kind? }]`; we need
+   * to group cells into rows and treat row 0 (or cells with kind='columnHeader')
+   * as headers.
    */
   private extractTables(azureResponse: any): Array<{ headers: string[]; rows: string[][] }> {
-    if (!azureResponse.tables) return [];
-    
-    return azureResponse.tables.map((table: any) => ({
-      headers: table.columnHeaders || [],
-      rows: table.cells || []
-    }));
+    const src = azureResponse?.tables;
+    if (!Array.isArray(src) || src.length === 0) return [];
+
+    return src.map((table: any) => {
+      const cells: any[] = Array.isArray(table.cells) ? table.cells : [];
+      const rowCount = table.rowCount ?? cells.reduce((m, c) => Math.max(m, (c.rowIndex ?? 0) + 1), 0);
+      const colCount = table.columnCount ?? cells.reduce((m, c) => Math.max(m, (c.columnIndex ?? 0) + 1), 0);
+
+      const grid: string[][] = Array.from({ length: rowCount }, () => Array(colCount).fill(''));
+      for (const c of cells) {
+        const r = c.rowIndex ?? 0;
+        const col = c.columnIndex ?? 0;
+        if (r < rowCount && col < colCount) {
+          grid[r][col] = String(c.content ?? '').trim();
+        }
+      }
+
+      // Heuristic: if any cell on the first row is marked columnHeader, or if the first row
+      // is non-numeric, treat it as headers.
+      let headers: string[];
+      let rows: string[][];
+      const hasExplicitHeaders = cells.some((c: any) => c.kind === 'columnHeader');
+      if (hasExplicitHeaders || (grid[0] && grid[0].every(v => v && isNaN(Number(v.replace(/[,$]/g, '')))))) {
+        headers = grid[0] ?? [];
+        rows = grid.slice(1);
+      } else {
+        headers = Array.from({ length: colCount }, (_, i) => `col${i + 1}`);
+        rows = grid;
+      }
+      return { headers, rows };
+    });
   }
 
   /**
-   * Extract key-value pairs from Azure DI response
+   * Convert Azure DI tables into row objects suitable for forensic per-row detection.
+   * Uses the same normalization as CSV/XLSX parsing (Amount/Date/Vendor aliases).
+   */
+  private synthesizeItemsFromTables(tables: Array<{ headers: string[]; rows: string[][] }>): any[] {
+    const items: any[] = [];
+    for (const t of tables) {
+      for (const row of t.rows) {
+        const obj: Record<string, any> = {};
+        t.headers.forEach((h, i) => {
+          if (h) obj[h] = row[i] ?? '';
+        });
+        if (Object.keys(obj).length > 0) {
+          items.push(this.normalizeRow(obj));
+        }
+      }
+    }
+    return items;
+  }
+
+  /**
+   * Extract key-value pairs from Azure DI response.
+   * Azure returns `[{ key: {content}, value: {content} }]`.
    */
   private extractKeyValuePairs(azureResponse: any): Record<string, string> {
-    return azureResponse.keyValuePairs || {};
+    const src = azureResponse?.keyValuePairs;
+    if (!Array.isArray(src)) return {};
+    const out: Record<string, string> = {};
+    for (const pair of src) {
+      const k = (pair?.key?.content ?? '').trim();
+      const v = (pair?.value?.content ?? '').trim();
+      if (k) out[k] = v;
+    }
+    return out;
   }
 
   /**

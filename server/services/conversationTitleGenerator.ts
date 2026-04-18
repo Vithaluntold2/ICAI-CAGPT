@@ -66,9 +66,27 @@ Only respond with valid JSON, no other text.`;
       maxTokens: 150
     });
 
-    // Parse JSON response
-    const cleaned = response.content.trim().replace(/```json\n?|\n?```/g, '');
-    const parsed = JSON.parse(cleaned);
+    // Parse JSON response — be tolerant of empty responses and non-JSON noise
+    const cleaned = (response.content || '').trim().replace(/```json\n?|\n?```/g, '');
+    let parsed: { title?: string; metadata?: string } = {};
+    if (cleaned) {
+      try {
+        parsed = JSON.parse(cleaned);
+      } catch {
+        // Try to extract a {...} block if the model wrapped JSON in prose
+        const match = cleaned.match(/\{[\s\S]*\}/);
+        if (match) {
+          try { parsed = JSON.parse(match[0]); } catch { /* fall through to fallback */ }
+        }
+      }
+    }
+
+    if (!parsed.title) {
+      // Model returned empty/non-JSON. This is common for short prompts and not
+      // a hard failure — quietly fall back to the heuristic titler.
+      console.log('[TitleGenerator] Model returned no title; using heuristic fallback.');
+      return heuristicTitle(firstUserMessage);
+    }
 
     // Validate and truncate if needed
     const title = (parsed.title || '').substring(0, 50);
@@ -81,29 +99,30 @@ Only respond with valid JSON, no other text.`;
 
   } catch (error) {
     console.error('[TitleGenerator] Error generating title:', error);
-    
-    // Fallback: Extract topic keywords, not the raw user message
-    const cleaned = firstUserMessage
-      .replace(/^(hi|hello|hey|please|i need|i want|can you|could you|help me)[,.]?\s*/i, '')
-      .replace(/\?$/, '')
-      .trim();
-    const fallbackTitle = (cleaned || 'New Conversation')
-      .substring(0, 40)
-      .split(' ')
-      .slice(0, 5)
-      .join(' ');
-    
-    // Extract domain keywords for metadata
-    const keywords = extractKeywords(firstUserMessage);
-    const fallbackMetadata = keywords.length > 0
-      ? `Discussion about ${keywords.join(', ')}`
-      : 'Accounting and tax advisory question';
-
-    return {
-      title: fallbackTitle || 'New Conversation',
-      metadata: fallbackMetadata.substring(0, 80)
-    };
+    return heuristicTitle(firstUserMessage);
   }
+}
+
+function heuristicTitle(firstUserMessage: string): ConversationTitleResult {
+  const cleaned = firstUserMessage
+    .replace(/^(hi|hello|hey|please|i need|i want|can you|could you|help me)[,.]?\s*/i, '')
+    .replace(/\?$/, '')
+    .trim();
+  const fallbackTitle = (cleaned || 'New Conversation')
+    .substring(0, 40)
+    .split(' ')
+    .slice(0, 5)
+    .join(' ');
+
+  const keywords = extractKeywords(firstUserMessage);
+  const fallbackMetadata = keywords.length > 0
+    ? `Discussion about ${keywords.join(', ')}`
+    : 'Accounting and tax advisory question';
+
+  return {
+    title: fallbackTitle || 'New Conversation',
+    metadata: fallbackMetadata.substring(0, 80)
+  };
 }
 
 /**

@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Upload, Search, AlertTriangle, CheckCircle, FileText, TrendingDown, TrendingUp, Info, ArrowLeft, Loader2 } from "lucide-react";
+import { Upload, Search, AlertTriangle, CheckCircle, FileText, TrendingDown, TrendingUp, Info, ArrowLeft, Loader2, Download, GitCompare, Clock } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient } from "@/lib/queryClient";
 
@@ -36,6 +36,11 @@ export default function ForensicIntelligence() {
   const { toast } = useToast();
   const [caseTitle, setCaseTitle] = useState("");
   const [selectedCaseId, setSelectedCaseId] = useState<string | null>(null);
+  const [reconcileSource, setReconcileSource] = useState<string>("");
+  const [reconcileTarget, setReconcileTarget] = useState<string>("");
+  const [reconcileResult, setReconcileResult] = useState<any>(null);
+  const [timelineData, setTimelineData] = useState<any>(null);
+  const [isGeneratingReport, setIsGeneratingReport] = useState(false);
 
   // Redirect unauthenticated users to auth page
   useEffect(() => {
@@ -63,12 +68,17 @@ export default function ForensicIntelligence() {
 
   // Create case mutation
   const createCaseMutation = useMutation({
-    mutationFn: async (caseData: { caseTitle: string }) => {
+    mutationFn: async (caseData: { title: string }) => {
       const response = await fetch('/api/forensics/cases', {
         method: 'POST',
+        credentials: 'include',
         body: JSON.stringify(caseData),
         headers: { 'Content-Type': 'application/json' }
       });
+      if (!response.ok) {
+        const err = await response.text();
+        throw new Error(err || `HTTP ${response.status}`);
+      }
       return response.json();
     },
     onSuccess: (data) => {
@@ -152,7 +162,7 @@ export default function ForensicIntelligence() {
       return;
     }
 
-    createCaseMutation.mutate({ caseTitle });
+    createCaseMutation.mutate({ title: caseTitle });
   };
 
   const handleDocumentUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -175,7 +185,7 @@ export default function ForensicIntelligence() {
 
     for (const file of Array.from(files)) {
       const formData = new FormData();
-      formData.append('document', file);
+      formData.append('file', file);
       
       await uploadDocumentMutation.mutateAsync({
         caseId: selectedCaseId,
@@ -195,6 +205,75 @@ export default function ForensicIntelligence() {
     }
 
     analyzeCaseMutation.mutate(selectedCaseId);
+  };
+
+  const handleGenerateReport = async () => {
+    if (!selectedCaseId) return;
+    setIsGeneratingReport(true);
+    try {
+      const res = await fetch(`/api/forensics/cases/${selectedCaseId}/report`, {
+        method: 'POST',
+        credentials: 'include'
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `forensic-report-${selectedCaseId}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast({ title: "Report generated", description: "PDF downloaded" });
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "Report failed", description: e.message });
+    } finally {
+      setIsGeneratingReport(false);
+    }
+  };
+
+  const handleReconcile = async () => {
+    if (!selectedCaseId || !reconcileSource || !reconcileTarget) {
+      toast({ variant: "destructive", title: "Pick two documents" });
+      return;
+    }
+    if (reconcileSource === reconcileTarget) {
+      toast({ variant: "destructive", title: "Source and target must differ" });
+      return;
+    }
+    try {
+      const res = await fetch(`/api/forensics/cases/${selectedCaseId}/reconcile`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sourceDocumentId: reconcileSource, targetDocumentId: reconcileTarget })
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setReconcileResult(data);
+      toast({
+        title: "Reconciliation complete",
+        description: `${data.summary.matchedCount} matched, ${data.discrepancies.length} discrepancies`
+      });
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "Reconciliation failed", description: e.message });
+    }
+  };
+
+  const handleLoadTimeline = async () => {
+    if (!selectedCaseId) return;
+    try {
+      const res = await fetch(`/api/forensics/cases/${selectedCaseId}/timeline`, {
+        credentials: 'include'
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setTimelineData(data);
+      toast({ title: "Timeline loaded", description: `${data.totalEvents} events` });
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "Timeline failed", description: e.message });
+    }
   };
 
   // Get overall risk score from case data
@@ -254,11 +333,107 @@ export default function ForensicIntelligence() {
           <p className="text-muted-foreground mt-2">
             Proactive anomaly detection and cross-document reconciliation
           </p>
+          {selectedCase && (
+            <div className="mt-3 p-3 rounded-lg bg-muted/50 border border-border" data-testid="selected-case-banner">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div>
+                  <p className="text-xs text-muted-foreground">Active case</p>
+                  <p className="font-semibold text-lg">{(selectedCase as any).title}</p>
+                  <p className="text-xs font-mono text-muted-foreground">{(selectedCase as any).id}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  {(selectedCase as any).severityLevel && (
+                    <Badge variant={['critical','high'].includes((selectedCase as any).severityLevel) ? 'destructive' : 'secondary'}>
+                      {(selectedCase as any).severityLevel}
+                    </Badge>
+                  )}
+                  <Badge variant="outline">
+                    {(selectedCase as any).totalFindings ?? 0} findings
+                  </Badge>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setSelectedCaseId(null)}
+                    data-testid="button-close-case"
+                  >
+                    Close
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Left Column: Case Setup & Document Upload */}
           <div className="lg:col-span-1 space-y-4">
+            <Card data-testid="card-case-list">
+              <CardHeader>
+                <CardTitle className="flex items-center justify-between">
+                  <span>Your Cases</span>
+                  <Badge variant="outline" data-testid="badge-case-count">
+                    {(cases as any[]).length}
+                  </Badge>
+                </CardTitle>
+                <CardDescription>
+                  {(cases as any[]).length === 0
+                    ? 'No cases yet — create one below to get started.'
+                    : 'Click a case to open it.'}
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-2 max-h-80 overflow-y-auto">
+                {casesLoading && (
+                  <div className="flex items-center justify-center py-4 text-muted-foreground text-sm">
+                    <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                    Loading cases…
+                  </div>
+                )}
+                {!casesLoading && (cases as any[]).length === 0 && (
+                  <div className="text-sm text-muted-foreground text-center py-4">
+                    No forensic cases yet.
+                  </div>
+                )}
+                {(cases as any[]).map((c: any) => {
+                  const active = c.id === selectedCaseId;
+                  const sev = c.severityLevel;
+                  return (
+                    <button
+                      key={c.id}
+                      onClick={() => setSelectedCaseId(c.id)}
+                      data-testid={`case-item-${c.id}`}
+                      className={
+                        "w-full text-left p-3 rounded-md border transition-colors " +
+                        (active
+                          ? "bg-primary/10 border-primary"
+                          : "bg-background hover:bg-muted border-border")
+                      }
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <span className="font-medium text-sm truncate flex-1">{c.title}</span>
+                        {sev && (
+                          <Badge
+                            variant={['critical', 'high'].includes(sev) ? 'destructive' : 'secondary'}
+                            className="text-[10px] shrink-0"
+                          >
+                            {sev}
+                          </Badge>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-3 mt-1 text-[11px] text-muted-foreground">
+                        <span>{c.totalFindings ?? 0} findings</span>
+                        {typeof c.overallRiskScore === 'number' && c.overallRiskScore > 0 && (
+                          <span>risk {c.overallRiskScore}/100</span>
+                        )}
+                        <span className="ml-auto">
+                          {c.createdAt ? new Date(c.createdAt).toLocaleDateString() : ''}
+                        </span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </CardContent>
+            </Card>
+
             <Card>
               <CardHeader>
                 <CardTitle>New Forensic Case</CardTitle>
@@ -295,7 +470,7 @@ export default function ForensicIntelligence() {
                     <input
                       type="file"
                       multiple
-                      accept=".pdf,.png,.jpg,.jpeg,.tiff"
+                      accept=".pdf,.png,.jpg,.jpeg,.tiff,.xlsx,.xls,.csv,.txt"
                       onChange={handleDocumentUpload}
                       className="hidden"
                       id="file-upload"
@@ -305,7 +480,7 @@ export default function ForensicIntelligence() {
                       <Upload className="w-8 h-8 mx-auto mb-2 text-muted-foreground" />
                       <p className="text-sm font-medium">Click to upload</p>
                       <p className="text-xs text-muted-foreground mt-1">
-                        PDF, PNG, JPEG, TIFF
+                        PDF, images, Excel (XLSX/XLS), CSV, TXT
                       </p>
                     </label>
                   </div>
@@ -325,18 +500,166 @@ export default function ForensicIntelligence() {
                 )}
 
                 {(documents as ForensicDocument[]).length > 0 && (
-                  <Button
-                    onClick={handleAnalyzeCase}
-                    disabled={analyzeCaseMutation.isPending}
-                    className="w-full"
-                    data-testid="button-run-analysis"
-                  >
-                    <Search className="w-4 h-4 mr-2" />
-                    {analyzeCaseMutation.isPending ? "Analyzing..." : "Run Forensic Analysis"}
-                  </Button>
+                  <>
+                    <Button
+                      onClick={handleAnalyzeCase}
+                      disabled={analyzeCaseMutation.isPending}
+                      className="w-full"
+                      data-testid="button-run-analysis"
+                    >
+                      <Search className="w-4 h-4 mr-2" />
+                      {analyzeCaseMutation.isPending ? "Analyzing..." : "Run Forensic Analysis"}
+                    </Button>
+
+                    <Button
+                      onClick={handleGenerateReport}
+                      disabled={isGeneratingReport}
+                      variant="secondary"
+                      className="w-full"
+                      data-testid="button-generate-report"
+                    >
+                      <Download className="w-4 h-4 mr-2" />
+                      {isGeneratingReport ? "Generating..." : "Generate Report (PDF)"}
+                    </Button>
+
+                    <Button
+                      onClick={handleLoadTimeline}
+                      variant="outline"
+                      className="w-full"
+                      data-testid="button-load-timeline"
+                    >
+                      <Clock className="w-4 h-4 mr-2" />
+                      Load Timeline
+                    </Button>
+                  </>
                 )}
               </CardContent>
             </Card>
+
+            {(documents as ForensicDocument[]).length >= 2 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <GitCompare className="w-4 h-4" />
+                    Reconciliation
+                  </CardTitle>
+                  <CardDescription>Match entries across two documents</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div>
+                    <Label className="text-xs">Source document</Label>
+                    <select
+                      className="w-full mt-1 p-2 border rounded-md bg-background text-sm"
+                      value={reconcileSource}
+                      onChange={(e) => setReconcileSource(e.target.value)}
+                      data-testid="select-reconcile-source"
+                    >
+                      <option value="">— pick source —</option>
+                      {(documents as any[]).map((d) => (
+                        <option key={d.id} value={d.id}>{d.filename}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <Label className="text-xs">Target document</Label>
+                    <select
+                      className="w-full mt-1 p-2 border rounded-md bg-background text-sm"
+                      value={reconcileTarget}
+                      onChange={(e) => setReconcileTarget(e.target.value)}
+                      data-testid="select-reconcile-target"
+                    >
+                      <option value="">— pick target —</option>
+                      {(documents as any[]).map((d) => (
+                        <option key={d.id} value={d.id}>{d.filename}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <Button
+                    onClick={handleReconcile}
+                    disabled={!reconcileSource || !reconcileTarget}
+                    className="w-full"
+                    data-testid="button-reconcile"
+                  >
+                    <GitCompare className="w-4 h-4 mr-2" />
+                    Reconcile
+                  </Button>
+
+                  {reconcileResult && (
+                    <div className="mt-3 space-y-2 text-xs">
+                      <div className="p-2 bg-muted rounded">
+                        <div className="font-semibold">Summary</div>
+                        <div>Matched: {reconcileResult.summary.matchedCount}</div>
+                        <div>Unmatched (source): {reconcileResult.summary.unmatchedSourceCount}</div>
+                        <div>Unmatched (target): {reconcileResult.summary.unmatchedTargetCount}</div>
+                        <div>Amount mismatches: {reconcileResult.summary.amountMismatchCount}</div>
+                        <div>Timing mismatches: {reconcileResult.summary.timingMismatchCount}</div>
+                      </div>
+                      {reconcileResult.discrepancies.slice(0, 15).map((d: any, i: number) => (
+                        <div key={i} className="p-2 border rounded">
+                          <div className="flex justify-between items-start gap-2">
+                            <span className="font-medium text-[11px]">{d.nature}</span>
+                            <Badge variant={d.severity === 'high' ? 'destructive' : 'outline'} className="text-[10px]">
+                              {d.severity}
+                            </Badge>
+                          </div>
+                          <div className="text-muted-foreground mt-1">{d.description}</div>
+                          <div className="text-[10px] text-muted-foreground mt-1 italic">→ {d.suggestedAction}</div>
+                        </div>
+                      ))}
+                      {reconcileResult.discrepancies.length > 15 && (
+                        <div className="text-muted-foreground italic">
+                          …and {reconcileResult.discrepancies.length - 15} more discrepancies
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
+            {timelineData && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Clock className="w-4 h-4" />
+                    Timeline
+                  </CardTitle>
+                  <CardDescription>
+                    {timelineData.totalEvents} events · {timelineData.dateRange.earliest?.split('T')[0]} → {timelineData.dateRange.latest?.split('T')[0]}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-2 max-h-96 overflow-y-auto text-xs">
+                  {timelineData.events.slice(0, 50).map((ev: any) => (
+                    <div key={ev.id} className="border-l-2 border-muted pl-3 py-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-muted-foreground text-[10px]">
+                          {ev.date.split('T')[0]}
+                        </span>
+                        <Badge variant="outline" className="text-[10px]">{ev.eventType}</Badge>
+                        {ev.severity && (
+                          <Badge variant={ev.severity === 'high' || ev.severity === 'critical' ? 'destructive' : 'secondary'} className="text-[10px]">
+                            {ev.severity}
+                          </Badge>
+                        )}
+                      </div>
+                      <div className="font-medium mt-1">{ev.title}</div>
+                      {ev.description && <div className="text-muted-foreground mt-0.5 text-[11px]">{ev.description}</div>}
+                      {ev.sourceDocumentFilename && (
+                        <div className="text-[10px] text-muted-foreground mt-0.5 italic">
+                          ← {ev.sourceDocumentFilename}
+                          {typeof ev.rowIndex === 'number' ? ` · row ${ev.rowIndex + 1}` : ''}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                  {timelineData.events.length > 50 && (
+                    <div className="text-muted-foreground italic text-center pt-2">
+                      …showing first 50 of {timelineData.events.length} events
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
 
             {overallRiskScore > 0 && (
               <Card>

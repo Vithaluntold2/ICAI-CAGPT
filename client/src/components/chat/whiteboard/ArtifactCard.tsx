@@ -90,10 +90,11 @@ export function ArtifactCard({
           </DropdownMenu>
         </div>
       </div>
-      <div className="p-2 flex-1 overflow-auto">
-        {/* `embedded` tells the child renderers that this card already shows
-            the title + kind + menu in its own header — so they should suppress
-            their own redundant title chrome to avoid duplication. */}
+      {/* No inner padding, no outer scroll — the renderer owns its own
+          viewport (via `embedded=true`). Prevents the double-scrollbar effect
+          on large spreadsheets and long documents, and removes a padding ring
+          that was competing with each renderer's own internal padding. */}
+      <div className="flex-1 min-h-0 overflow-hidden relative">
         <ArtifactRenderer artifact={artifact} conversationId={conversationId} embedded />
       </div>
     </div>

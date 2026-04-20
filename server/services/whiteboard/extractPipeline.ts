@@ -115,7 +115,22 @@ export function buildArtifactsForMessage(input: BuildArtifactsInput): BuildArtif
   }
   if (precomputed.workflow) {
     const title = precomputed.workflow.title ?? "Workflow";
-    const id = place("workflow", title, summarize(title, "workflow"), precomputed.workflow);
+    // WorkflowGenerator emits the visualization as { type, title, data, config:
+    // { nodes, edges, layout, isLargeWorkflow } } — nodes/edges nested inside
+    // `config`. But WorkflowArtifact reads `payload.nodes` / `payload.edges` /
+    // `payload.layout` at the TOP LEVEL. Without flattening, the client gets
+    // undefined, falls back to [], and shows the "No workflow to display"
+    // empty-state card even though the data is there.
+    const rawWorkflow = precomputed.workflow as any;
+    const config = rawWorkflow.config ?? {};
+    const flatPayload = {
+      title: rawWorkflow.title,
+      nodes: rawWorkflow.nodes ?? config.nodes ?? [],
+      edges: rawWorkflow.edges ?? config.edges ?? [],
+      layout: rawWorkflow.layout ?? config.layout,
+      isLargeWorkflow: rawWorkflow.isLargeWorkflow ?? config.isLargeWorkflow,
+    };
+    const id = place("workflow", title, summarize(title, "workflow"), flatPayload);
     updatedContent = `${updatedContent.trimEnd()}\n<artifact id="${id}" />`;
   }
   if (precomputed.mindmap) {

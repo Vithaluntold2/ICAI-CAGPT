@@ -2327,8 +2327,12 @@ export class AIOrchestrator {
    * Everything AFTER "End: <line>" (typically explanatory narrative paragraphs)
    * is preserved unchanged. If the pattern doesn't match, the response is
    * returned as-is — we only strip when a clean Start:/End: block is present.
+   *
+   * Public so the SSE cache-hit path in routes.ts can apply the same
+   * transformation to cached workflow responses — otherwise the cache path
+   * would show the pre-strip prose in chat while the non-cache path wouldn't.
    */
-  private stripWorkflowProse(response: string): string {
+  public stripWorkflowProse(response: string): string {
     const workflowBlock = /^\s*Start\s*:[\s\S]*?^\s*End\s*:[^\n]*\n?/m;
     if (!workflowBlock.test(response)) return response;
     return response.replace(workflowBlock, '').replace(/^\s+/, '');

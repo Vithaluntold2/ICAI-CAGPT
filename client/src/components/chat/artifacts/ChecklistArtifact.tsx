@@ -27,6 +27,9 @@ interface Props {
   conversationId?: string;
   payload: ChecklistPayload;
   state: ChecklistState;
+  /** True when rendered inside the whiteboard ArtifactCard (which owns the
+   *  outer border + title). Standalone chat rendering gets its own card. */
+  embedded?: boolean;
 }
 
 /**
@@ -36,7 +39,7 @@ interface Props {
  * without a round-trip. Agent-driven updates (via update_checklist tool) also
  * flow through the same cache on the next manifest refresh / SSE end event.
  */
-export function ChecklistArtifact({ artifactId, conversationId, payload, state }: Props) {
+export function ChecklistArtifact({ artifactId, conversationId, payload, state, embedded = false }: Props) {
   const items = payload?.items ?? [];
   const sections = useMemo(() => groupBySection(items), [items]);
 
@@ -161,7 +164,14 @@ export function ChecklistArtifact({ artifactId, conversationId, payload, state }
   }, [buildMarkdown, payload?.title]);
 
   return (
-    <div className="w-full h-full overflow-auto" data-testid={`checklist-artifact-${artifactId}`}>
+    <div
+      className={
+        embedded
+          ? "w-full h-full overflow-auto"
+          : "w-full bg-card border rounded-lg overflow-auto max-h-[720px]"
+      }
+      data-testid={`checklist-artifact-${artifactId}`}
+    >
       <div className="flex items-center gap-2 px-3 py-2 border-b text-xs bg-muted/40">
         <CircleDashed className="h-3.5 w-3.5 text-muted-foreground" />
         <span className="font-medium">{checkedCount}/{totalCount}</span>

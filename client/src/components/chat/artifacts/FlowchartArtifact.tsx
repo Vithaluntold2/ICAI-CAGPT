@@ -69,7 +69,13 @@ function normalizeMermaidSource(src: string): string {
   return out.trim();
 }
 
-export function FlowchartArtifact({ payload }: { payload: { source: string } }) {
+export function FlowchartArtifact({
+  payload,
+  embedded = false,
+}: {
+  payload: { source: string };
+  embedded?: boolean;
+}) {
   const ref = useRef<HTMLDivElement>(null);
   const [status, setStatus] = useState<"idle" | "rendering" | "ok" | "error">("idle");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -172,37 +178,50 @@ export function FlowchartArtifact({ payload }: { payload: { source: string } }) 
     );
   }
 
-  return (
-    <div className="relative w-full h-full overflow-auto">
+  const toolbar = status === "ok" ? (
+    <div className="absolute top-2 right-2 z-10 flex items-center gap-0.5 rounded-md border bg-background shadow-sm">
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 w-7 p-0"
+            title="Download…"
+            data-testid="flowchart-download"
+          >
+            <Download className="h-3.5 w-3.5" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem onClick={() => handleExport("png")}>
+            PNG image
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => handleExport("svg")}>
+            SVG image
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  ) : null;
+
+  const body = (
+    <>
       {status === "rendering" && (
         <div className="p-3 text-xs text-muted-foreground italic">Rendering…</div>
       )}
-      {status === "ok" && (
-        <div className="absolute top-2 right-2 z-10">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-7 w-7 p-0 bg-background/90 backdrop-blur shadow-sm"
-                title="Download…"
-                data-testid="flowchart-download"
-              >
-                <Download className="h-3.5 w-3.5" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => handleExport("png")}>
-                PNG image
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => handleExport("svg")}>
-                SVG image
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      )}
+      {toolbar}
       <div ref={ref} className="flex justify-center items-start p-2" />
+    </>
+  );
+
+  if (embedded) {
+    // Inside ArtifactCard — no own chrome.
+    return <div className="relative w-full h-full overflow-auto">{body}</div>;
+  }
+  // Standalone (chat inline) — own bordered card so it reads as an artifact.
+  return (
+    <div className="relative w-full bg-card border rounded-lg overflow-auto max-h-[720px]">
+      {body}
     </div>
   );
 }

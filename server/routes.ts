@@ -37,6 +37,8 @@ import { documentIngestion } from "./services/core/documentIngestion";
 import { continuousLearning } from "./services/core/continuousLearning";
 import { voiceService } from "./services/voice/voiceService";
 import { listArtifactsByConversation, createArtifact, updateArtifactState } from "./services/whiteboard/repository";
+import { buildArtifactsForMessage } from "./services/whiteboard/extractPipeline";
+import { placeNext, type LayoutState } from "./services/whiteboard/autoLayout";
 import { buildBoardXlsxBuffer } from "./services/whiteboard/exportXlsx";
 import { buildBoardPptxBuffer } from "./services/whiteboard/exportPptx";
 import { buildBoardPdfBuffer } from "./services/whiteboard/exportPdf";
@@ -4790,6 +4792,81 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
             };
             if (cachedResponse.visualization && result.metadata) {
               result.metadata.visualization = cachedResponse.visualization;
+            }
+
+            // Cache-hit artifact extraction: the orchestrator path runs
+            // buildArtifactsForMessage after generating visualization metadata.
+            // On a cache hit the orchestrator is bypassed entirely, which
+            // meant no whiteboard artifact was ever created for this message —
+            // user got the chat text but nothing on the Output canvas.
+            //
+            // Recreate the same extraction here against the cached viz +
+            // spreadsheet so the artifact lands for THIS conversation /
+            // message with the same layout/ids logic as the non-cache path.
+            if (isFeatureEnabled('WHITEBOARD_V2') && conversation.id && assistantMessageId) {
+              try {
+                const prior = await listArtifactsByConversation(conversation.id);
+                let seed: LayoutState = { cursorX: 0, rowTop: 0, rowHeight: 0 };
+                for (const a of prior) {
+                  const { state } = placeNext(seed, { width: a.width, height: a.height });
+                  seed = state;
+                }
+
+                const viz = cachedResponse.visualization as any;
+                const slots: {
+                  visualization?: any;
+                  workflow?: any;
+                  mindmap?: any;
+                  spreadsheet?: any;
+                } = {};
+                if (viz?.type === 'workflow') slots.workflow = viz;
+                else if (viz?.type === 'mindmap') slots.mindmap = viz;
+                else if (viz) slots.visualization = viz;
+                const cachedSpreadsheet = (cachedResponse.metadata as any)?.spreadsheetData;
+                if (cachedSpreadsheet) slots.spreadsheet = cachedSpreadsheet;
+
+                // Match the non-cache path: strip the Start:/Step N:/End: prose
+                // block from chat for workflow mode so behaviour is identical
+                // whether or not the AI response came from cache.
+                let contentForExtraction = fullResponse;
+                if (chatMode === 'workflow' && slots.workflow) {
+                  const beforeLen = contentForExtraction.length;
+                  contentForExtraction = aiOrchestrator.stripWorkflowProse(contentForExtraction);
+                  if (contentForExtraction.length !== beforeLen) {
+                    console.log('[cache-hit] stripped workflow prose', { before: beforeLen, after: contentForExtraction.length });
+                    fullResponse = contentForExtraction;
+                    result.response = contentForExtraction;
+                  }
+                }
+
+                console.log('[cache-hit] extraction starting', {
+                  chatMode,
+                  vizType: viz?.type ?? null,
+                  slots: Object.keys(slots).filter(k => (slots as any)[k]),
+                });
+
+                const built = buildArtifactsForMessage({
+                  content: contentForExtraction,
+                  conversationId: conversation.id,
+                  messageId: assistantMessageId,
+                  chatMode,
+                  precomputed: slots,
+                  layoutState: seed,
+                  idFactory: () => `art_${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`,
+                });
+
+                console.log('[cache-hit] extraction complete', {
+                  artifactsCreated: built.artifacts.length,
+                  kinds: built.artifacts.map(a => a.kind),
+                });
+
+                if (built.artifacts.length > 0) {
+                  (result as any).whiteboardUpdatedContent = built.updatedContent;
+                  (result as any).whiteboardArtifacts = built.artifacts;
+                }
+              } catch (e) {
+                console.error('[cache-hit] artifact extraction failed:', e);
+              }
             }
           }
         }

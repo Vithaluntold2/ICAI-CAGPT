@@ -416,7 +416,7 @@ function MindMapRendererInner({ data, embedded = false }: MindMapRendererProps) 
   }
 
   return (
-    <div className="w-full h-[600px] relative border border-border rounded-lg overflow-hidden bg-background">
+    <div className={`relative overflow-hidden bg-background ${embedded ? "w-full h-full" : "w-full h-[600px] border border-border rounded-lg"}`}>
       {showHeader && (
         <div className="absolute top-0 left-0 right-0 z-10 bg-background/95 backdrop-blur border-b border-border px-4 py-3">
           <h3 className="text-sm font-medium">{data.title}</h3>

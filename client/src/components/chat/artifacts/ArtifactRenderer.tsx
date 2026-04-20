@@ -33,12 +33,13 @@ export function ArtifactRenderer({
           payload={artifact.payload as any}
           conversationId={conversationId}
           messageId={artifact.messageId}
+          embedded={embedded}
         />
       );
     case "flowchart":
-      return <FlowchartArtifact payload={artifact.payload as any} />;
+      return <FlowchartArtifact payload={artifact.payload as any} embedded={embedded} />;
     case "document":
-      return <DocumentArtifact payload={artifact.payload as any} />;
+      return <DocumentArtifact payload={artifact.payload as any} embedded={embedded} />;
     case "checklist":
       return (
         <ChecklistArtifact
@@ -46,6 +47,7 @@ export function ArtifactRenderer({
           conversationId={conversationId}
           payload={artifact.payload as any}
           state={(artifact.state ?? {}) as any}
+          embedded={embedded}
         />
       );
     default:

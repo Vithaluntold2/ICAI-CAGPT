@@ -80,20 +80,24 @@ export function MindmapArtifact({ payload, embedded = false }: { payload: any; e
     };
   }, [isFullscreen]);
 
-  // Container style: in-place card vs a full-viewport overlay. Fullscreen is
-  // later portalled to <body> so its `fixed` positioning escapes any
-  // transformed ancestor (the whiteboard canvas applies CSS transforms, which
-  // would otherwise scope `fixed` to the canvas instead of the viewport).
+  // Container style: three layouts here.
+  //   - fullscreen:  portal + fixed inset-0 overlay (escapes whiteboard transform).
+  //   - embedded:    fills the ArtifactCard exactly, no own border (card has it).
+  //   - standalone:  provides its own card chrome (for chat inline rendering).
+  // Fullscreen is later portalled to <body> so its `fixed` positioning escapes
+  // any transformed ancestor (whiteboard applies CSS transforms, which would
+  // otherwise scope `fixed` to the canvas instead of the viewport).
   const containerClass = isFullscreen
-    ? "fixed inset-0 z-50 bg-card p-4 flex flex-col"
-    : "bg-card border rounded-lg p-4 relative";
+    ? "fixed inset-0 z-50 bg-card flex flex-col"
+    : embedded
+      ? "relative h-full w-full"
+      : "bg-card border rounded-lg p-4 relative";
 
-  // When fullscreen, the inner MindMapRenderer needs to fill the whole
-  // overlay. MindMapRenderer's own root is `h-[600px]` — we override it to
-  // `h-full w-full` on the first descendant div so the renderer stretches
-  // to its parent without touching its source.
-  const bodyClass = isFullscreen
-    ? "flex-1 min-h-0 [&>div:first-child]:!h-full [&>div:first-child]:!w-full"
+  // MindMapRenderer's own root is `h-[600px]` — override it to `h-full w-full`
+  // on the first descendant div so the renderer stretches to its parent in
+  // fullscreen and embedded modes.
+  const bodyClass = isFullscreen || embedded
+    ? "h-full w-full [&>div:first-child]:!h-full [&>div:first-child]:!w-full"
     : "";
 
   const tree = (

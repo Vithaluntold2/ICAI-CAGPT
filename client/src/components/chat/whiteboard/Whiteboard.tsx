@@ -1,11 +1,30 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { TransformWrapper, TransformComponent, type ReactZoomPanPinchRef } from "react-zoom-pan-pinch";
 import { useConversationArtifacts } from "@/hooks/useConversationArtifacts";
 import { useMultiSelection } from "./useMultiSelection";
 import { useSelectionContext } from "./useSelectionContext";
+import { useSelectionTooltip } from "./useSelectionTooltip";
 import { ArtifactCard } from "./ArtifactCard";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
+import { Minus, Plus, Maximize, RotateCcw, Quote } from "lucide-react";
+
+// Zoom bounds + step — kept here so the overlay UI and the TransformWrapper
+// stay in sync. Step is a multiplicative factor per press, not an additive
+// delta, so 1.25x zooms in 25%, 0.8x zooms out 20%.
+const MIN_SCALE = 0.25;
+const MAX_SCALE = 2.5;
+const ZOOM_STEP = 1.25;         // one press = 25% in, or 1/1.25 = 20% out
+const ZOOM_ANIM_MS = 180;
+const INITIAL_SCALE = 0.8;
+const FIT_PADDING_PX = 60;       // breathing room around artifacts in fit view
+// Canvas sizing: the transform's content area must always fully enclose every
+// artifact, otherwise react-zoom-pan-pinch's pan-clamp will refuse to scroll
+// past the fixed edge when zoomed in. We use MIN_* as a floor for small boards
+// and CANVAS_PAD so there's always breathing room past the last artifact.
+const MIN_CANVAS_W = 2600;
+const MIN_CANVAS_H = 1200;
+const CANVAS_PAD = 600;          // px of pan-room past the farthest artifact
 
 interface MarqueeState {
   // Viewport (client) coords — used to render the overlay.
@@ -31,7 +50,43 @@ export function Whiteboard({ conversationId }: { conversationId: string }) {
   const orderedIds = useMemo(() => data?.artifacts.map(a => a.id) ?? [], [data]);
   const { selected, click, clear, setMany } = useMultiSelection(orderedIds);
   const setArtifacts = useSelectionContext(s => s.setArtifacts);
+  const setHighlight = useSelectionContext(s => s.setHighlight);
   const artifacts = data?.artifacts ?? [];
+
+  // Native text selection within any card → floating "Ask about this" tooltip.
+  const { selection: textSelection, clear: clearTextSelection } = useSelectionTooltip();
+
+  const onAskAboutSelection = useCallback(() => {
+    if (!textSelection) return;
+    setHighlight([textSelection.artifactId], textSelection.text);
+    const el = document.querySelector<HTMLTextAreaElement>('[data-testid="composer-input"]');
+    el?.focus();
+    // Clear the native browser selection so the tooltip disappears and the
+    // composer has visual focus; the text is already captured in the store.
+    window.getSelection()?.removeAllRanges();
+    clearTextSelection();
+  }, [textSelection, setHighlight, clearTextSelection]);
+
+  // Dynamic canvas dimensions: always large enough to fully contain every
+  // artifact (plus pad), so panning isn't clamped when zoomed into a tall card.
+  // NOTE: artifacts can also grow taller than their stored `height` because
+  // ArtifactCard uses `minHeight`, not `height` — we'd never capture that from
+  // data alone. CANVAS_PAD compensates for the uncertainty; it's intentionally
+  // generous so the user can always pan an extra screenful past the bottom.
+  const { canvasW, canvasH } = useMemo(() => {
+    let maxX = MIN_CANVAS_W - CANVAS_PAD;
+    let maxY = MIN_CANVAS_H - CANVAS_PAD;
+    for (const a of artifacts) {
+      const right = a.canvasX + a.width;
+      const bottom = a.canvasY + a.height;
+      if (right > maxX) maxX = right;
+      if (bottom > maxY) maxY = bottom;
+    }
+    return {
+      canvasW: Math.max(MIN_CANVAS_W, Math.round(maxX + CANVAS_PAD)),
+      canvasH: Math.max(MIN_CANVAS_H, Math.round(maxY + CANVAS_PAD)),
+    };
+  }, [artifacts]);
   const { toast } = useToast();
 
   const transformRef = useRef<ReactZoomPanPinchRef | null>(null);
@@ -39,6 +94,87 @@ export function Whiteboard({ conversationId }: { conversationId: string }) {
   const [marquee, setMarquee] = useState<MarqueeState | null>(null);
   const [panDisabled, setPanDisabled] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  // Mirror of the current transform scale so the overlay can show "75%" etc.
+  // Updated via TransformWrapper's onTransformed callback.
+  const [scale, setScale] = useState<number>(INITIAL_SCALE);
+
+  // --- Stable zoom controls -----------------------------------------------
+  // Multiplicative stepping so zoom is predictable (every press is the same
+  // perceived amount regardless of current scale), and animated so it doesn't
+  // feel like a snap-jump.
+
+  const clamp = (n: number) => Math.max(MIN_SCALE, Math.min(MAX_SCALE, n));
+
+  const zoomTo = useCallback((nextScale: number) => {
+    const ref = transformRef.current;
+    if (!ref) return;
+    const target = clamp(nextScale);
+    const { positionX, positionY, scale: cur } = ref.state;
+    if (Math.abs(target - cur) < 1e-4) return;
+    // Keep the viewport centre pinned so zoom doesn't jump away.
+    const rect = wrapperRef.current?.getBoundingClientRect();
+    if (!rect) {
+      ref.setTransform(positionX, positionY, target, ZOOM_ANIM_MS, 'easeOut');
+      return;
+    }
+    const cx = rect.width / 2;
+    const cy = rect.height / 2;
+    const canvasX = (cx - positionX) / cur;
+    const canvasY = (cy - positionY) / cur;
+    const newPx = cx - canvasX * target;
+    const newPy = cy - canvasY * target;
+    ref.setTransform(newPx, newPy, target, ZOOM_ANIM_MS, 'easeOut');
+  }, []);
+
+  const zoomIn = useCallback(() => zoomTo(scale * ZOOM_STEP), [scale, zoomTo]);
+  const zoomOut = useCallback(() => zoomTo(scale / ZOOM_STEP), [scale, zoomTo]);
+
+  const resetView = useCallback(() => {
+    const ref = transformRef.current;
+    if (!ref) return;
+    ref.resetTransform(ZOOM_ANIM_MS, 'easeOut');
+  }, []);
+
+  const fitToContent = useCallback(() => {
+    const ref = transformRef.current;
+    const wrapper = wrapperRef.current;
+    if (!ref || !wrapper || artifacts.length === 0) return;
+    // Bounding box over all artifacts in canvas space
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const a of artifacts) {
+      if (a.canvasX < minX) minX = a.canvasX;
+      if (a.canvasY < minY) minY = a.canvasY;
+      if (a.canvasX + a.width > maxX) maxX = a.canvasX + a.width;
+      if (a.canvasY + a.height > maxY) maxY = a.canvasY + a.height;
+    }
+    const bboxW = (maxX - minX) + FIT_PADDING_PX * 2;
+    const bboxH = (maxY - minY) + FIT_PADDING_PX * 2;
+    const wrapRect = wrapper.getBoundingClientRect();
+    if (bboxW <= 0 || bboxH <= 0 || wrapRect.width <= 0 || wrapRect.height <= 0) return;
+    const fitScale = clamp(Math.min(wrapRect.width / bboxW, wrapRect.height / bboxH));
+    // Centre the bbox in the viewport
+    const tx = (wrapRect.width - (maxX - minX) * fitScale) / 2 - minX * fitScale;
+    const ty = (wrapRect.height - (maxY - minY) * fitScale) / 2 - minY * fitScale;
+    ref.setTransform(tx, ty, fitScale, 250, 'easeOut');
+  }, [artifacts]);
+
+  // Keyboard: + / = zoom in, - zoom out, 0 reset, F fit
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const active = document.activeElement as HTMLElement | null;
+      if (active) {
+        const tag = active.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || active.isContentEditable) return;
+      }
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === '+' || e.key === '=') { e.preventDefault(); zoomIn(); }
+      else if (e.key === '-' || e.key === '_') { e.preventDefault(); zoomOut(); }
+      else if (e.key === '0') { e.preventDefault(); resetView(); }
+      else if (e.key === 'f' || e.key === 'F') { e.preventDefault(); fitToContent(); }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [zoomIn, zoomOut, resetView, fitToContent]);
 
   // Cmd/Ctrl+K — focus composer + push current selection as referred artifacts
   useEffect(() => {
@@ -229,15 +365,28 @@ export function Whiteboard({ conversationId }: { conversationId: string }) {
     >
       <TransformWrapper
         ref={transformRef}
-        minScale={0.25}
-        maxScale={3}
-        initialScale={0.8}
+        minScale={MIN_SCALE}
+        maxScale={MAX_SCALE}
+        initialScale={INITIAL_SCALE}
         centerOnInit
-        wheel={{ step: 0.1 }}
+        // Disable pan-clamping so tall cards can always be fully reviewed;
+        // the canvas size itself already guarantees you can reach every
+        // artifact, and unbounded lets the user overshoot slightly without
+        // feeling "stuck".
+        limitToBounds={false}
+        centerZoomedOut={false}
+        wheel={{ step: 0.08 }}
         doubleClick={{ disabled: true }}
         panning={{ disabled: panDisabled }}
+        onTransform={(_ref, state) => {
+          // Keep overlay % in sync with current zoom level
+          if (Math.abs(state.scale - scale) > 1e-3) setScale(state.scale);
+        }}
       >
-        <TransformComponent wrapperClass="!w-full !h-full" contentClass="!w-[2600px] !min-h-[1200px]">
+        <TransformComponent
+          wrapperClass="!w-full !h-full"
+          contentStyle={{ width: canvasW, minHeight: canvasH }}
+        >
           <div className="relative w-full h-full" data-testid="whiteboard-canvas-inner">
             {artifacts.map(a => (
               <ArtifactCard
@@ -252,6 +401,91 @@ export function Whiteboard({ conversationId }: { conversationId: string }) {
         </TransformComponent>
       </TransformWrapper>
       {marqueeOverlay}
+
+      {/* Floating "Ask about this" button when the user selects text inside
+          any artifact card. Position-fixed to the document so it tracks the
+          selection regardless of canvas pan/zoom. */}
+      {textSelection && (
+        <button
+          type="button"
+          onClick={onAskAboutSelection}
+          onMouseDown={(e) => e.preventDefault()} // don't clear the selection
+          className="fixed z-50 -translate-x-1/2 -translate-y-[calc(100%+6px)] bg-primary text-primary-foreground text-xs font-medium rounded-full shadow-lg px-3 py-1.5 flex items-center gap-1.5 hover:brightness-110 whitespace-nowrap"
+          style={{ top: textSelection.rect.top, left: textSelection.rect.left }}
+          data-testid="selection-ask-about-this"
+        >
+          <Quote className="h-3 w-3" />
+          Ask about this
+        </button>
+      )}
+
+      {/* Zoom / view controls — fixed overlay, outside the transformed area so
+          it never moves or scales with the canvas. */}
+      <div
+        className="absolute bottom-4 right-4 z-20 flex items-center gap-1 bg-card/95 border border-border rounded-full shadow-lg px-2 py-1 backdrop-blur"
+        data-testid="whiteboard-zoom-controls"
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 rounded-full"
+          onClick={zoomOut}
+          disabled={scale <= MIN_SCALE + 1e-3}
+          title="Zoom out (−)"
+          data-testid="zoom-out"
+        >
+          <Minus className="h-4 w-4" />
+        </Button>
+
+        <button
+          type="button"
+          onClick={resetView}
+          className="min-w-[3.5rem] text-center text-xs font-medium tabular-nums px-2 py-1 rounded hover:bg-muted"
+          title="Click to reset to 100% (0)"
+          data-testid="zoom-percent"
+        >
+          {Math.round(scale * 100)}%
+        </button>
+
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 rounded-full"
+          onClick={zoomIn}
+          disabled={scale >= MAX_SCALE - 1e-3}
+          title="Zoom in (+)"
+          data-testid="zoom-in"
+        >
+          <Plus className="h-4 w-4" />
+        </Button>
+
+        <div className="w-px h-5 bg-border mx-1" />
+
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 rounded-full"
+          onClick={fitToContent}
+          disabled={artifacts.length === 0}
+          title="Fit to content (F)"
+          data-testid="zoom-fit"
+        >
+          <Maximize className="h-4 w-4" />
+        </Button>
+
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 rounded-full"
+          onClick={resetView}
+          title="Reset view (0)"
+          data-testid="zoom-reset"
+        >
+          <RotateCcw className="h-4 w-4" />
+        </Button>
+      </div>
+
       {selected.size > 0 && (
         <div
           className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-card border rounded-full px-4 py-2 shadow flex items-center gap-3 text-sm z-10"

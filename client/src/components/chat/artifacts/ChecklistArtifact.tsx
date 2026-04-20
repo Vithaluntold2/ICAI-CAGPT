@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, CircleDashed, Loader2 } from "lucide-react";
+import { Check, CircleDashed, Loader2, Quote } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
+import { useSelectionContext } from "../whiteboard/useSelectionContext";
 
 interface ChecklistItem {
   id: string;
@@ -43,6 +44,21 @@ export function ChecklistArtifact({ artifactId, conversationId, payload, state }
   const queuedRef = useRef<Set<string> | null>(null);
   const timerRef = useRef<number | null>(null);
   const queryClient = useQueryClient();
+  const setHighlight = useSelectionContext(s => s.setHighlight);
+
+  /**
+   * Quick-reference: push THIS specific item into the composer's selection
+   * context (as `highlightedText`) scoped to this artifact. Stops the row's
+   * click handler so it doesn't also toggle the checkbox.
+   */
+  const referenceItem = useCallback((e: React.MouseEvent, item: ChecklistItem) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const label = item.section ? `${item.section}: ${item.label}` : item.label;
+    setHighlight([artifactId], label);
+    const input = document.querySelector<HTMLTextAreaElement>('[data-testid="composer-input"]');
+    input?.focus();
+  }, [artifactId, setHighlight]);
 
   // Keep local state in sync if the artifact row changes out-of-band (e.g. agent
   // toggles an item via update_checklist — the whiteboard query refetches and
@@ -129,12 +145,12 @@ export function ChecklistArtifact({ artifactId, conversationId, payload, state }
               {sectionItems.map(item => {
                 const isChecked = checked.has(item.id);
                 return (
-                  <li key={item.id}>
+                  <li key={item.id} className="group/item relative">
                     <button
                       type="button"
                       onClick={() => toggle(item.id)}
                       className={cn(
-                        "w-full text-left flex items-start gap-2 px-2 py-1.5 rounded hover:bg-muted/60 transition-colors",
+                        "w-full text-left flex items-start gap-2 px-2 py-1.5 pr-9 rounded hover:bg-muted/60 transition-colors",
                         isChecked && "opacity-60",
                       )}
                       data-testid={`checklist-item-${item.id}`}
@@ -156,6 +172,20 @@ export function ChecklistArtifact({ artifactId, conversationId, payload, state }
                           <span className="block text-xs text-muted-foreground mt-0.5">{item.hint}</span>
                         )}
                       </span>
+                    </button>
+                    {/* Quick-reference: push THIS item into the composer's
+                        selection context. Hover-revealed so it doesn't clutter
+                        the row at rest. Stops propagation so clicking it
+                        doesn't also toggle the checkbox. */}
+                    <button
+                      type="button"
+                      onClick={(e) => referenceItem(e, item)}
+                      className="absolute right-2 top-1.5 h-6 w-6 rounded inline-flex items-center justify-center text-muted-foreground opacity-0 group-hover/item:opacity-100 hover:bg-muted hover:text-foreground transition-opacity focus-visible:opacity-100"
+                      title="Ask about this item"
+                      aria-label="Ask about this item"
+                      data-testid={`checklist-item-ref-${item.id}`}
+                    >
+                      <Quote className="h-3.5 w-3.5" />
                     </button>
                   </li>
                 );

@@ -3,7 +3,7 @@
  * Polished mindmap component rivaling VisualMind with animations and interactivity
  */
 
-import { useEffect, useState, useMemo } from 'react';
+import { memo, useEffect, useRef, useState, useMemo } from 'react';
 // ReactFlow base stylesheet is required — without it, nodes render without
 // dimensions and edges route to nowhere, producing a visually-empty canvas.
 // (WorkflowRenderer imports the same file; mindmap was relying on workflow
@@ -399,13 +399,19 @@ function MindMapRendererInner({ data, embedded = false }: MindMapRendererProps) 
   const [nodes, setNodes, onNodesChange] = useNodesState(layoutNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(layoutEdges);
   const { fitView } = useReactFlow();
+  const canvasWrapperRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setNodes(layoutNodes);
     setEdges(layoutEdges);
-    // Fit view after layout
-    setTimeout(() => fitView({ padding: 0.2, duration: 800 }), 100);
-  }, [layoutNodes, layoutEdges, setNodes, setEdges, fitView]);
+    // fitView only makes sense in non-embedded contexts where the container
+    // has a stable pixel size at mount. In embedded mode we rely on
+    // defaultViewport at a fixed zoom (see the ReactFlow component below) to
+    // dodge the late-measurement bug entirely.
+    if (!embedded) {
+      setTimeout(() => fitView({ padding: 0.2, duration: 800 }), 100);
+    }
+  }, [layoutNodes, layoutEdges, setNodes, setEdges, fitView, embedded]);
 
   // Header is rendered only when a title is present AND we're not embedded
   // inside an outer artifact card (which already shows the title). Action
@@ -443,18 +449,29 @@ function MindMapRendererInner({ data, embedded = false }: MindMapRendererProps) 
       )}
 
       {/* ReactFlow Canvas */}
-      <div className={showHeader ? 'h-[calc(100%-60px)] mt-[60px]' : 'h-full'}>
+      <div
+        ref={canvasWrapperRef}
+        className={showHeader ? 'h-[calc(100%-60px)] mt-[60px]' : 'h-full'}
+      >
         <ReactFlow
           nodes={nodes}
           edges={edges}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           nodeTypes={nodeTypes}
-          fitView
+          // fitView is deliberately OFF in embedded mode. Inside the
+          // whiteboard's CSS-transformed canvas, ReactFlow's initial
+          // measurement of our parent's size is unreliable and fitView locks
+          // in a tiny scale (~0.31) that it never recovers from, even with
+          // ResizeObserver re-fits. We opt for a stable defaultViewport at
+          // readable zoom instead — user pans / uses Controls to explore.
+          // Standalone (chat) and fullscreen paths still fitView since their
+          // containers have a stable pixel size at mount.
+          fitView={!embedded}
           fitViewOptions={{
             padding: 0.2,
             maxZoom: 1.5,
-            minZoom: 0.3,
+            minZoom: 0.5,
           }}
           nodesDraggable={true}
           nodesConnectable={false}
@@ -463,7 +480,7 @@ function MindMapRendererInner({ data, embedded = false }: MindMapRendererProps) 
           zoomOnScroll={true}
           minZoom={0.2}
           maxZoom={2.5}
-          defaultViewport={{ x: 0, y: 0, zoom: 1 }}
+          defaultViewport={embedded ? { x: 40, y: 40, zoom: 0.8 } : { x: 0, y: 0, zoom: 1 }}
         >
           <Background gap={20} size={1} />
           <Controls
@@ -481,10 +498,20 @@ function MindMapRendererInner({ data, embedded = false }: MindMapRendererProps) 
   );
 }
 
-export default function MindMapRenderer(props: MindMapRendererProps) {
+/**
+ * Memoised public API for MindMapRenderer. Without memo, every parent
+ * re-render (e.g. Chat re-rendering on each composer keystroke) walks into
+ * MindMapRendererInner's useEffect, re-runs the dagre layout, and calls
+ * setNodes/setEdges — ReactFlow visibly "flashes" the mindmap. memo
+ * short-circuits when `data` and `embedded` are reference-equal; callers
+ * are responsible for handing us a stable `data` reference.
+ */
+const MindMapRenderer = memo(function MindMapRenderer(props: MindMapRendererProps) {
   return (
     <ReactFlowProvider>
       <MindMapRendererInner {...props} />
     </ReactFlowProvider>
   );
-}
+});
+
+export default MindMapRenderer;

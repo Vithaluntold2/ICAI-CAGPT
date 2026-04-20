@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -69,7 +69,7 @@ function normalizeMermaidSource(src: string): string {
   return out.trim();
 }
 
-export function FlowchartArtifact({
+function FlowchartArtifactInner({
   payload,
   embedded = false,
 }: {
@@ -223,3 +223,12 @@ export function FlowchartArtifact({
     </div>
   );
 }
+
+/**
+ * Memoised public export. Without memo, every parent re-render (e.g. Chat
+ * re-rendering on each composer keystroke) runs mermaid.render() again,
+ * briefly wiping and redrawing the SVG — looks like the diagram is flashing.
+ * Callers (MindmapCodeBlock / ArtifactRenderer) hand us a stable
+ * `{ source }` payload so React.memo short-circuits cleanly.
+ */
+export const FlowchartArtifact = memo(FlowchartArtifactInner);

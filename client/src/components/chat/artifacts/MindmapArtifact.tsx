@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Download, Maximize2, Minimize2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import MindMapRenderer from "../../visualizations/MindMapRenderer";
 
-export function MindmapArtifact({ payload, embedded = false }: { payload: any; embedded?: boolean }) {
+function MindmapArtifactInner({ payload, embedded = false }: { payload: any; embedded?: boolean }) {
   const bodyRef = useRef<HTMLDivElement>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
@@ -148,3 +148,17 @@ export function MindmapArtifact({ payload, embedded = false }: { payload: any; e
 
   return isFullscreen ? createPortal(tree, document.body) : tree;
 }
+
+/**
+ * Memoised export. The inner component's `payload` prop is a parsed JSON
+ * object — when the source string is the same, callers (Chat.tsx,
+ * ArtifactRenderer) must hand us the same reference or React.memo won't
+ * help. MindmapCodeBlock / ChartMessageRich already memoise their parse;
+ * the whiteboard artifact row naturally caches its payload.
+ *
+ * Without this memo, every parent re-render (e.g. the user typing in the
+ * composer causing Chat.tsx to re-render) walks into MindMapRenderer's
+ * useEffect, re-runs the dagre layout, calls setNodes/setEdges, and
+ * ReactFlow visibly "flashes" the mindmap.
+ */
+export const MindmapArtifact = memo(MindmapArtifactInner);

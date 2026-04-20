@@ -184,6 +184,11 @@ export function Composer({
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
               submit();
+            } else if (e.key === "Escape") {
+              // Release focus so whiteboard keyboard shortcuts (+/-/0/F)
+              // work again without the user having to click outside.
+              e.preventDefault();
+              (e.currentTarget as HTMLTextAreaElement).blur();
             }
           }}
         />

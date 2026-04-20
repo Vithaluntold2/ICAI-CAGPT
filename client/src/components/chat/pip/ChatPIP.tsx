@@ -12,12 +12,30 @@ interface PIPState {
   collapsed: boolean;
 }
 
+const PIP_WIDTH = 360;
+const PIP_HEIGHT_EXPANDED = 480;
+const PIP_HEIGHT_COLLAPSED = 40;
+
+// Clamp position so the entire PIP stays within the viewport. Applied on
+// read, resize, and drag — any of those can produce an out-of-bounds value
+// (e.g. a stale localStorage entry from before a smaller window, or a
+// pre-fix bad drag saved by an earlier build).
+function clampState(s: PIPState): PIPState {
+  if (typeof window === "undefined") return s;
+  const h = s.collapsed ? PIP_HEIGHT_COLLAPSED : PIP_HEIGHT_EXPANDED;
+  return {
+    ...s,
+    right: Math.max(0, Math.min(window.innerWidth - PIP_WIDTH, s.right)),
+    bottom: Math.max(0, Math.min(window.innerHeight - h, s.bottom)),
+  };
+}
+
 function readState(): PIPState {
   const defaults: PIPState = { right: 24, bottom: 24, collapsed: false };
   try {
     const saved = localStorage.getItem(LS_KEY);
-    if (!saved) return defaults;
-    return { ...defaults, ...JSON.parse(saved) };
+    const raw = saved ? { ...defaults, ...JSON.parse(saved) } : defaults;
+    return clampState(raw);
   } catch {
     return defaults;
   }
@@ -45,6 +63,14 @@ export function ChatPIP({
     localStorage.setItem(LS_KEY, JSON.stringify(state));
   }, [state]);
 
+  // Re-clamp on window resize so the PIP doesn't get stranded off-screen
+  // after the window is shrunk (common when docking/undocking a monitor).
+  useEffect(() => {
+    const onResize = () => setState((s) => clampState(s));
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
   function onMouseDown(e: React.MouseEvent) {
     const startClientX = e.clientX;
     const startClientY = e.clientY;
@@ -56,10 +82,10 @@ export function ChatPIP({
       if (!dragging.current) return;
       const deltaX = ev.clientX - startClientX;
       const deltaY = ev.clientY - startClientY;
-      setState((s) => ({
+      setState((s) => clampState({
         ...s,
-        right: Math.max(0, Math.min(window.innerWidth - 360, origRight - deltaX)),
-        bottom: Math.max(0, Math.min(window.innerHeight - 80, origBottom - deltaY)),
+        right: origRight - deltaX,
+        bottom: origBottom - deltaY,
       }));
     };
     const up = () => {
@@ -71,12 +97,12 @@ export function ChatPIP({
     window.addEventListener("mouseup", up);
   }
 
-  const height = state.collapsed ? 40 : 480;
+  const height = state.collapsed ? PIP_HEIGHT_COLLAPSED : PIP_HEIGHT_EXPANDED;
 
   return (
     <div
       className="fixed z-30 bg-background border shadow-lg rounded-lg flex flex-col overflow-hidden"
-      style={{ right: state.right, bottom: state.bottom, width: 360, height }}
+      style={{ right: state.right, bottom: state.bottom, width: PIP_WIDTH, height }}
       data-testid="chat-pip"
     >
       <div

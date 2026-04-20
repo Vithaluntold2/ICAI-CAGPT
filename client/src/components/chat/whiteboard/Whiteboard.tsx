@@ -176,6 +176,33 @@ export function Whiteboard({ conversationId }: { conversationId: string }) {
     return () => window.removeEventListener('keydown', handler);
   }, [zoomIn, zoomOut, resetView, fitToContent]);
 
+  // CAD-style wheel behavior: plain wheel = pan, Ctrl+wheel = zoom.
+  // The TransformWrapper's `wheel.activationKeys: ['Control']` makes the library
+  // only handle zoom when Ctrl is held; we take over wheel-without-Ctrl and
+  // translate it into a pan by calling setTransform directly.
+  // Must attach natively with { passive: false } because React's synthetic
+  // onWheel is passive by default (preventDefault would silently no-op).
+  useEffect(() => {
+    const el = wrapperRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (e.ctrlKey || e.metaKey) return; // let the library zoom
+      const ref = transformRef.current;
+      if (!ref) return;
+      e.preventDefault();
+      const { positionX, positionY, scale: cur } = ref.state;
+      // Line-mode wheels report deltaMode=1; page-mode is 2. Scale deltas to
+      // keep pan feel consistent regardless of the device reporting mode.
+      const lineHeight = 16;
+      const mult = e.deltaMode === 1 ? lineHeight : e.deltaMode === 2 ? 400 : 1;
+      const dx = e.deltaX * mult;
+      const dy = e.deltaY * mult;
+      ref.setTransform(positionX - dx, positionY - dy, cur, 0);
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, []);
+
   // Cmd/Ctrl+K — focus composer + push current selection as referred artifacts
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -310,7 +337,7 @@ export function Whiteboard({ conversationId }: { conversationId: string }) {
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = `whiteboard-selected-${conversationId}.xlsx`;
+      link.download = `output-selected-${conversationId}.xlsx`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -333,7 +360,7 @@ export function Whiteboard({ conversationId }: { conversationId: string }) {
         className="flex flex-col items-center justify-center h-full text-muted-foreground p-8 text-center"
         data-testid="whiteboard-empty"
       >
-        <p className="text-sm">Your whiteboard will fill as the assistant produces diagrams, charts, and workflows.</p>
+        <p className="text-sm">Your output will fill as the assistant produces diagrams, charts, and workflows.</p>
       </div>
     );
   }
@@ -375,7 +402,7 @@ export function Whiteboard({ conversationId }: { conversationId: string }) {
         // feeling "stuck".
         limitToBounds={false}
         centerZoomedOut={false}
-        wheel={{ step: 0.08 }}
+        wheel={{ step: 0.08, activationKeys: ['Control', 'Meta'] }}
         doubleClick={{ disabled: true }}
         panning={{ disabled: panDisabled }}
         onTransform={(_ref, state) => {

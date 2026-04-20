@@ -10,18 +10,23 @@ import { validateEnvironmentOrThrow, getEnvironmentInfo } from "./utils/envValid
 import { getFeatureFlags, getDisabledFeatures } from "./config/featureFlags";
 import { toolRegistry } from "./services/tools/registry";
 import { readWhiteboardTool } from "./services/tools/readWhiteboard.tool";
+import { updateChecklistTool } from "./services/tools/updateChecklist.tool";
 
 // Register tools at module load (idempotent; ignore "already registered" if hot-reloaded)
-try {
-  toolRegistry.register(readWhiteboardTool);
-  console.log('[Startup] ✓ Registered tool: read_whiteboard');
-} catch (err: any) {
-  if (err?.message?.includes('already registered')) {
-    // Safe to ignore in dev / double-bootstrap scenarios
-  } else {
-    console.error('[Startup] Failed to register read_whiteboard tool:', err);
+function safeRegister(tool: { name: string }, register: () => void) {
+  try {
+    register();
+    console.log(`[Startup] ✓ Registered tool: ${tool.name}`);
+  } catch (err: any) {
+    if (err?.message?.includes('already registered')) {
+      // Safe to ignore in dev / double-bootstrap scenarios
+    } else {
+      console.error(`[Startup] Failed to register ${tool.name} tool:`, err);
+    }
   }
 }
+safeRegister(readWhiteboardTool, () => toolRegistry.register(readWhiteboardTool));
+safeRegister(updateChecklistTool, () => toolRegistry.register(updateChecklistTool));
 
 // =============================================================================
 // GLOBAL ERROR HANDLERS - Catch unhandled errors to prevent crashes

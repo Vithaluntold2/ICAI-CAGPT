@@ -987,6 +987,7 @@ export class AIOrchestrator {
           content: mainResponse,
           conversationId: options.conversationId,
           messageId: options.messageId,
+          chatMode,
           precomputed: {
             visualization: visualization as any,
             spreadsheet: spreadsheetPreviewData as any,

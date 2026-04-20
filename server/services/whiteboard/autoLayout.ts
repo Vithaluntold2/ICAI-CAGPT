@@ -42,4 +42,5 @@ export const NATURAL_SIZE: Record<string, { width: number; height: number }> = {
   mindmap: { width: 700, height: 500 },
   flowchart: { width: 700, height: 450 },
   spreadsheet: { width: 900, height: 500 },
+  checklist: { width: 520, height: 480 },
 };

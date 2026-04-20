@@ -36,7 +36,7 @@ import { getClientFeatures, isFeatureEnabled } from "./config/featureFlags";
 import { documentIngestion } from "./services/core/documentIngestion";
 import { continuousLearning } from "./services/core/continuousLearning";
 import { voiceService } from "./services/voice/voiceService";
-import { listArtifactsByConversation, createArtifact } from "./services/whiteboard/repository";
+import { listArtifactsByConversation, createArtifact, updateArtifactState } from "./services/whiteboard/repository";
 import { buildBoardXlsxBuffer } from "./services/whiteboard/exportXlsx";
 import { buildBoardPptxBuffer } from "./services/whiteboard/exportPptx";
 import { buildBoardPdfBuffer } from "./services/whiteboard/exportPdf";
@@ -987,6 +987,25 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
     await backfillIfNeeded(id);
     const artifacts = await listArtifactsByConversation(id);
     res.json({ artifacts });
+  });
+
+  // Update the mutable state of a single artifact (currently: checklist toggles).
+  // Body: { state: { ... } } — shallow-merged with the existing state jsonb.
+  app.patch("/api/conversations/:id/whiteboard/:artifactId/state", requireAuth, async (req, res) => {
+    const userId = getCurrentUserId(req);
+    if (!userId) return res.status(401).json({ error: "Not authenticated" });
+    const { id, artifactId } = req.params;
+    const conversation = await storage.getConversation(id);
+    if (!conversation) return res.status(404).json({ error: "Conversation not found" });
+    if (conversation.userId !== userId) return res.status(403).json({ error: "Access denied" });
+
+    const patch = (req.body ?? {}).state;
+    if (!patch || typeof patch !== "object") {
+      return res.status(400).json({ error: "bad_state", message: "Expected body.state to be an object" });
+    }
+    const updated = await updateArtifactState(artifactId, id, patch as Record<string, unknown>);
+    if (!updated) return res.status(404).json({ error: "artifact_not_found" });
+    res.json({ artifact: updated });
   });
 
   app.post("/api/conversations/:id/whiteboard/export", requireAuth, async (req, res) => {

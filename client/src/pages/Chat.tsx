@@ -674,9 +674,53 @@ export default function Chat() {
                   }).then(r => r.ok ? r.json() : { artifacts: [] }),
                 ]);
 
-                // Messages: splice fresh content (with server-injected
-                // <artifact /> placeholders) into local state for the just-
-                // completed message, bypassing the streaming-guard effect.
+                // ORDER MATTERS HERE.
+                //
+                // The placeholder resolver in ReactMarkdown reads
+                // `artifactsData?.byId?.[id]` — where artifactsData comes
+                // from useConversationArtifacts, keyed by ['whiteboard',
+                // convId]. If we call setMessages BEFORE priming the
+                // whiteboard cache, the re-render triggered by setMessages
+                // reads a stale (empty) byId and renders the "[artifact …
+                // loading…]" fallback, and that render sticks — subsequent
+                // cache updates don't invalidate the already-rendered
+                // tree for reasons related to the observer timing.
+                //
+                // Priming the whiteboard cache FIRST (and messages cache
+                // second) means when setMessages fires at the end, React's
+                // upcoming re-render sees both (a) the new message content
+                // with the <artifact /> placeholder AND (b) the cached
+                // artifact by id — in the same commit. Placeholder resolves
+                // on the first render, no navigation-away-and-back needed.
+
+                const artifacts = (wbRes?.artifacts ?? []) as any[];
+                const byId: Record<string, any> = {};
+                for (const a of artifacts) byId[a.id] = a;
+                console.log('[Chat] post-stream whiteboard refresh', {
+                  convId: resolvedConvId,
+                  artifactCount: artifacts.length,
+                  artifactIds: artifacts.map(a => a.id),
+                });
+
+                // 1. Whiteboard cache first.
+                queryClient.setQueryData(
+                  ['whiteboard', resolvedConvId],
+                  { artifacts, byId },
+                );
+                queryClient.invalidateQueries({ queryKey: ['whiteboard', resolvedConvId] });
+                queryClient.refetchQueries({ queryKey: ['whiteboard', resolvedConvId] });
+
+                // 2. Messages cache.
+                queryClient.setQueryData(
+                  ['/api/conversations', resolvedConvId, 'messages'],
+                  fresh,
+                );
+
+                // 3. Finally, the local messages state. This is what
+                //    actually causes Chat to re-render with the new
+                //    content containing <artifact /> placeholders.
+                //    Both caches above are already populated, so the
+                //    placeholder lookups succeed on the first render.
                 const freshMsg = messageId
                   ? fresh.messages.find((m: any) => m.id === messageId)
                   : undefined;
@@ -687,45 +731,6 @@ export default function Chat() {
                       : msg
                   ));
                 }
-                queryClient.setQueryData(
-                  ['/api/conversations', resolvedConvId, 'messages'],
-                  fresh,
-                );
-
-                // Whiteboard: triple-belt so the artifact actually lands in
-                // the React Query cache that chat placeholder resolution
-                // reads from. Earlier we relied on setQueryData alone and
-                // users still saw "[artifact … loading…]" until navigating
-                // out and back. Combining all three guarantees the cache
-                // updates for every subscriber:
-                //
-                //   1. setQueryData  — primes the cache synchronously with
-                //      the exact shape `useConversationArtifacts` returns
-                //      ({ artifacts, byId }), so subscribers that read the
-                //      cache on their next render get fresh data without
-                //      waiting for a fetch.
-                //   2. invalidateQueries — marks the key stale, so the next
-                //      time a subscriber mounts or observes, it refetches
-                //      rather than trusting whatever's cached. Defends
-                //      against future setQueryData races.
-                //   3. refetchQueries — forces an immediate background
-                //      refetch right now, which fires subscriber updates
-                //      via React Query's standard notification path (some-
-                //      times more reliable than setQueryData's notifier).
-                const artifacts = (wbRes?.artifacts ?? []) as any[];
-                const byId: Record<string, any> = {};
-                for (const a of artifacts) byId[a.id] = a;
-                console.log('[Chat] post-stream whiteboard refresh', {
-                  convId: resolvedConvId,
-                  artifactCount: artifacts.length,
-                  artifactIds: artifacts.map(a => a.id),
-                });
-                queryClient.setQueryData(
-                  ['whiteboard', resolvedConvId],
-                  { artifacts, byId },
-                );
-                queryClient.invalidateQueries({ queryKey: ['whiteboard', resolvedConvId] });
-                queryClient.refetchQueries({ queryKey: ['whiteboard', resolvedConvId] });
               } catch (err) {
                 console.warn('[Chat] post-stream refetch failed', err);
               }

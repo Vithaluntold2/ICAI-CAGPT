@@ -262,7 +262,68 @@ const getLayoutedElements = (nodes: Node[], edges: Edge[], layout: string = 'dag
   return { nodes: layoutedNodes, edges };
 };
 
-const getNodeStyle = (type: string, theme: ColorTheme, isDark: boolean = false) => {
+// A theme resolved for the current light/dark mode. All per-node visual
+// decisions (gradient fills, text color, border, shadow, canvas, dot color)
+// are pre-computed ONCE per (theme × mode) change — `getNodeStyle` just looks
+// values up, so every dark-mode fix flows from a single function instead of
+// scattered per-call luminance math and `isDark` branches.
+interface ResolvedTheme {
+  startBg: string;
+  endBg: string;
+  decisionBg: string;
+  stepBg: string;
+  stepText: string;
+  stepBorder: string;
+  stepShadow: string;
+  edge: string;
+  canvasBackground: string;
+  dotColor: string;
+}
+
+function resolveTheme(theme: ColorTheme, isDark: boolean): ResolvedTheme {
+  const stepFirstHex = theme.step.match(/#[0-9a-fA-F]{6}/)?.[0] ?? '#e0e7ff';
+  const stepIsLight = hexLuminance(stepFirstHex) > 0.55;
+
+  if (!isDark) {
+    return {
+      startBg: theme.start,
+      endBg: theme.end,
+      decisionBg: theme.decision,
+      stepBg: theme.step,
+      stepText: stepIsLight ? '#0f172a' : '#ffffff',
+      stepBorder: stepIsLight
+        ? '1px solid rgba(15,23,42,0.08)'
+        : 'none',
+      stepShadow: stepIsLight ? 'none' : '0 2px 8px rgba(0,0,0,0.3)',
+      edge: theme.edge,
+      canvasBackground: theme.background,
+      dotColor: theme.edge + '20',
+    };
+  }
+
+  // Dark mode: pastel step gradients would blow out on a dark canvas, so
+  // blend each hex stop toward a near-black base. Computed in JS so the final
+  // `background` is a plain `linear-gradient(..., #rrggbb, #rrggbb)` — avoids
+  // CSS `color-mix()`, which silently dropped in at least one user's browser
+  // and reverted nodes to the React Flow default white panel.
+  const darkStepBg = theme.step.replace(/#[0-9a-fA-F]{6}/g, (hex) =>
+    blendHex(hex, '#1a1b1f', 0.25)
+  );
+  return {
+    startBg: theme.start,      // start/end/decision use saturated colors
+    endBg: theme.end,          // already — leave them alone.
+    decisionBg: theme.decision,
+    stepBg: darkStepBg,
+    stepText: '#ffffff',
+    stepBorder: '1px solid rgba(255,255,255,0.08)',
+    stepShadow: '0 2px 8px rgba(0,0,0,0.6)',
+    edge: theme.edge,
+    canvasBackground: 'hsl(var(--background))',
+    dotColor: theme.edge + '40',
+  };
+}
+
+const getNodeStyle = (type: string, resolved: ResolvedTheme) => {
   const baseStyle = {
     padding: '20px 24px',
     borderRadius: '16px',
@@ -295,75 +356,46 @@ const getNodeStyle = (type: string, theme: ColorTheme, isDark: boolean = false) 
     }
   };
 
-  let backgroundColor: string;
-  
   switch (type) {
     case 'start':
-      backgroundColor = theme.start;
       return {
         ...baseStyle,
         ...hoverTransform,
-        background: backgroundColor,
+        background: resolved.startBg,
         borderRadius: '50px',
         minHeight: '80px',
-        boxShadow: `0 10px 30px rgba(0,0,0,0.15), 0 0 0 1px rgba(255,255,255,0.1) inset, 0 0 60px ${theme.edge}40`,
+        boxShadow: `0 10px 30px rgba(0,0,0,0.15), 0 0 0 1px rgba(255,255,255,0.1) inset, 0 0 60px ${resolved.edge}40`,
       };
     case 'end':
-      backgroundColor = theme.end;
       return {
         ...baseStyle,
         ...hoverTransform,
-        background: backgroundColor,
+        background: resolved.endBg,
         borderRadius: '50px',
         minHeight: '80px',
-        boxShadow: `0 10px 30px rgba(0,0,0,0.15), 0 0 0 1px rgba(255,255,255,0.1) inset, 0 0 60px ${theme.edge}40`,
+        boxShadow: `0 10px 30px rgba(0,0,0,0.15), 0 0 0 1px rgba(255,255,255,0.1) inset, 0 0 60px ${resolved.edge}40`,
       };
     case 'decision':
-      backgroundColor = theme.decision;
       return {
         ...baseStyle,
-        background: backgroundColor,
+        background: resolved.decisionBg,
         clipPath: 'polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)',
-        boxShadow: `0 10px 30px rgba(0,0,0,0.15), 0 0 60px ${theme.edge}30`,
+        boxShadow: `0 10px 30px rgba(0,0,0,0.15), 0 0 60px ${resolved.edge}30`,
         ':hover': {
           transform: 'scale(1.08) rotate(2deg)',
-          boxShadow: `0 20px 40px rgba(0,0,0,0.25), 0 0 80px ${theme.edge}50`,
+          boxShadow: `0 20px 40px rgba(0,0,0,0.25), 0 0 80px ${resolved.edge}50`,
           zIndex: 20
         }
       };
-    default: {
-      backgroundColor = theme.step;
-      // Step nodes often use pastel / light gradients. Pick text color by
-      // sampling the first hex in the gradient: if the luminance is high
-      // (light background) → dark text; else → white text with shadow.
-      const firstHex = backgroundColor.match(/#[0-9a-fA-F]{6}/)?.[0] ?? '#e0e7ff';
-      const origIsLight = hexLuminance(firstHex) > 0.55;
-      // Dark mode: blend each hex stop in the step gradient toward a
-      // near-black base (#1a1b1f). Preserves each theme's hue identity
-      // (purple stays purple, orange stays orange) but darkens the overall
-      // fill so pastel-biased themes don't paint near-white nodes on a dark
-      // canvas. The blend is computed in JS so the final `background` value
-      // is a plain `linear-gradient(..., #rrggbb, #rrggbb)` — no CSS
-      // `color-mix()`, which at least one browser in our user base rejected
-      // silently when nested inside a gradient, causing the whole declaration
-      // to drop back to the React Flow default white panel.
-      const stepBackground = isDark
-        ? backgroundColor.replace(/#[0-9a-fA-F]{6}/g, (hex) =>
-            blendHex(hex, "#1a1b1f", 0.25))
-        : backgroundColor;
+    default:
       return {
         ...baseStyle,
         ...hoverTransform,
-        background: stepBackground,
-        color: isDark ? '#ffffff' : (origIsLight ? '#0f172a' : '#ffffff'),
-        textShadow: isDark
-          ? '0 2px 8px rgba(0,0,0,0.6)'
-          : (origIsLight ? 'none' : '0 2px 8px rgba(0,0,0,0.3)'),
-        border: isDark
-          ? '1px solid rgba(255,255,255,0.08)'
-          : (origIsLight ? '1px solid rgba(15,23,42,0.08)' : 'none'),
+        background: resolved.stepBg,
+        color: resolved.stepText,
+        textShadow: resolved.stepShadow,
+        border: resolved.stepBorder,
       };
-    }
   }
 };
 
@@ -474,7 +506,13 @@ function WorkflowRendererInner({ nodes: nodesInput, edges: edgesInput, title, la
   const reactFlowInstance = useReactFlow();
   
   const activeTheme = customTheme || selectedTheme;
-  
+
+  // Single source of truth for every dark-mode decision. `resolveTheme` folds
+  // theme + isDark into pre-computed fills, text colors, borders, canvas,
+  // and dot alpha — so every visual layer derives from one memoized object
+  // instead of ad-hoc `isDark ? x : y` checks scattered through the tree.
+  const resolved = useMemo(() => resolveTheme(activeTheme, isDark), [activeTheme, isDark]);
+
   const randomizeColors = () => {
     const randomIndex = Math.floor(Math.random() * colorThemes.length);
     setSelectedTheme(colorThemes[randomIndex]);
@@ -604,7 +642,7 @@ function WorkflowRendererInner({ nodes: nodesInput, edges: edgesInput, title, la
       );
     }
   }, [reactFlowInstance]);
-  const createThemedNodes = (theme: ColorTheme): Node[] => {
+  const createThemedNodes = (resolved: ResolvedTheme): Node[] => {
     const dims = getNodeDimensions(compactMode, nodes.length);
     
     return nodes.map((node, idx) => {
@@ -745,18 +783,18 @@ function WorkflowRendererInner({ nodes: nodesInput, edges: edgesInput, title, la
         },
         position: { x: 0, y: idx * 150 },
         style: {
-          ...getNodeStyle(node.type, theme, isDark),
+          ...getNodeStyle(node.type, resolved),
           width: dims.width,
           height: dims.height,
           padding: compactMode ? '8px 12px' : '20px 24px',
           fontSize: compactMode ? '11px' : '14px',
           ...(isHighlighted ? {
             transform: 'scale(1.1)',
-            boxShadow: `0 0 60px ${theme.edge}, 0 20px 40px rgba(0,0,0,0.3)`,
+            boxShadow: `0 0 60px ${resolved.edge}, 0 20px 40px rgba(0,0,0,0.3)`,
             zIndex: 30
           } : {}),
           ...(matchesSearch ? {
-            outline: `3px solid ${theme.edge}`,
+            outline: `3px solid ${resolved.edge}`,
             outlineOffset: '4px'
           } : {})
         },
@@ -765,10 +803,15 @@ function WorkflowRendererInner({ nodes: nodesInput, edges: edgesInput, title, la
     });
   };
 
-  const createThemedEdges = (theme: ColorTheme): Edge[] => {
+  const createThemedEdges = (resolved: ResolvedTheme): Edge[] => {
+    // Edge labels use a white pill against the canvas in light mode, but on a
+    // dark canvas that pill becomes a glaring white chip — swap it for a
+    // darker card surface so the label blends with the rest of the UI.
+    const labelBgFill = isDark ? '#1a1b1f' : '#ffffff';
+    const labelTextFill = isDark ? '#ffffff' : resolved.edge;
     return edges.map((edge, idx) => {
       const isActive = isAnimating && animationProgress >= (idx / edges.length);
-      
+
       return {
         id: edge.id,
         source: edge.source,
@@ -780,27 +823,27 @@ function WorkflowRendererInner({ nodes: nodesInput, edges: edgesInput, title, la
           type: MarkerType.ArrowClosed,
           width: 30,
           height: 30,
-          color: isActive ? theme.edge : theme.edge + '80'
+          color: isActive ? resolved.edge : resolved.edge + '80'
         },
         style: {
           strokeWidth: isActive ? 5 : 3,
-          stroke: isActive ? theme.edge : theme.edge + '80',
+          stroke: isActive ? resolved.edge : resolved.edge + '80',
           strokeDasharray: animateEdges ? '8,8' : '0',
-          filter: isActive ? `drop-shadow(0 0 8px ${theme.edge})` : 'none',
+          filter: isActive ? `drop-shadow(0 0 8px ${resolved.edge})` : 'none',
           transition: 'all 0.3s ease'
         },
         labelStyle: {
-          fill: theme.edge,
+          fill: labelTextFill,
           fontSize: 13,
           fontWeight: 700,
           zIndex: 100
         },
         labelBgStyle: {
-          fill: '#ffffff',
+          fill: labelBgFill,
           fillOpacity: 0.98,
           rx: 8,
           ry: 8,
-          stroke: theme.edge,
+          stroke: resolved.edge,
           strokeWidth: 2
         },
         labelBgPadding: [10, 14] as [number, number],
@@ -812,8 +855,8 @@ function WorkflowRendererInner({ nodes: nodesInput, edges: edgesInput, title, la
   // Get dimensions based on compact mode and node count
   const nodeDims = getNodeDimensions(compactMode, nodes.length);
 
-  const initialNodes = createThemedNodes(activeTheme);
-  const initialEdges = createThemedEdges(activeTheme);
+  const initialNodes = createThemedNodes(resolved);
+  const initialEdges = createThemedEdges(resolved);
 
   const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(
     initialNodes,
@@ -827,8 +870,8 @@ function WorkflowRendererInner({ nodes: nodesInput, edges: edgesInput, title, la
   const [flowEdges, setEdges] = useEdgesState(layoutedEdges);
 
   useEffect(() => {
-    const newNodes = createThemedNodes(activeTheme);
-    const newEdges = createThemedEdges(activeTheme);
+    const newNodes = createThemedNodes(resolved);
+    const newEdges = createThemedEdges(resolved);
     const dims = getNodeDimensions(compactMode, nodes.length);
     const { nodes: newLayoutedNodes, edges: newLayoutedEdges } = getLayoutedElements(
       newNodes,
@@ -845,7 +888,7 @@ function WorkflowRendererInner({ nodes: nodesInput, edges: edgesInput, title, la
       const padding = nodes.length > 30 ? 0.1 : nodes.length > 15 ? 0.15 : 0.2;
       reactFlowInstance?.fitView({ padding, duration: 800 });
     }, 100);
-  }, [nodes, edges, activeTheme, animateEdges, currentLayout, isAnimating, animationProgress, searchTerm, compactMode, isDark]);
+  }, [nodes, edges, resolved, animateEdges, currentLayout, isAnimating, animationProgress, searchTerm, compactMode]);
 
   // Dynamic height based on workflow size. Scale linearly with node count so
   // tall vertical flows aren't compressed to ~18% zoom (nodes become specks).
@@ -898,14 +941,9 @@ function WorkflowRendererInner({ nodes: nodesInput, edges: edgesInput, title, la
   const containerClass = isFullscreen
     ? "fixed inset-0 z-50 w-screen h-screen rounded-none border-0 shadow-none flex flex-col"
     : "w-full border rounded-xl overflow-hidden shadow-2xl";
-  // In dark mode, fall back to the app's dark canvas token instead of the
-  // theme's (often near-white) background so a pastel theme like Royal Purple
-  // doesn't bathe the whole workflow in #faf5ff while the rest of the UI is
-  // dark. Node colors still honour the theme via the gradient blend above.
-  const canvasBackground = isDark ? "hsl(var(--background))" : activeTheme.background;
   const containerStyle: React.CSSProperties = isFullscreen
-    ? { background: canvasBackground }
-    : { background: canvasBackground, height: containerHeight };
+    ? { background: resolved.canvasBackground }
+    : { background: resolved.canvasBackground, height: containerHeight };
 
   // Fullscreen has to escape the whiteboard's transformed container. A
   // transform on any ancestor turns that ancestor into the containing block
@@ -1229,8 +1267,8 @@ function WorkflowRendererInner({ nodes: nodesInput, edges: edgesInput, title, la
             variant={'dots' as any}
             gap={24}
             size={2}
-            color={activeTheme.edge + (isDark ? '40' : '20')}
-            style={{ background: canvasBackground }}
+            color={resolved.dotColor}
+            style={{ background: resolved.canvasBackground }}
           />
           <Controls 
             showInteractive={true}

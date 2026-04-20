@@ -174,7 +174,18 @@ export class AIOrchestrator {
     
     // Step 2: Route to appropriate model and solvers
     const routingDecision = queryTriageService.routeQuery(classification, userTier, !!options?.attachment);
-    
+
+    // Calculation mode emits sheet blocks with formula cell-refs. gpt-4o-mini
+    // drifts on cell indexing (self-refs, off-by-one across rows) which lands
+    // as #ERR in the rendered spreadsheet. Force gpt-4o for these requests.
+    if (chatMode === 'calculation' || classification.requiresCalculation) {
+      if (routingDecision.primaryModel === 'gpt-4o-mini') {
+        console.log('[Orchestrator] Upgrading model gpt-4o-mini → gpt-4o for calculation/sheet generation');
+        routingDecision.primaryModel = 'gpt-4o';
+        routingDecision.fallbackModels = ['gpt-4o-mini', ...routingDecision.fallbackModels];
+      }
+    }
+
     // Step 2.5: ADVANCED REASONING - Enhance routing decision with reasoning profile
     // CRITICAL: CoT for Research/Calculate runs independently of full governor
     // This ensures quality improvement even when other features are disabled

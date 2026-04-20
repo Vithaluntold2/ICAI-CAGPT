@@ -151,11 +151,6 @@ export default function SpreadsheetViewer({
     ) || false;
   };
 
-  // Check if a cell value is a formula
-  const isFormula = (value: string | number | null): boolean => {
-    return typeof value === 'string' && value.startsWith('=');
-  };
-
   const formatCellValue = (value: string | number | null): string => {
     if (value === null || value === undefined) return '';
     if (typeof value === 'number') {
@@ -315,27 +310,17 @@ export default function SpreadsheetViewer({
 
                         const span = getCellSpan(rowIdx, colIdx);
                         const style = getCellStyle(rowIdx, colIdx, cell, isHeader);
-                        const cellIsFormula = isFormula(cell);
-                        const isErr = typeof cell === 'string' && cell.startsWith('#ERR');
 
                         return (
                           <td
                             key={colIdx}
                             className={
-                              // Excel-style grid: thin gray border on every side of every cell.
                               'px-3 py-1.5 border border-gray-300 dark:border-gray-700 whitespace-nowrap align-middle ' +
                               (isHeader
                                 ? 'font-semibold text-xs uppercase tracking-wide text-gray-700 dark:text-gray-300 '
-                                : '') +
-                              (cellIsFormula
-                                ? 'bg-emerald-50 dark:bg-emerald-950/30 font-mono text-emerald-700 dark:text-emerald-400 text-xs '
-                                : '') +
-                              (isErr
-                                ? 'bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400 font-mono text-xs '
                                 : '')
                             }
                             style={style}
-                            title={cellIsFormula ? `Formula: ${cell}` : isErr ? 'Formula could not be evaluated' : undefined}
                             {...span}
                           >
                             {getDisplayValue(cell, rowIdx)}
@@ -348,50 +333,6 @@ export default function SpreadsheetViewer({
               </tbody>
             </table>
           </div>
-
-          {/* Formulas in this sheet */}
-          {currentSheet.formulas && currentSheet.formulas.length > 0 && (
-            <div className="mt-6 p-4 border rounded-lg bg-emerald-50/50 dark:bg-emerald-900/10">
-              <h4 className="font-semibold text-sm mb-3 flex items-center gap-2 text-emerald-700 dark:text-emerald-400">
-                <Table2 className="h-4 w-4" />
-                Excel Formulas ({currentSheet.formulas.length})
-              </h4>
-              <div className="grid gap-2 text-xs font-mono max-h-40 overflow-y-auto">
-                {currentSheet.formulas.slice(0, 20).map((formula, idx) => (
-                  <div key={idx} className="flex items-start gap-2 text-emerald-700 dark:text-emerald-400">
-                    <span className="opacity-60">{idx + 1}.</span>
-                    <span>{formula}</span>
-                  </div>
-                ))}
-                {currentSheet.formulas.length > 20 && (
-                  <div className="text-muted-foreground italic">
-                    ... and {currentSheet.formulas.length - 20} more formulas
-                  </div>
-                )}
-              </div>
-              <p className="mt-3 text-xs text-muted-foreground">
-                💡 Download the Excel file to use these formulas interactively
-              </p>
-            </div>
-          )}
-
-          {/* Calculations Summary */}
-          {data.metadata?.calculations && data.metadata.calculations.length > 0 && (
-            <div className="mt-6 p-4 border rounded-lg bg-muted/20">
-              <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
-                <Table2 className="h-4 w-4 text-primary" />
-                Applied Calculations
-              </h4>
-              <ul className="space-y-2 text-sm">
-                {data.metadata.calculations.map((calc, idx) => (
-                  <li key={idx} className="flex items-start gap-2">
-                    <span className="text-primary font-mono">•</span>
-                    <span className="text-muted-foreground">{calc}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
         </div>
       </div>
     </div>

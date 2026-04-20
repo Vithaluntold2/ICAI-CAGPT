@@ -596,6 +596,27 @@ export default function Chat() {
           setIsStreaming(true);
           setThinkingSteps([]); // Reset thinking steps
           setCagptStatus(getStatusForMode(chatMode));
+
+          // Prime the whiteboard cache with an empty placeholder BEFORE
+          // `setActiveConversation` propagates. Without this, the instant
+          // useConversationArtifacts(convId) mounts (triggered by the state
+          // flip) it fires a queryFn that hits /api/.../whiteboard — the
+          // server returns [] because no artifacts are persisted yet — and
+          // that empty result gets cached with staleTime: 30_000. When
+          // onEnd later setQueryData's the real artifacts, the subtle
+          // observer-vs-fiber-tree timing prevents the already-committed
+          // "[artifact … loading…]" render from updating, and the user has
+          // to reload / navigate away to remount the subscriber.
+          //
+          // By pre-seeding the cache, the mount sees cached data and skips
+          // the initial fetch entirely — no race. The function-form guards
+          // the case where this conversation is actually returning and
+          // already has cached artifacts we want to preserve.
+          queryClient.setQueryData(
+            ['whiteboard', convId],
+            (old: any) => old ?? { artifacts: [], byId: {} },
+          );
+
           if (!activeConversation) {
             setActiveConversation(convId);
           }

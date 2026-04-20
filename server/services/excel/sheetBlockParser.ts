@@ -120,7 +120,27 @@ function parseSheetBlock(body: string): ParsedBlock | null {
   const lines = csvPart.split('\n').map(l => l.trimEnd()).filter(l => l.length > 0);
   if (lines.length < 2) return null; // need header + at least one row
 
-  const rows = lines.map(splitCsvLine);
+  const parsedRows = lines.map(splitCsvLine);
+  if (parsedRows.length === 0) return null;
+
+  // Strip section-header rows — rows where only column 1 has content and all
+  // other columns are empty (e.g. "Slab-wise Tax Calculation,,"). The AI
+  // emits these as visual headings inside sheet blocks, but its formula cell
+  // references skip them in its mental row numbering. The parser used to
+  // include them as full grid rows, which shifted every downstream cell-ref
+  // by one row — producing #ERR totals, slab-2 tax appearing in slab-3's
+  // cell, etc. We drop them here (with a warning) so the grid indexing
+  // matches what the AI intended. The prompt in promptBuilder.ts also
+  // forbids these explicitly, but this stays as a defensive backstop.
+  const rows = parsedRows.filter((r, i) => {
+    if (i === 0) return true; // keep the header row
+    const hasDataBeyondCol0 = r.slice(1).some(c => c && c.trim() !== '');
+    if (!hasDataBeyondCol0 && r[0] && r[0].trim() !== '') {
+      console.warn(`[sheetBlockParser] Dropped section-header row at input line ${i + 1}: "${r[0]}"`);
+      return false;
+    }
+    return true;
+  });
   if (rows.length === 0) return null;
 
   // Build the raw grid

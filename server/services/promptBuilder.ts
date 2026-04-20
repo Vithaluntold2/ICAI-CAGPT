@@ -145,6 +145,27 @@ export class PromptBuilder {
       `VLOOKUP, XLOOKUP, NPV, IRR, PMT, FV, PV, SUMIFS, COUNTIFS all work.\n` +
       `• For payback period with a cumulative column J: \`=MATCH(TRUE, J2:J7>=0, 0)\` (plus adjustment ` +
       `for the offset) works and is portable.\n\n` +
+      `NO SECTION-HEADER ROWS inside \`\`\`sheet\`\`\` blocks:\n` +
+      `• Every row you emit inside a \`\`\`sheet\`\`\` block MUST contain cell data comparable to other ` +
+      `rows (i.e. populate every column, even if the value is 0 or empty-string). Do NOT emit ` +
+      `section-header / banner / separator rows with content only in column 1 and blanks elsewhere — ` +
+      `the parser includes those as full grid rows, but your cell-refs after that point end up one ` +
+      `row too low, producing #ERR or wrong values silently.\n` +
+      `• For section titles, use the \`title:\` and \`description:\` front-matter, or plain prose ` +
+      `OUTSIDE the \`\`\`sheet\`\`\` block.\n` +
+      `• WRONG (causes off-by-one shift on every formula below):\n` +
+      `    \`\`\`sheet\n` +
+      `    Particulars,Amount,Formula\n` +
+      `    Gross Salary,1500000,\n` +
+      `    Slab-wise Tax Calculation,,    ← SECTION HEADER — forbidden\n` +
+      `    Slab 1 portion,300000,0\n` +
+      `    \`\`\`\n` +
+      `• RIGHT (every row has comparable data):\n` +
+      `    \`\`\`sheet\n` +
+      `    Particulars,Amount,Formula\n` +
+      `    Gross Salary,1500000,\n` +
+      `    Slab 1 portion,300000,0\n` +
+      `    \`\`\`\n\n` +
       `CSV CELL FORMAT inside \`\`\`sheet\`\`\` blocks:\n` +
       `• Columns are separated by commas. Any CELL that itself contains a comma MUST be wrapped in ` +
       `double quotes. This catches Indian-format numbers (₹3,00,000), ranges ("₹3,00,001 – ₹7,00,000"), ` +

@@ -338,15 +338,18 @@ const getNodeStyle = (type: string, theme: ColorTheme, isDark: boolean = false) 
       // (light background) → dark text; else → white text with shadow.
       const firstHex = backgroundColor.match(/#[0-9a-fA-F]{6}/)?.[0] ?? '#e0e7ff';
       const origIsLight = hexLuminance(firstHex) > 0.55;
-      // Dark mode: blend each hex stop in the step gradient toward the dark
-      // card color (~#23252a / --card). Preserves each theme's hue identity
+      // Dark mode: blend each hex stop in the step gradient toward a
+      // near-black base (#1a1b1f). Preserves each theme's hue identity
       // (purple stays purple, orange stays orange) but darkens the overall
       // fill so pastel-biased themes don't paint near-white nodes on a dark
-      // canvas. Text colour is forced to white in dark mode so no combination
-      // of theme × mode yields low-contrast unreadable text.
+      // canvas. The blend is computed in JS so the final `background` value
+      // is a plain `linear-gradient(..., #rrggbb, #rrggbb)` — no CSS
+      // `color-mix()`, which at least one browser in our user base rejected
+      // silently when nested inside a gradient, causing the whole declaration
+      // to drop back to the React Flow default white panel.
       const stepBackground = isDark
         ? backgroundColor.replace(/#[0-9a-fA-F]{6}/g, (hex) =>
-            `color-mix(in srgb, ${hex} 25%, #1a1b1f)`)
+            blendHex(hex, "#1a1b1f", 0.25))
         : backgroundColor;
       return {
         ...baseStyle,
@@ -374,6 +377,24 @@ function hexLuminance(hex: string): number {
   const b = (n & 255) / 255;
   const lin = (c: number) => (c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
   return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+}
+
+// Linear blend of two #RRGGBB hex colors. `ratio` is the weight of `hex`
+// (0 = all target, 1 = all hex). Produces a standard `#rrggbb` so every
+// browser parses the resulting gradient without relying on CSS `color-mix`.
+function blendHex(hex: string, targetHex: string, ratio: number): string {
+  const parse = (h: string): [number, number, number] => {
+    const m = /^#([0-9a-fA-F]{6})$/.exec(h);
+    if (!m) return [0, 0, 0];
+    const n = parseInt(m[1], 16);
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  };
+  const [r1, g1, b1] = parse(hex);
+  const [r2, g2, b2] = parse(targetHex);
+  const mix = (a: number, b: number) =>
+    Math.max(0, Math.min(255, Math.round(a * ratio + b * (1 - ratio))));
+  const toHex = (n: number) => n.toString(16).padStart(2, "0");
+  return `#${toHex(mix(r1, r2))}${toHex(mix(g1, g2))}${toHex(mix(b1, b2))}`;
 }
 
 function WorkflowRendererInner({ nodes: nodesInput, edges: edgesInput, title, layout = 'dagre-tb', embedded = false }: WorkflowRendererProps) {
@@ -877,9 +898,14 @@ function WorkflowRendererInner({ nodes: nodesInput, edges: edgesInput, title, la
   const containerClass = isFullscreen
     ? "fixed inset-0 z-50 w-screen h-screen rounded-none border-0 shadow-none flex flex-col"
     : "w-full border rounded-xl overflow-hidden shadow-2xl";
+  // In dark mode, fall back to the app's dark canvas token instead of the
+  // theme's (often near-white) background so a pastel theme like Royal Purple
+  // doesn't bathe the whole workflow in #faf5ff while the rest of the UI is
+  // dark. Node colors still honour the theme via the gradient blend above.
+  const canvasBackground = isDark ? "hsl(var(--background))" : activeTheme.background;
   const containerStyle: React.CSSProperties = isFullscreen
-    ? { background: activeTheme.background }
-    : { background: activeTheme.background, height: containerHeight };
+    ? { background: canvasBackground }
+    : { background: canvasBackground, height: containerHeight };
 
   // Fullscreen has to escape the whiteboard's transformed container. A
   // transform on any ancestor turns that ancestor into the containing block
@@ -1199,12 +1225,12 @@ function WorkflowRendererInner({ nodes: nodesInput, edges: edgesInput, title, la
             if (original) setDetailNode(original);
           }}
         >
-          <Background 
+          <Background
             variant={'dots' as any}
-            gap={24} 
-            size={2} 
-            color={activeTheme.edge + '20'}
-            style={{ background: activeTheme.background }}
+            gap={24}
+            size={2}
+            color={activeTheme.edge + (isDark ? '40' : '20')}
+            style={{ background: canvasBackground }}
           />
           <Controls 
             showInteractive={true}

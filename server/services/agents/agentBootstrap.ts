@@ -379,13 +379,18 @@ export async function executeWorkflow(
     options: {},
   };
 
-  // Create orchestration job (starts async execution)
+  // Create orchestration job (starts async execution). `template.dependencies`
+  // is the authoritative graph for this mode — the orchestrator used to read
+  // agent.dependencies on the AgentDefinition, but agents rarely declare that
+  // field, which meant downstream agents ran with empty upstream outputs and
+  // then crashed on undefined.map/.length/etc.
   const job = await agentOrchestrator.executeAgents(
     agentInput.conversationId,
     userId,
     mode,
     template.sequence,
-    agentInput
+    agentInput,
+    (template as any).dependencies,
   );
 
   console.log(`[AgentBootstrap] Workflow job created: ${job.jobId}, waiting for completion...`);

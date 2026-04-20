@@ -37,6 +37,13 @@ export interface OrchestrationJob {
   mode: string;
   agents: string[]; // Agent IDs to execute
   input: AgentInput;
+  /**
+   * Per-job dependency overrides: agentId → list of upstream agent IDs it
+   * depends on. If set, these override the `dependencies` field on the agent
+   * definitions for this job. Populated from the mode-template configured in
+   * agentBootstrap — agents themselves rarely declare dependencies directly.
+   */
+  dependencies?: Record<string, string[]>;
   status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
   startTime?: Date;
   endTime?: Date;
@@ -134,16 +141,22 @@ export class AgentOrchestrator extends EventEmitter {
 
   /**
    * Execute a set of agents for a conversation
+   *
+   * `dependencies` is an optional per-job override of the dependency graph —
+   * required because individual agent classes rarely declare their own
+   * `AgentDefinition.dependencies`; the authoritative graph lives in the
+   * mode templates in agentBootstrap.ts and must be plumbed through here.
    */
   async executeAgents(
     conversationId: string,
     userId: string,
     mode: string,
     agentIds: string[],
-    input: AgentInput
+    input: AgentInput,
+    dependencies?: Record<string, string[]>,
   ): Promise<OrchestrationJob> {
     const jobId = `job_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    
+
     const job: OrchestrationJob = {
       jobId,
       conversationId,
@@ -151,6 +164,7 @@ export class AgentOrchestrator extends EventEmitter {
       mode,
       agents: agentIds,
       input,
+      dependencies,
       status: 'pending',
       results: new Map(),
       errors: [],
@@ -183,8 +197,9 @@ export class AgentOrchestrator extends EventEmitter {
     job.startTime = new Date();
     this.broadcastJobUpdate(job);
 
-    // Build dependency graph
-    const dependencyGraph = this.buildDependencyGraph(job.agents);
+    // Build dependency graph (per-job overrides take precedence over
+    // agent self-declared dependencies — see buildDependencyGraph notes)
+    const dependencyGraph = this.buildDependencyGraph(job.agents, job.dependencies);
 
     // Execute agents in dependency order with parallelization
     await this.executeWithDependencies(job, dependencyGraph);
@@ -200,8 +215,17 @@ export class AgentOrchestrator extends EventEmitter {
 
   /**
    * Build dependency graph for agents
+   *
+   * Priority order for each agent's dependency list:
+   *   1. Per-job override (`job.dependencies[agentId]`) — populated from the
+   *      mode template in agentBootstrap.ts. This is the authoritative source.
+   *   2. Agent self-declared `dependencies` on the AgentDefinition.
+   *   3. Empty list (agent runs as a root).
    */
-  private buildDependencyGraph(agentIds: string[]): Map<string, string[]> {
+  private buildDependencyGraph(
+    agentIds: string[],
+    overrides?: Record<string, string[]>,
+  ): Map<string, string[]> {
     const graph = new Map<string, string[]>();
 
     for (const agentId of agentIds) {
@@ -211,7 +235,8 @@ export class AgentOrchestrator extends EventEmitter {
         continue;
       }
 
-      graph.set(agentId, agent.dependencies || []);
+      const deps = overrides?.[agentId] ?? agent.dependencies ?? [];
+      graph.set(agentId, deps);
     }
 
     return graph;
@@ -267,10 +292,11 @@ export class AgentOrchestrator extends EventEmitter {
         }
 
         try {
+          const mergedInput = this.buildAgentInput(job, agentId, dependencyGraph.get(agentId) || []);
           const context: AgentExecutionContext = {
             agentId,
             jobId: job.jobId,
-            input: job.input,
+            input: mergedInput,
             dependencies: this.getDependencyOutputs(job, dependencyGraph.get(agentId) || []),
             attempt: 1,
             maxAttempts: agent.retryConfig?.maxRetries ?? 3,
@@ -321,6 +347,62 @@ export class AgentOrchestrator extends EventEmitter {
     return dependencyIds
       .map(id => job.results.get(id))
       .filter((output): output is AgentOutput => output !== undefined);
+  }
+
+  /**
+   * Assemble the input for a single agent by merging the job's root input
+   * with data produced by the agent's upstream dependencies.
+   *
+   * Previously every agent received only `job.input` (the original user query),
+   * so downstream agents in a pipeline couldn't see the output of upstream
+   * agents — they always saw `input.data.<expected-field>` as undefined.
+   *
+   * Merge strategy (first overrides are earliest, later overrides win):
+   *   1. Start with `job.input.data` so user-provided fields remain available.
+   *   2. Shallow-merge each upstream's `output.data` into input.data, in
+   *      dependency-declaration order. This is the "flatten by convention"
+   *      path agents generally rely on — e.g. WorkflowParser emits
+   *      `{ workflow, nodeCount, edgeCount }`, so NodeGenerator can read
+   *      `input.data.workflow.nodes` without knowing its upstream's id.
+   *   3. Expose the raw outputs two additional ways so agents that prefer an
+   *      explicit lookup can use them:
+   *        - `input.data.previousOutputs[<upstreamAgentId>]` (flat dict)
+   *        - `input.previousAgentOutputs` (ordered array — declared on the
+   *          AgentInput type, was never populated before this change).
+   */
+  private buildAgentInput(
+    job: OrchestrationJob,
+    agentId: string,
+    dependencyIds: string[],
+  ): AgentInput {
+    const mergedData: Record<string, any> = { ...(job.input.data ?? {}) };
+    const previousOutputs: Record<string, any> = {};
+    const previousAgentOutputs: AgentOutput[] = [];
+
+    for (const depId of dependencyIds) {
+      const depOut = job.results.get(depId);
+      if (!depOut) continue;
+      previousAgentOutputs.push(depOut);
+      if (depOut.success && depOut.data) {
+        previousOutputs[depId] = depOut.data;
+        Object.assign(mergedData, depOut.data);
+      }
+    }
+
+    // Preserve any previousOutputs the caller already set (rare — defensive).
+    const existingPrev = (job.input.data?.previousOutputs ?? {}) as Record<string, any>;
+
+    return {
+      ...job.input,
+      data: {
+        ...mergedData,
+        previousOutputs: { ...existingPrev, ...previousOutputs },
+      },
+      previousAgentOutputs: [
+        ...(job.input.previousAgentOutputs ?? []),
+        ...previousAgentOutputs,
+      ],
+    };
   }
 
   /**

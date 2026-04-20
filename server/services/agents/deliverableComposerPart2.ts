@@ -16,15 +16,15 @@ export class SituationSummarizer extends EventEmitter implements AgentDefinition
   version = '1.0.1'; // AI Upgrade
 
   async execute(input: AgentInput): Promise<AgentOutput> {
-    const situation = input.data.situation as any;
-    
+    const situation = (input.data.situation as any) || {};
+
     let summary: any = null;
     let aiGenerated = false;
 
     try {
         const prompt = `
             Analyze this client situation:
-            "${situation.description}"
+            "${situation.description ?? ''}"
             Known Issues: ${JSON.stringify(situation.issues || [])}
             Urgency: ${situation.urgent ? 'High' : 'Normal'}
 
@@ -77,8 +77,8 @@ export class OptionsGenerator extends EventEmitter implements AgentDefinition {
   version = '1.0.1'; // Bumping version as we are adding AI
 
   async execute(input: AgentInput): Promise<AgentOutput> {
-    const situation = input.data.situation as any;
-    
+    const situation = (input.data.situation as any) || {};
+
     // Generate context-aware options using AI
     const complexity = situation?.complexity || 'moderate';
     const budgetConstraint = situation?.budget || 'standard';
@@ -162,13 +162,17 @@ export class ProConAnalyzer extends EventEmitter implements AgentDefinition {
   version = '1.0.0';
 
   async execute(input: AgentInput): Promise<AgentOutput> {
-    const options = input.data.options as any[];
-    const analysis = options.map(opt => ({
-      option: opt.name,
-      pros: opt.pros,
-      cons: opt.cons,
-      netScore: opt.pros.length - opt.cons.length,
-    }));
+    const options = (input.data.options as any[]) || [];
+    const analysis = options.map(opt => {
+      const pros = Array.isArray(opt?.pros) ? opt.pros : [];
+      const cons = Array.isArray(opt?.cons) ? opt.cons : [];
+      return {
+        option: opt?.name,
+        pros,
+        cons,
+        netScore: pros.length - cons.length,
+      };
+    });
 
     return {
       success: true,
@@ -395,11 +399,11 @@ export class RiskMitigationPlanner extends EventEmitter implements AgentDefiniti
   version = '1.0.0';
 
   async execute(input: AgentInput): Promise<AgentOutput> {
-    const risks = input.data.risks as any[];
+    const risks = (input.data.risks as any[]) || [];
     const mitigation = risks.map(risk => ({
-      risk: risk.name,
-      impact: risk.impact,
-      mitigation: `Implement ${risk.name} mitigation strategy`,
+      risk: risk?.name,
+      impact: risk?.impact,
+      mitigation: `Implement ${risk?.name ?? 'identified'} mitigation strategy`,
       owner: 'Project Manager',
       status: 'Planned',
     }));
@@ -475,11 +479,11 @@ export class AdvisoryLetterFinalizer extends EventEmitter implements AgentDefini
   version = '1.0.0';
 
   async execute(input: AgentInput): Promise<AgentOutput> {
-    const sections = input.data.sections as any[];
+    const sections = (input.data.sections as any[]) || [];
     const letter = {
       title: 'Advisory Letter',
       date: new Date().toISOString(),
-      addressee: input.data.client,
+      addressee: input.data.client ?? 'Client',
       sections,
       closing: 'We remain available to discuss this matter further',
       signature: '[Partner Name]',
@@ -525,7 +529,7 @@ export class ChecklistGenerator extends EventEmitter implements AgentDefinition 
   version = '1.0.0';
 
   async execute(input: AgentInput): Promise<AgentOutput> {
-    const requirements = input.data.requirements as any[];
+    const requirements = (input.data.requirements as any[]) || [];
     const checklist = requirements.map((req, i) => ({
       item: i + 1,
       requirement: req.name,
@@ -550,7 +554,7 @@ export class FormPreparationGuide extends EventEmitter implements AgentDefinitio
   version = '1.0.0';
 
   async execute(input: AgentInput): Promise<AgentOutput> {
-    const forms = input.data.forms as any[];
+    const forms = (input.data.forms as any[]) || [];
     const guide = forms.map(form => ({
       form: form.name,
       sections: form.sections || [],
@@ -574,7 +578,7 @@ export class DeadlineTracker extends EventEmitter implements AgentDefinition {
   version = '1.0.0';
 
   async execute(input: AgentInput): Promise<AgentOutput> {
-    const deadlines = input.data.deadlines as any[];
+    const deadlines = (input.data.deadlines as any[]) || [];
     const tracker = deadlines.map(d => ({
       item: d.name,
       deadline: d.date,
@@ -599,7 +603,7 @@ export class DocumentationAssembler extends EventEmitter implements AgentDefinit
   version = '1.0.0';
 
   async execute(input: AgentInput): Promise<AgentOutput> {
-    const documents = input.data.documents as any[];
+    const documents = (input.data.documents as any[]) || [];
     const assembled = {
       documents: documents.map(d => ({ name: d.name, status: 'Complete' })),
       totalPages: documents.reduce((sum, d) => sum + (d.pages || 1), 0),
@@ -622,11 +626,11 @@ export class ComplianceCertificateGenerator extends EventEmitter implements Agen
   version = '1.0.0';
 
   async execute(input: AgentInput): Promise<AgentOutput> {
-    const compliance = input.data.compliance as any;
+    const compliance = (input.data.compliance as any) || {};
     const certificate = {
       title: 'Certificate of Compliance',
-      entity: compliance.entityName,
-      period: compliance.period,
+      entity: compliance.entityName ?? 'Entity',
+      period: compliance.period ?? 'Current Period',
       statement: 'This is to certify that the entity has complied with all applicable requirements',
       date: new Date().toISOString(),
       signatory: 'Authorized Signatory',
@@ -648,9 +652,9 @@ export class FilingInstructionWriter extends EventEmitter implements AgentDefini
   version = '1.0.0';
 
   async execute(input: AgentInput): Promise<AgentOutput> {
-    const filing = input.data.filing as any;
+    const filing = (input.data.filing as any) || {};
     const instructions = {
-      filing: filing.name,
+      filing: filing.name ?? 'Filing',
       steps: [
         'Step 1: Gather required documents',
         'Step 2: Complete form accurately',
@@ -677,7 +681,7 @@ export class AuditTrailDocumenter extends EventEmitter implements AgentDefinitio
   version = '1.0.0';
 
   async execute(input: AgentInput): Promise<AgentOutput> {
-    const activities = input.data.activities as any[];
+    const activities = (input.data.activities as any[]) || [];
     const trail = activities.map((act, i) => ({
       sequence: i + 1,
       activity: act.name,
@@ -703,10 +707,10 @@ export class ComplianceReportFinalizer extends EventEmitter implements AgentDefi
   version = '1.0.0';
 
   async execute(input: AgentInput): Promise<AgentOutput> {
-    const sections = input.data.sections as any[];
+    const sections = (input.data.sections as any[]) || [];
     const report = {
       title: 'Compliance Report',
-      period: input.data.period,
+      period: input.data.period ?? 'Current Period',
       sections,
       summary: 'All compliance requirements have been met',
       certification: 'Certified by authorized personnel',
@@ -775,14 +779,15 @@ export class RevenueModeler extends EventEmitter implements AgentDefinition {
   version = '1.0.0';
 
   async execute(input: AgentInput): Promise<AgentOutput> {
-    const assumptions = input.data.assumptions as any;
+    const assumptions = (input.data.assumptions as any) || {};
+    const revenueAssumptions = assumptions.revenue || { base: 0, growth: 0 };
     const years = input.data.years || 5;
-    
+
     const projections = [];
     for (let year = 1; year <= years; year++) {
       projections.push({
         year,
-        revenue: Math.round(assumptions.revenue.base * Math.pow(1 + assumptions.revenue.growth, year)),
+        revenue: Math.round((revenueAssumptions.base ?? 0) * Math.pow(1 + (revenueAssumptions.growth ?? 0), year)),
       });
     }
 
@@ -802,14 +807,15 @@ export class ExpenseForecaster extends EventEmitter implements AgentDefinition {
   version = '1.0.0';
 
   async execute(input: AgentInput): Promise<AgentOutput> {
-    const revenue = input.data.revenue as any[];
-    const assumptions = input.data.assumptions as any;
-    
+    const revenue = (input.data.revenue as any[]) || [];
+    const assumptions = (input.data.assumptions as any) || {};
+    const costs = assumptions.costs || { fixedCosts: 0, variableCostRatio: 0 };
+
     const expenses = revenue.map(r => ({
       year: r.year,
-      fixedCosts: assumptions.costs.fixedCosts,
-      variableCosts: Math.round(r.revenue * assumptions.costs.variableCostRatio),
-      totalExpenses: Math.round(assumptions.costs.fixedCosts + r.revenue * assumptions.costs.variableCostRatio),
+      fixedCosts: costs.fixedCosts ?? 0,
+      variableCosts: Math.round((r.revenue ?? 0) * (costs.variableCostRatio ?? 0)),
+      totalExpenses: Math.round((costs.fixedCosts ?? 0) + (r.revenue ?? 0) * (costs.variableCostRatio ?? 0)),
     }));
 
     return {
@@ -828,16 +834,20 @@ export class CashFlowProjector extends EventEmitter implements AgentDefinition {
   version = '1.0.0';
 
   async execute(input: AgentInput): Promise<AgentOutput> {
-    const revenue = input.data.revenue as any[];
-    const expenses = input.data.expenses as any[];
-    
-    const cashFlow = revenue.map((r, i) => ({
-      year: r.year,
-      inflow: r.revenue,
-      outflow: expenses[i].totalExpenses,
-      netCashFlow: r.revenue - expenses[i].totalExpenses,
-      cumulativeCashFlow: i === 0 ? r.revenue - expenses[i].totalExpenses : 0, // Simplified
-    }));
+    const revenue = (input.data.revenue as any[]) || [];
+    const expenses = (input.data.expenses as any[]) || [];
+
+    const cashFlow = revenue.map((r, i) => {
+      const exp = expenses[i]?.totalExpenses ?? 0;
+      const rev = r?.revenue ?? 0;
+      return {
+        year: r?.year,
+        inflow: rev,
+        outflow: exp,
+        netCashFlow: rev - exp,
+        cumulativeCashFlow: i === 0 ? rev - exp : 0, // Simplified
+      };
+    });
 
     return {
       success: true,
@@ -855,13 +865,13 @@ export class ValuationCalculator extends EventEmitter implements AgentDefinition
   version = '1.0.0';
 
   async execute(input: AgentInput): Promise<AgentOutput> {
-    const cashFlows = input.data.cashFlows as any[];
+    const cashFlows = (input.data.cashFlows as any[]) || [];
     const discountRate = input.data.discountRate || 0.12;
-    
+
     const dcf = cashFlows.map(cf => ({
-      year: cf.year,
-      cashFlow: cf.netCashFlow,
-      presentValue: Math.round(cf.netCashFlow / Math.pow(1 + discountRate, cf.year)),
+      year: cf?.year,
+      cashFlow: cf?.netCashFlow ?? 0,
+      presentValue: Math.round((cf?.netCashFlow ?? 0) / Math.pow(1 + discountRate, cf?.year ?? 1)),
     }));
 
     const npv = dcf.reduce((sum, pv) => sum + pv.presentValue, 0);
@@ -907,19 +917,19 @@ export class ScenarioComparisonBuilder extends EventEmitter implements AgentDefi
   version = '1.0.0';
 
   async execute(input: AgentInput): Promise<AgentOutput> {
-    const scenarios = input.data.scenarios as any[];
-    
+    const scenarios = (input.data.scenarios as any[]) || [];
+
     const comparison = scenarios.map(s => ({
-      scenario: s.name,
-      npv: s.npv,
-      irr: s.irr,
-      payback: s.payback,
-      rank: s.rank || 0,
+      scenario: s?.name,
+      npv: s?.npv,
+      irr: s?.irr,
+      payback: s?.payback,
+      rank: s?.rank || 0,
     }));
 
     return {
       success: true,
-      data: { comparison, recommended: comparison[0].scenario },
+      data: { comparison, recommended: comparison[0]?.scenario ?? null },
       metadata: { agentId: this.id, executionTime: Date.now() - input.timestamp, confidence: 0.88 },
     };
   }
@@ -933,12 +943,12 @@ export class ChartDataPreparation extends EventEmitter implements AgentDefinitio
   version = '1.0.0';
 
   async execute(input: AgentInput): Promise<AgentOutput> {
-    const data = input.data.financialData as any[];
-    
+    const data = (input.data.financialData as any[]) || [];
+
     const chartData = {
-      revenueChart: data.map(d => ({ year: d.year, value: d.revenue })),
-      profitChart: data.map(d => ({ year: d.year, value: d.profit })),
-      cashFlowChart: data.map(d => ({ year: d.year, value: d.cashFlow })),
+      revenueChart: data.map(d => ({ year: d?.year, value: d?.revenue })),
+      profitChart: data.map(d => ({ year: d?.year, value: d?.profit })),
+      cashFlowChart: data.map(d => ({ year: d?.year, value: d?.cashFlow })),
     };
 
     return {

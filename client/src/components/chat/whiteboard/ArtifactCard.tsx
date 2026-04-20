@@ -91,7 +91,10 @@ export function ArtifactCard({
         </div>
       </div>
       <div className="p-2 flex-1 overflow-auto">
-        <ArtifactRenderer artifact={artifact} conversationId={conversationId} />
+        {/* `embedded` tells the child renderers that this card already shows
+            the title + kind + menu in its own header — so they should suppress
+            their own redundant title chrome to avoid duplication. */}
+        <ArtifactRenderer artifact={artifact} conversationId={conversationId} embedded />
       </div>
     </div>
   );

@@ -520,9 +520,9 @@ export class TaxPositionAnalyzer extends EventEmitter implements AgentDefinition
   version = '1.0.0';
 
   async execute(input: AgentInput): Promise<AgentOutput> {
-    const position = input.data.position as any;
+    const position = (input.data.position as any) || {};
     const analysis = {
-      position: position.description,
+      position: position.description ?? 'Position under review',
       legalBasis: 'Section 80C, Income Tax Act',
       strength: 'Strong - supported by case law',
       risks: ['Minor procedural risks'],
@@ -545,10 +545,10 @@ export class LegalCitationBuilder extends EventEmitter implements AgentDefinitio
   version = '1.0.0';
 
   async execute(input: AgentInput): Promise<AgentOutput> {
-    const sources = input.data.sources as any[];
+    const sources = (input.data.sources as any[]) || [];
     const citations = sources.map((s, i) => ({
       number: i + 1,
-      citation: `${s.title}, ${s.court} (${s.year})`,
+      citation: `${s?.title ?? 'Source'}, ${s?.court ?? ''} (${s?.year ?? ''})`,
       relevance: 'Directly supports tax position',
     }));
 
@@ -568,12 +568,12 @@ export class PrecedentAnalyzer extends EventEmitter implements AgentDefinition {
   version = '1.0.0';
 
   async execute(input: AgentInput): Promise<AgentOutput> {
-    const cases = input.data.cases as any[];
+    const cases = (input.data.cases as any[]) || [];
     const analysis = cases.map(c => ({
-      case: c.name,
-      holding: c.holding,
+      case: c?.name,
+      holding: c?.holding,
       applicability: 'Directly applicable',
-      weight: c.court === 'Supreme Court' ? 'High' : 'Medium',
+      weight: c?.court === 'Supreme Court' ? 'High' : 'Medium',
     }));
 
     return {
@@ -787,7 +787,7 @@ export class TaxOpinionFinalizer extends EventEmitter implements AgentDefinition
   version = '1.0.0';
 
   async execute(input: AgentInput): Promise<AgentOutput> {
-    const sections = input.data.sections as any[];
+    const sections = (input.data.sections as any[]) || [];
     const finalized = {
       title: 'Tax Opinion Letter',
       date: new Date().toISOString(),

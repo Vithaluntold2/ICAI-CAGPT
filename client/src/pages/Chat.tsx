@@ -1346,7 +1346,7 @@ export default function Chat() {
                   className="flex flex-col items-center justify-center h-full text-muted-foreground p-8 text-center"
                   data-testid="whiteboard-no-conversation"
                 >
-                  <p className="text-sm">Start a conversation to populate your whiteboard.</p>
+                  <p className="text-sm">Start a conversation to populate your output.</p>
                 </div>
               )}
               <ChatPIP

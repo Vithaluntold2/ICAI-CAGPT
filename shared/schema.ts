@@ -398,6 +398,7 @@ export const whiteboardArtifactKinds = [
   "mindmap",
   "flowchart",
   "spreadsheet",
+  "document",
 ] as const;
 export type WhiteboardArtifactKind = typeof whiteboardArtifactKinds[number];
 

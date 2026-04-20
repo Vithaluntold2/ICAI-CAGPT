@@ -1,4 +1,12 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Download } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 let mermaidInitialized = false;
 let mermaidModule: any = null;
@@ -66,6 +74,42 @@ export function FlowchartArtifact({ payload }: { payload: { source: string } }) 
   const [status, setStatus] = useState<"idle" | "rendering" | "ok" | "error">("idle");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
+  const handleExport = useCallback(async (format: "png" | "svg") => {
+    // Mermaid renders a real <svg> element into `ref.current`. For SVG we can
+    // download the markup directly; for PNG we hand the SVG to html-to-image
+    // which rasterises it via a data-URL → canvas pipeline.
+    const svgEl = ref.current?.querySelector("svg") as SVGSVGElement | null;
+    if (!svgEl) return;
+
+    if (format === "svg") {
+      const serializer = new XMLSerializer();
+      const svgStr = serializer.serializeToString(svgEl);
+      const blob = new Blob([svgStr], { type: "image/svg+xml;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `flowchart-${Date.now()}.svg`;
+      a.click();
+      URL.revokeObjectURL(url);
+      return;
+    }
+
+    try {
+      const htmlToImage = await import("html-to-image");
+      const dataUrl = await htmlToImage.toPng(svgEl as unknown as HTMLElement, {
+        pixelRatio: 2,
+        backgroundColor: "#ffffff",
+        cacheBust: true,
+      });
+      const a = document.createElement("a");
+      a.href = dataUrl;
+      a.download = `flowchart-${Date.now()}.png`;
+      a.click();
+    } catch (err) {
+      console.error("[FlowchartArtifact] PNG export failed:", err);
+    }
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     const source = payload?.source ?? "";
@@ -126,9 +170,34 @@ export function FlowchartArtifact({ payload }: { payload: { source: string } }) 
   }
 
   return (
-    <div className="w-full h-full overflow-auto">
+    <div className="relative w-full h-full overflow-auto">
       {status === "rendering" && (
         <div className="p-3 text-xs text-muted-foreground italic">Rendering…</div>
+      )}
+      {status === "ok" && (
+        <div className="absolute top-2 right-2 z-10">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 w-7 p-0 bg-background/90 backdrop-blur shadow-sm"
+                title="Download…"
+                data-testid="flowchart-download"
+              >
+                <Download className="h-3.5 w-3.5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => handleExport("png")}>
+                PNG image
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleExport("svg")}>
+                SVG image
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
       )}
       <div ref={ref} className="flex justify-center items-start p-2" />
     </div>

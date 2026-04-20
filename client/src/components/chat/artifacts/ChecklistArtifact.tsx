@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, CircleDashed, Loader2, Quote } from "lucide-react";
+import { Check, CircleDashed, Download, Loader2, Quote } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 import { useSelectionContext } from "../whiteboard/useSelectionContext";
 
 interface ChecklistItem {
@@ -120,6 +121,45 @@ export function ChecklistArtifact({ artifactId, conversationId, payload, state }
   const totalCount = items.length;
   const checkedCount = checked.size;
 
+  // Serialise the checklist to GitHub-flavored markdown so users can paste it
+  // into docs, PRs, or Notion without losing the checked/unchecked state or
+  // the section structure. Hints come through as blockquotes under each item.
+  const buildMarkdown = useCallback((): string => {
+    const lines: string[] = [];
+    const title = payload?.title?.trim();
+    if (title) {
+      lines.push(`# ${title}`);
+      lines.push("");
+    }
+    for (const { name, items: sectionItems } of sections) {
+      if (name) {
+        lines.push(`## ${name}`);
+        lines.push("");
+      }
+      for (const item of sectionItems) {
+        const box = checked.has(item.id) ? "[x]" : "[ ]";
+        lines.push(`- ${box} ${item.label}`);
+        if (item.hint) {
+          lines.push(`  > ${item.hint}`);
+        }
+      }
+      lines.push("");
+    }
+    return lines.join("\n").trimEnd() + "\n";
+  }, [payload?.title, sections, checked]);
+
+  const handleDownload = useCallback(() => {
+    const md = buildMarkdown();
+    const blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    const base = (payload?.title || "checklist").replace(/[^a-z0-9_-]+/gi, "_");
+    a.download = `${base}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [buildMarkdown, payload?.title]);
+
   return (
     <div className="w-full h-full overflow-auto" data-testid={`checklist-artifact-${artifactId}`}>
       <div className="flex items-center gap-2 px-3 py-2 border-b text-xs bg-muted/40">
@@ -127,11 +167,22 @@ export function ChecklistArtifact({ artifactId, conversationId, payload, state }
         <span className="font-medium">{checkedCount}/{totalCount}</span>
         <span className="text-muted-foreground">complete</span>
         {saving && (
-          <span className="ml-auto flex items-center gap-1 text-muted-foreground">
+          <span className="flex items-center gap-1 text-muted-foreground">
             <Loader2 className="h-3 w-3 animate-spin" />
             saving…
           </span>
         )}
+        <Button
+          size="sm"
+          variant="ghost"
+          className="ml-auto h-6 px-2 text-[11px]"
+          onClick={handleDownload}
+          title="Download as Markdown"
+          data-testid="checklist-download"
+        >
+          <Download className="h-3 w-3 mr-1" />
+          .md
+        </Button>
       </div>
       <div className="p-3 space-y-3">
         {sections.map(({ name, items: sectionItems }, idx) => (

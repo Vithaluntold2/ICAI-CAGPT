@@ -30,6 +30,9 @@ export type ChartData = VisualizationData;
 
 interface VisualizationRendererProps {
   chartData: VisualizationData;
+  /** Forwarded to sub-renderers (MindMapRenderer, WorkflowRenderer) so they
+   *  suppress their own title chrome when rendered inside an artifact card. */
+  embedded?: boolean;
 }
 
 // Type guard for legacy visualizations
@@ -69,12 +72,12 @@ function isMindMapVisualization(viz: VisualizationData): viz is MindMapData {
   return viz.type === 'mindmap';
 }
 
-export default function VisualizationRenderer({ chartData }: VisualizationRendererProps) {
+export default function VisualizationRenderer({ chartData, embedded = false }: VisualizationRendererProps) {
   const { type, title } = chartData;
 
   // Handle MindMap visualization first (different structure)
   if (isMindMapVisualization(chartData)) {
-    return <MindMapRenderer data={chartData} />;
+    return <MindMapRenderer data={chartData} embedded={embedded} />;
   }
 
   // For legacy and advanced charts, data is always present
@@ -165,6 +168,7 @@ export default function VisualizationRenderer({ chartData }: VisualizationRender
             edges={config.edges}
             title={title}
             layout={config.layout}
+            embedded={embedded}
           />
         );
     }

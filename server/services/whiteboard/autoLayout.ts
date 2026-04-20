@@ -43,4 +43,6 @@ export const NATURAL_SIZE: Record<string, { width: number; height: number }> = {
   flowchart: { width: 700, height: 450 },
   spreadsheet: { width: 900, height: 500 },
   checklist: { width: 520, height: 480 },
+  // Deliverable Composer documents are portrait-ish — think A4 preview.
+  document: { width: 720, height: 900 },
 };

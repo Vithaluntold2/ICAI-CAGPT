@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import {
   ReactFlow,
   Node,
@@ -34,11 +35,20 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { 
-  Palette, 
-  Shuffle, 
-  Settings, 
-  Download, 
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Badge } from '@/components/ui/badge';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import {
+  Palette,
+  Shuffle,
+  Settings,
+  Download,
   Search,
   ZoomIn,
   ZoomOut,
@@ -49,7 +59,11 @@ import {
   Share2,
   Play,
   Pause,
-  RotateCcw
+  RotateCcw,
+  Info,
+  MousePointerClick,
+  Expand,
+  Shrink,
 } from 'lucide-react';
 import ColorPicker from '@/components/ui/color-picker';
 import { useToast } from '@/hooks/use-toast';
@@ -75,6 +89,10 @@ interface WorkflowRendererProps {
   edges: WorkflowEdge[];
   title?: string;
   layout?: string; // 'linear-process', 'decision-tree', 'parallel-workflow', 'approval-workflow'
+  /** When true, the internal title chip (left side of the header) is hidden
+   *  since the outer artifact card already shows the artifact title. The
+   *  toolbar on the right stays — its controls are unique to the workflow. */
+  embedded?: boolean;
 }
 
 interface ColorTheme {
@@ -343,7 +361,7 @@ function hexLuminance(hex: string): number {
   return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
 }
 
-function WorkflowRendererInner({ nodes, edges, title, layout = 'dagre-tb' }: WorkflowRendererProps) {
+function WorkflowRendererInner({ nodes, edges, title, layout = 'dagre-tb', embedded = false }: WorkflowRendererProps) {
   const [selectedTheme, setSelectedTheme] = useState<ColorTheme>(colorThemes[0]);
   const [animateEdges, setAnimateEdges] = useState(true);
   const [customTheme, setCustomTheme] = useState<ColorTheme | null>(null);
@@ -354,6 +372,13 @@ function WorkflowRendererInner({ nodes, edges, title, layout = 'dagre-tb' }: Wor
   // Compact mode for large workflows - auto-enabled for 20+ nodes
   const isLargeWorkflow = nodes.length > 20;
   const [compactMode, setCompactMode] = useState(isLargeWorkflow);
+  // Node detail modal — opened on node click. Holds the full (un-clamped)
+  // label/description/substeps so nothing is ever unreachable.
+  const [detailNode, setDetailNode] = useState<WorkflowNode | null>(null);
+  // Fullscreen lightbox — separate from "Fit to View". Fullscreen enlarges the
+  // entire workflow container to fill the viewport; Fit to View just reframes
+  // the canvas within whatever container size it's currently in.
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const { toast } = useToast();
   const reactFlowInstance = useReactFlow();
   
@@ -500,92 +525,126 @@ function WorkflowRendererInner({ nodes, edges, title, layout = 'dagre-tb' }: Wor
           : '',
       ].join('');
 
+      // True when rendered content will likely be clipped — used to decide
+      // whether to surface a "more" hint at the bottom of the node body.
+      const isLabelLong = (node.label?.length ?? 0) > (compactMode ? 40 : 90);
+      const isDescLong = (node.description?.length ?? 0) > 80;
+      const hasHiddenSubsteps = (node.substeps?.length ?? 0) > 3;
+      const hasLongSubstep = (node.substeps ?? []).some(s => (s?.length ?? 0) > 60);
+      const contentClipped = isLabelLong || isDescLong || hasHiddenSubsteps || hasLongSubstep;
+
       return {
         id: node.id,
         type: 'default',
         data: {
-          label: compactMode ? (
-            // Compact mode: wrap to max 2 lines, then ellipsis. Full text on hover.
-            <div
-              className="flex items-center justify-center h-full w-full"
-              style={{ zIndex: 10 }}
-              title={fullTooltip}
-            >
+          label: (
+            <>
+              {/* Always-present affordance: a small info chip at the top-right
+                  of the node communicates "click for full details". We show a
+                  stronger pill ("More") when content is actually clipped, and a
+                  subtle icon otherwise. */}
               <div
-                className={`font-semibold text-xs leading-snug text-center px-1 ${isHighlighted ? 'animate-pulse' : ''} ${matchesSearch ? 'underline' : ''}`}
-                style={{
-                  display: '-webkit-box',
-                  WebkitBoxOrient: 'vertical',
-                  WebkitLineClamp: 2,
-                  overflow: 'hidden',
-                  overflowWrap: 'anywhere',
-                  wordBreak: 'break-word',
-                  maxWidth: dims.width - 12,
-                }}
+                className="absolute top-1.5 right-1.5 pointer-events-none flex items-center gap-1 z-20"
+                aria-hidden
               >
-                {node.label}
+                {contentClipped ? (
+                  <div
+                    className="flex items-center gap-1 rounded-full bg-black/35 backdrop-blur-sm px-1.5 py-0.5 text-[10px] font-semibold text-white shadow-sm"
+                    title="Content is truncated — click to expand"
+                  >
+                    <Info className="h-2.5 w-2.5" />
+                    <span className="leading-none">More</span>
+                  </div>
+                ) : (
+                  <Info className="h-3 w-3 text-white/60" />
+                )}
               </div>
-            </div>
-          ) : (
-            // Detailed mode: wrap freely; let text span multiple lines. Clamp the
-            // label at 3 lines, description at 2, so the node stays predictable
-            // but no text is hard-truncated by JavaScript.
-            <div
-              className="flex flex-col gap-1.5 w-full"
-              style={{ lineHeight: '1.35', zIndex: 10 }}
-              title={fullTooltip}
-            >
-              <div
-                className={`font-bold text-sm ${isHighlighted ? 'animate-pulse' : ''} ${matchesSearch ? 'underline' : ''}`}
-                style={{
-                  display: '-webkit-box',
-                  WebkitBoxOrient: 'vertical',
-                  WebkitLineClamp: 3,
-                  overflow: 'hidden',
-                  overflowWrap: 'anywhere',
-                  wordBreak: 'break-word',
-                }}
-              >
-                {node.label}
-              </div>
-              {node.description && (
+
+              {compactMode ? (
+                // Compact mode: wrap to max 2 lines, then ellipsis. Full text on hover and on click.
                 <div
-                  className="text-xs opacity-90 leading-snug"
-                  style={{
-                    display: '-webkit-box',
-                    WebkitBoxOrient: 'vertical',
-                    WebkitLineClamp: 2,
-                    overflow: 'hidden',
-                    overflowWrap: 'anywhere',
-                  }}
+                  className="flex items-center justify-center h-full w-full"
+                  style={{ zIndex: 10 }}
+                  title={fullTooltip}
                 >
-                  {node.description}
+                  <div
+                    className={`font-semibold text-xs leading-snug text-center px-1 ${isHighlighted ? 'animate-pulse' : ''} ${matchesSearch ? 'underline' : ''}`}
+                    style={{
+                      display: '-webkit-box',
+                      WebkitBoxOrient: 'vertical',
+                      WebkitLineClamp: 2,
+                      overflow: 'hidden',
+                      overflowWrap: 'anywhere',
+                      wordBreak: 'break-word',
+                      maxWidth: dims.width - 12,
+                    }}
+                  >
+                    {node.label}
+                  </div>
                 </div>
-              )}
-              {node.substeps && node.substeps.length > 0 && (
-                <div className="text-[11px] text-left space-y-0.5 leading-tight opacity-95">
-                  {node.substeps.slice(0, 3).map((step, i) => (
-                    <div key={i} className="flex items-start gap-1.5">
-                      <span className="mt-0.5">•</span>
-                      <span
-                        style={{
-                          display: '-webkit-box',
-                          WebkitBoxOrient: 'vertical',
-                          WebkitLineClamp: 1,
-                          overflow: 'hidden',
-                          overflowWrap: 'anywhere',
-                        }}
-                      >
-                        {step}
-                      </span>
+              ) : (
+                // Detailed mode: wrap freely; let text span multiple lines. Clamp the
+                // label at 3 lines, description at 2, so the node stays predictable
+                // but no text is hard-truncated — full content is always reachable
+                // via the click-to-expand dialog.
+                <div
+                  className="flex flex-col gap-1.5 w-full"
+                  style={{ lineHeight: '1.35', zIndex: 10 }}
+                  title={fullTooltip}
+                >
+                  <div
+                    className={`font-bold text-sm pr-14 ${isHighlighted ? 'animate-pulse' : ''} ${matchesSearch ? 'underline' : ''}`}
+                    style={{
+                      display: '-webkit-box',
+                      WebkitBoxOrient: 'vertical',
+                      WebkitLineClamp: 3,
+                      overflow: 'hidden',
+                      overflowWrap: 'anywhere',
+                      wordBreak: 'break-word',
+                    }}
+                  >
+                    {node.label}
+                  </div>
+                  {node.description && (
+                    <div
+                      className="text-xs opacity-90 leading-snug"
+                      style={{
+                        display: '-webkit-box',
+                        WebkitBoxOrient: 'vertical',
+                        WebkitLineClamp: 2,
+                        overflow: 'hidden',
+                        overflowWrap: 'anywhere',
+                      }}
+                    >
+                      {node.description}
                     </div>
-                  ))}
-                  {node.substeps.length > 3 && (
-                    <div className="italic opacity-70">+{node.substeps.length - 3} more…</div>
+                  )}
+                  {node.substeps && node.substeps.length > 0 && (
+                    <div className="text-[11px] text-left space-y-0.5 leading-tight opacity-95">
+                      {node.substeps.slice(0, 3).map((step, i) => (
+                        <div key={i} className="flex items-start gap-1.5">
+                          <span className="mt-0.5">•</span>
+                          <span
+                            style={{
+                              display: '-webkit-box',
+                              WebkitBoxOrient: 'vertical',
+                              WebkitLineClamp: 1,
+                              overflow: 'hidden',
+                              overflowWrap: 'anywhere',
+                            }}
+                          >
+                            {step}
+                          </span>
+                        </div>
+                      ))}
+                      {node.substeps.length > 3 && (
+                        <div className="italic opacity-70">+{node.substeps.length - 3} more… (click to view all)</div>
+                      )}
+                    </div>
                   )}
                 </div>
               )}
-            </div>
+            </>
           )
         },
         position: { x: 0, y: idx * 150 },
@@ -695,11 +754,52 @@ function WorkflowRendererInner({ nodes, edges, title, layout = 'dagre-tb' }: Wor
   // Dynamic height based on workflow size
   const containerHeight = nodes.length > 40 ? 900 : nodes.length > 20 ? 800 : 700;
 
-  return (
-    <div className="w-full border rounded-xl overflow-hidden shadow-2xl" style={{ background: activeTheme.background, height: containerHeight }}>
+  // While fullscreen, lock body scroll + bind Escape to exit. On toggle, give
+  // React Flow a beat to settle the new container size then re-fit so the
+  // workflow fills the whole screen instead of staying at the old zoom.
+  useEffect(() => {
+    if (!isFullscreen) {
+      const t = window.setTimeout(() => reactFlowInstance?.fitView({ padding: 0.2, duration: 300 }), 100);
+      return () => window.clearTimeout(t);
+    }
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setIsFullscreen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    const t = window.setTimeout(() => reactFlowInstance?.fitView({ padding: 0.15, duration: 400 }), 100);
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      window.removeEventListener("keydown", onKey);
+      window.clearTimeout(t);
+    };
+  }, [isFullscreen, reactFlowInstance]);
+
+  const containerClass = isFullscreen
+    ? "fixed inset-0 z-50 w-screen h-screen rounded-none border-0 shadow-none flex flex-col"
+    : "w-full border rounded-xl overflow-hidden shadow-2xl";
+  const containerStyle: React.CSSProperties = isFullscreen
+    ? { background: activeTheme.background }
+    : { background: activeTheme.background, height: containerHeight };
+
+  // Fullscreen has to escape the whiteboard's transformed container. A
+  // transform on any ancestor turns that ancestor into the containing block
+  // for `position: fixed`, so an overlay rendered inline would be visually
+  // clipped to the canvas. createPortal moves the DOM node under <body>, out
+  // of the transform subtree, so `fixed inset-0` now resolves against the
+  // viewport as intended. Non-fullscreen renders stay in place.
+  const tree = (
+    <div className={containerClass} style={containerStyle} data-fullscreen={isFullscreen || undefined}>
       {/* Enhanced Header */}
       {title && (
-        <div className="px-4 py-3 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 flex items-center justify-between gap-4">
+        <div className="shrink-0 px-4 py-3 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 flex items-center justify-between gap-4">
+          {embedded ? (
+            // Embedded inside an artifact card → the outer card already shows
+            // the title, so we only render the toolbar (right side). A small
+            // spacer pushes the toolbar to the right edge.
+            <div aria-hidden />
+          ) : (
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-primary to-primary/60 flex items-center justify-center">
               <GitBranch className="w-5 h-5 text-white" />
@@ -709,7 +809,8 @@ function WorkflowRendererInner({ nodes, edges, title, layout = 'dagre-tb' }: Wor
               <p className="text-xs text-muted-foreground">{nodes.length} steps • {edges.length} connections{isLargeWorkflow ? ' • Large workflow' : ''}</p>
             </div>
           </div>
-          
+          )}
+
           <div className="flex items-center gap-2 flex-wrap">
             {/* Search */}
             <div className="relative">
@@ -875,6 +976,20 @@ function WorkflowRendererInner({ nodes, edges, title, layout = 'dagre-tb' }: Wor
               Animate
             </Button>
 
+            {/* Fullscreen toggle — SEPARATE from Fit to View. Fullscreen
+                enlarges the entire workflow container to cover the viewport;
+                Fit to View only reframes the graph within the current container. */}
+            <Button
+              variant={isFullscreen ? "default" : "outline"}
+              size="sm"
+              onClick={() => setIsFullscreen(!isFullscreen)}
+              className="h-8"
+              title={isFullscreen ? "Exit fullscreen (Esc)" : "Open fullscreen"}
+              data-testid="workflow-fullscreen-toggle"
+            >
+              {isFullscreen ? <Shrink className="h-3.5 w-3.5" /> : <Expand className="h-3.5 w-3.5" />}
+            </Button>
+
             {/* Export Menu */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -954,13 +1069,14 @@ function WorkflowRendererInner({ nodes, edges, title, layout = 'dagre-tb' }: Wor
         </div>
       )}
 
-      {/* React Flow Canvas */}
-      <div className={title ? "h-[calc(100%-72px)]" : "h-full"}>
+      {/* React Flow Canvas. In fullscreen the container is flex-col with an
+          unbounded height, so we use flex-1 instead of a % calc. */}
+      <div className={isFullscreen ? "flex-1 min-h-0" : title ? "h-[calc(100%-72px)]" : "h-full"}>
         <ReactFlow
           nodes={flowNodes}
           edges={flowEdges}
           fitView
-          fitViewOptions={{ 
+          fitViewOptions={{
             padding: isLargeWorkflow ? 0.1 : 0.25,
             maxZoom: isLargeWorkflow ? 1 : 1.5,
             minZoom: isLargeWorkflow ? 0.1 : 0.3
@@ -976,6 +1092,13 @@ function WorkflowRendererInner({ nodes, edges, title, layout = 'dagre-tb' }: Wor
           defaultEdgeOptions={{
             type: 'smoothstep',
             animated: animateEdges,
+          }}
+          onNodeClick={(event, flowNode) => {
+            // Stop propagation so the outer whiteboard card doesn't also
+            // re-fire its selection logic while we're just inspecting a node.
+            event.stopPropagation();
+            const original = nodes.find(n => n.id === flowNode.id);
+            if (original) setDetailNode(original);
           }}
         >
           <Background 
@@ -1010,7 +1133,7 @@ function WorkflowRendererInner({ nodes, edges, title, layout = 'dagre-tb' }: Wor
               <div className="flex items-center gap-3">
                 <Play className="h-4 w-4 text-primary animate-pulse" />
                 <div className="w-48 h-2 bg-muted rounded-full overflow-hidden">
-                  <div 
+                  <div
                     className="h-full bg-primary transition-all duration-300"
                     style={{ width: `${animationProgress * 100}%` }}
                   />
@@ -1019,10 +1142,64 @@ function WorkflowRendererInner({ nodes, edges, title, layout = 'dagre-tb' }: Wor
               </div>
             </Panel>
           )}
+
+          {/* Discoverability hint — permanently visible so users know long
+              labels/descriptions aren't lost, they're a click away. */}
+          <Panel
+            position="bottom-center"
+            className="bg-background/90 backdrop-blur px-3 py-1.5 rounded-full border shadow-sm text-[11px] text-muted-foreground flex items-center gap-1.5"
+          >
+            <MousePointerClick className="h-3 w-3" />
+            <span>Click any node for full details</span>
+          </Panel>
         </ReactFlow>
       </div>
+
+      {/* Node detail dialog — shows ALL of label / description / substeps with
+          no truncation. This is the escape hatch for long content that doesn't
+          fit on the node face. */}
+      <Dialog open={!!detailNode} onOpenChange={(open) => !open && setDetailNode(null)}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-hidden flex flex-col">
+          <DialogHeader className="space-y-2">
+            <div className="flex items-center gap-2">
+              <Badge variant="secondary" className="uppercase tracking-wide">
+                {detailNode?.type ?? 'step'}
+              </Badge>
+              <span className="text-[11px] text-muted-foreground font-mono">
+                {detailNode?.id}
+              </span>
+            </div>
+            <DialogTitle className="text-xl leading-tight pr-8">
+              {detailNode?.label}
+            </DialogTitle>
+            {detailNode?.description && (
+              <DialogDescription className="text-sm text-foreground/80 whitespace-pre-wrap leading-relaxed">
+                {detailNode.description}
+              </DialogDescription>
+            )}
+          </DialogHeader>
+          {detailNode?.substeps && detailNode.substeps.length > 0 && (
+            <div className="flex flex-col gap-2 flex-1 min-h-0">
+              <h4 className="font-semibold text-sm text-muted-foreground">
+                Steps · {detailNode.substeps.length}
+              </h4>
+              <ScrollArea className="flex-1 pr-3 -mr-3">
+                <ol className="list-decimal pl-6 text-sm space-y-2 marker:text-muted-foreground marker:font-semibold">
+                  {detailNode.substeps.map((s, i) => (
+                    <li key={i} className="leading-relaxed whitespace-pre-wrap">
+                      {s}
+                    </li>
+                  ))}
+                </ol>
+              </ScrollArea>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
+
+  return isFullscreen ? createPortal(tree, document.body) : tree;
 }
 
 export default function WorkflowRenderer(props: WorkflowRendererProps) {

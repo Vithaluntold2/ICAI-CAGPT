@@ -368,15 +368,20 @@ export const whiteboardArtifacts = pgTable("whiteboard_artifacts", {
     .notNull()
     .references(() => messages.id, { onDelete: "cascade" }),
   sequence: integer("sequence").notNull(),
-  kind: text("kind").notNull(), // 'chart' | 'workflow' | 'mindmap' | 'flowchart' | 'spreadsheet'
+  kind: text("kind").notNull(), // 'chart' | 'workflow' | 'mindmap' | 'flowchart' | 'spreadsheet' | 'checklist'
   title: text("title").notNull(),
   summary: text("summary").notNull(),
   payload: jsonb("payload").notNull(),
+  // Mutable state separate from the immutable payload. Used by interactive artifacts
+  // (currently only 'checklist') to track user/agent updates like which items are
+  // checked. Shape depends on kind; for checklists: { checkedIds: string[], updatedAt: string }
+  state: jsonb("state").$type<Record<string, unknown>>().default({}),
   canvasX: integer("canvas_x").notNull(),
   canvasY: integer("canvas_y").notNull(),
   width: integer("width").notNull(),
   height: integer("height").notNull(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (table) => ({
   conversationSequenceIdx: index("whiteboard_conv_seq_idx")
     .on(table.conversationId, table.sequence),
@@ -387,6 +392,7 @@ export type WhiteboardArtifact = typeof whiteboardArtifacts.$inferSelect;
 export type InsertWhiteboardArtifact = typeof whiteboardArtifacts.$inferInsert;
 
 export const whiteboardArtifactKinds = [
+  "checklist",
   "chart",
   "workflow",
   "mindmap",

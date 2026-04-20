@@ -199,13 +199,46 @@ export class AIOrchestrator {
     // This applies to ALL modes including Deep Research - no assumptions allowed
     // Exception: Skip clarification if document is attached (answer is IN the document)
     let clarificationAnalysis: ClarificationAnalysis | undefined;
-    
+
     // Check if this is a casual message (greeting, thanks, etc.)
     const isCasualMessage = classification.isCasualMessage === true;
-    
+
+    // If the user has explicitly attached a whiteboard selection (a pinned
+    // artifact or a highlighted excerpt), ambiguity in the raw query text
+    // ("what does this mean?", "which ones are left?") is already resolved
+    // by the selection context that gets prepended as a preamble to the user
+    // turn. Running the clarification analyzer in that case just looks at the
+    // bare query and — not seeing the preamble — wrongly demands more input,
+    // blocking the real answer.
+    const hasSelection = !!options?.selection && (
+      (Array.isArray(options.selection.artifactIds) && options.selection.artifactIds.length > 0) ||
+      (typeof options.selection.highlightedText === 'string' && options.selection.highlightedText.trim().length > 0)
+    );
+
+    // Pronoun-only queries ("what does this mean?", "which are remaining?")
+    // are ambiguous on their own but perfectly answerable when the whiteboard
+    // has artifacts — the agent can resolve from the manifest. Skip the
+    // clarifier in that case so it doesn't demand the user re-state what
+    // they're clearly pointing at.
+    const queryLooksLikeReference = /\b(this|that|these|those|it|them|here|above|below)\b/i.test(query || '');
+    let hasArtifactsInConversation = false;
+    if (!hasSelection && queryLooksLikeReference && options?.conversationId) {
+      try {
+        const prior = await listArtifactsByConversation(options.conversationId);
+        hasArtifactsInConversation = prior.length > 0;
+      } catch {
+        // Best-effort — if we can't check, err toward bypass (user-friendlier)
+        hasArtifactsInConversation = true;
+      }
+    }
+
     if (isCasualMessage) {
       // Skip all complex processing for casual messages
       console.log('[AIOrchestrator] Casual message detected - skipping clarification and research');
+    } else if (hasSelection) {
+      console.log('[AIOrchestrator] Selection context present — skipping clarification analyzer, proceeding direct to answer');
+    } else if (queryLooksLikeReference && hasArtifactsInConversation) {
+      console.log('[AIOrchestrator] Ambiguous pronoun query with artifacts present — skipping clarifier, letting agent resolve from manifest');
     } else if (!options?.attachment) {
       // INTERVIEW-FIRST PATTERN: Use AI-driven async analysis for accurate context detection
       // Check if the user has already answered interview questions in this conversation
@@ -222,11 +255,16 @@ export class AIOrchestrator {
           clarificationAnalysis.recommendedApproach = 'answer';
         }
       } else {
-        // Use AI-powered async analysis (GPT-4o-mini chain-of-thought) for accurate detection
+        // Use AI-powered async analysis (GPT-4o-mini chain-of-thought) for accurate detection.
+        // The clarifier receives the conversationId so it can pull the memory
+        // glossary + rolling summary and build a deterministic "DO NOT ASK
+        // ABOUT" negative list from history — fixing context re-asks at the
+        // source instead of post-filtering the model's output.
         try {
           clarificationAnalysis = await requirementClarificationAIService.analyzeQueryAsync(
             query,
-            conversationHistory
+            conversationHistory,
+            options?.conversationId,
           );
           console.log(`[AIOrchestrator] AI clarification analysis: needsClarification=${clarificationAnalysis.needsClarification}, approach=${clarificationAnalysis.recommendedApproach}, missing=${clarificationAnalysis.missingContext.length} items`);
         } catch (err) {
@@ -234,14 +272,14 @@ export class AIOrchestrator {
           clarificationAnalysis = requirementClarificationAIService.analyzeQuery(query, conversationHistory);
         }
       }
-      
+
       // INQUIRY-FIRST: Always clarify when critical/high context is missing
       // This applies to ALL modes including Deep Research
       // We don't make assumptions about jurisdiction, entity type, etc.
       const shouldClarify = (
         clarificationAnalysis.needsClarification &&
         clarificationAnalysis.recommendedApproach === 'clarify' &&
-        clarificationAnalysis.missingContext.some(m => 
+        clarificationAnalysis.missingContext.some(m =>
           m.importance === 'critical' || m.importance === 'high'
         )
       );
@@ -937,6 +975,16 @@ export class AIOrchestrator {
       }
     }
 
+    // Deliverable Composer: the entire polished response IS the deliverable —
+    // this mode has no separate reasoning stream, and we don't force the AI to
+    // emit <DELIVERABLE>/<REASONING> tags. Promote the full response so it
+    // becomes a persisted document artifact on the whiteboard. Chat continues
+    // to echo the prose (mainResponse unchanged) — the extractPipeline skips
+    // the inline <artifact /> placeholder for documents to avoid duplication.
+    if (chatMode === 'deliverable-composer' && !deliverableContent && finalResponse?.trim()) {
+      deliverableContent = finalResponse;
+    }
+
     // Step 6: Log interaction for continuous learning (async, non-blocking)
     if (userId) {
       continuousLearning.logInteraction({
@@ -953,13 +1001,36 @@ export class AIOrchestrator {
       });
     }
 
+    // Extract any ```sheet``` blocks the AI authored directly in its response.
+    // We do this BEFORE building whiteboard artifacts so that the resulting
+    // SpreadsheetData can feed `precomputed.spreadsheet` and get a whiteboard
+    // artifact (which also drives inline chat rendering via <artifact /> tags).
+    // Failing silently is fine — the SSE route runs the same extraction as a
+    // fallback, so a regression here doesn't break the OutputPane path.
+    let aiAuthoredSpreadsheet: any = null;
+    try {
+      const { extractAndEvaluateSheetBlocks } = await import('./excel/sheetBlockParser');
+      const extracted = extractAndEvaluateSheetBlocks(mainResponse);
+      if (extracted.blockCount > 0 && extracted.spreadsheetData) {
+        mainResponse = extracted.text;
+        aiAuthoredSpreadsheet = extracted.spreadsheetData;
+        console.log(`[Orchestrator] Extracted ${extracted.blockCount} AI-authored sheet block(s)`);
+      }
+    } catch (err) {
+      console.warn('[Orchestrator] Sheet-block extraction skipped:', (err as Error).message);
+    }
+
+    // Prefer AI-authored sheet data over the generator's output for downstream
+    // consumers (OutputPane, whiteboard artifact, xlsx download fallback).
+    const effectiveSpreadsheetData = aiAuthoredSpreadsheet ?? spreadsheetPreviewData;
+
     // Add Excel/spreadsheet data to metadata for SSE streaming
     const enrichedMetadata = {
       ...metadata,
       hasExcel: !!excelWorkbook,
       excelBuffer: excelWorkbook?.buffer ? Buffer.from(excelWorkbook.buffer).toString('base64') : undefined,
       excelFilename: excelWorkbook ? `ICAI CAGPT_Calculations_${Date.now()}.xlsx` : undefined,
-      spreadsheetData: spreadsheetPreviewData,
+      spreadsheetData: effectiveSpreadsheetData,
       contentType: chatMode === 'checklist' ? 'checklist'
         : chatMode === 'workflow' ? 'workflow'
         : chatMode === 'calculation' ? 'calculation'
@@ -983,14 +1054,47 @@ export class AIOrchestrator {
           seed = state;
         }
 
+        // Route the generated visualization into the correct precomputed slot
+        // based on its payload type. Stuffing everything into `.visualization`
+        // made workflows and mindmaps render correctly (the renderer switches
+        // on payload.type) but the persisted artifact kind was always "chart"
+        // — so the manifest lied to the agent about what it was looking at.
+        const precomputedSlots: {
+          visualization?: any;
+          workflow?: any;
+          mindmap?: any;
+          spreadsheet?: any;
+          document?: any;
+        } = {
+          spreadsheet: effectiveSpreadsheetData as any,
+        };
+        if (visualization) {
+          const vizType = (visualization as any).type;
+          if (vizType === 'workflow') {
+            precomputedSlots.workflow = visualization as any;
+          } else if (vizType === 'mindmap') {
+            precomputedSlots.mindmap = visualization as any;
+          } else {
+            precomputedSlots.visualization = visualization as any;
+          }
+        }
+        // Deliverable Composer emits a long-form markdown document via the
+        // `deliverableContent` field. Promote it to a persisted artifact so it
+        // can be selected, referenced, and exported like any other artifact.
+        if (chatMode === 'deliverable-composer' && deliverableContent) {
+          precomputedSlots.document = {
+            title: 'Deliverable',
+            content: deliverableContent,
+            mode: chatMode,
+          };
+        }
+
         const built = buildArtifactsForMessage({
           content: mainResponse,
           conversationId: options.conversationId,
           messageId: options.messageId,
-          precomputed: {
-            visualization: visualization as any,
-            spreadsheet: spreadsheetPreviewData as any,
-          },
+          chatMode,
+          precomputed: precomputedSlots,
           layoutState: seed,
           idFactory: () => `art_${randomUUID().replace(/-/g, '').slice(0, 12)}`,
         });
@@ -1022,8 +1126,9 @@ export class AIOrchestrator {
         filename: `ICAI CAGPT_Calculations_${Date.now()}.xlsx`,
         summary: excelWorkbook.summary
       } : undefined,
-      // Include spreadsheet preview data for UI display (with formulas shown as text)
-      spreadsheetData: spreadsheetPreviewData,
+      // Include spreadsheet preview data for UI display (with formulas shown as text).
+      // Prefer AI-authored sheet data when the AI emitted a ```sheet``` fenced block.
+      spreadsheetData: effectiveSpreadsheetData,
       // Whiteboard integration (Phase 2.4)
       whiteboardArtifacts: whiteboardArtifactsOut,
       whiteboardUpdatedContent,

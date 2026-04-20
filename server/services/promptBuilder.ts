@@ -97,9 +97,20 @@ export class PromptBuilder {
       `and the user sees the computed numbers. You are NOT doing arithmetic yourself — ` +
       `you are WRITING formulas the engine will execute. Do NOT refuse to compute; do NOT ` +
       `write "Excel will do that" as if it's a different tool. The engine IS inside your response.\n\n` +
-      `• Single value (NPV, EMI, ratio, compound interest, etc.): write an inline formula with ` +
-      `all inputs inlined (no cell refs). Example: \`=FV(0.06, 5, 0, -10000)\` — the user will see ` +
-      `\`=FV(0.06, 5, 0, -10000)\` → **13,382.26** automatically.\n` +
+      `• Single value (NPV, EMI, ratio, compound interest, tax amount, etc.): write ONE formula ` +
+      `inside a single-backtick code span, with all numeric inputs inlined (no cell refs). ` +
+      `The server will append \` → **value**\` automatically — you do NOT write the arrow or the value yourself.\n` +
+      `  WRITE this and nothing more: \`=FV(0.06, 5, 0, -10000)\`\n` +
+      `  The user sees (after the engine runs): \`=FV(0.06, 5, 0, -10000)\` → **13,382.26**\n` +
+      `  Other rules for single-formula code spans:\n` +
+      `    — Exactly one formula per backtick pair. Do NOT chain: \`=A\` + \`=B\` must be two separate code spans, not one.\n` +
+      `    — No double backticks. Use ONE backtick on each side of the formula.\n` +
+      `    — Prefer decimal fractions over percent signs: write \`0.05\` not \`5%\` (the engine accepts both, but decimals are safer across evaluators).\n` +
+      `    — If you already know/want to state the expected value in prose (e.g., "which comes out to ₹87,500"), write it as separate prose OUTSIDE the code span. Never write \`=FORMULA\` → **value** yourself; that blocks the engine from substituting.\n` +
+      `    — If a computation needs multiple steps, emit multiple code spans in sequence, each one standalone:\n` +
+      `      Income tax: \`=250000*0.05 + 525000*0.20\`\n` +
+      `      Cess (4% of tax): \`=(250000*0.05 + 525000*0.20)*0.04\`\n` +
+      `      Total: \`=(250000*0.05 + 525000*0.20)*1.04\`\n` +
       `• Any multi-row / multi-column output (cashflow schedule, amortisation, scenario table, ` +
       `DCF, sensitivity, comparison matrix): emit a \`\`\`sheet\`\`\` fenced block. Format:\n\n` +
       '    ```sheet\n' +
@@ -112,6 +123,16 @@ export class PromptBuilder {
       `The engine evaluates every formula in the block and renders the computed sheet in the ` +
       `right-side Output Panel with proper column headers, formulas column, and download. ` +
       `Don't repeat the sheet's contents in prose — the panel IS the presentation.\n\n` +
+      `HARD RULE — FORMULAS ONLY GO IN \`\`\`sheet\`\`\` BLOCKS:\n` +
+      `• If ANY cell of a tabular output contains a value beginning with "=" (a formula), that table ` +
+      `MUST be emitted as a \`\`\`sheet\`\`\` fenced block. NEVER place formula strings (e.g. "=B6-B7", ` +
+      `"=B9*B10", "=SUM(C2:C10)") inside a \`visualization\` JSON object, a mermaid block, a markdown ` +
+      `table, or prose. Those renderers do NOT run the formula engine — the user will see the raw ` +
+      `formula text ("=B6-B7") instead of the computed number.\n` +
+      `• The \`visualization\` payload is for ALREADY-COMPUTED numeric data only (chart-ready rows ` +
+      `of {label, value} where value is a plain number). If you need formulas, use \`\`\`sheet\`\`\`. ` +
+      `If you only have plain numbers and want a chart, use visualization. Never mix the two.\n` +
+      `• Markdown tables are allowed ONLY when every cell is a plain number or a short label — no "=" cells.\n\n` +
       `CRITICAL CELL-REFERENCE RULES inside sheet blocks:\n` +
       `• Row 1 is ALWAYS the header row. The FIRST data row is therefore row 2.\n` +
       `• If your first data row represents "Year 0" (initial investment / t=0), then Year 1 is row 3, ` +
@@ -453,23 +474,31 @@ export class PromptBuilder {
         break;
         
       case 'checklist':
-        modeInstructions += `Create TWO comprehensive outputs:\n\n`;
-        modeInstructions += `### DELIVERABLE (for download):\n`;
-        modeInstructions += `Professional checklist with:\n`;
-        modeInstructions += `- [ ] Task items with checkboxes\n`;
-        modeInstructions += `- Priority: High/Medium/Low for each item\n`;
-        modeInstructions += `- Detailed descriptions and sub-tasks\n`;
-        modeInstructions += `- Deadlines and dependencies\n`;
-        modeInstructions += `- Regulatory references where applicable\n`;
-        modeInstructions += `- 30-50+ items for comprehensive coverage\n\n`;
-        modeInstructions += `### REASONING (for chat):\n`;
-        modeInstructions += `Extensive explanation (800+ words) covering:\n`;
-        modeInstructions += `- Methodology and framework used\n`;
-        modeInstructions += `- Why each major section was included\n`;
-        modeInstructions += `- Priority determination rationale\n`;
-        modeInstructions += `- Standards and best practices applied\n`;
-        modeInstructions += `- Industry benchmarks and considerations\n\n`;
-        modeInstructions += `Format:\n\`\`\`\n<DELIVERABLE>\n[checklist here]\n</DELIVERABLE>\n\n<REASONING>\n[detailed explanation here]\n</REASONING>\n\`\`\`\n\n`;
+        modeInstructions += `# ✅ CHECKLIST MODE — INTERACTIVE MARKDOWN CHECKBOXES\n\n`;
+
+        modeInstructions += `## 🚨 OUTPUT FORMAT — READ CAREFULLY, NO DEVIATION\n\n`;
+        modeInstructions += `You MUST return EXACTLY two blocks, in this order, wrapped in the tags shown:\n\n`;
+        modeInstructions += `\`\`\`\n<DELIVERABLE>\n# <Short Checklist Title>\n\n## <Section Name>\n\n- [ ] <Imperative action — verb first>\n    <Optional one-line hint under the item>\n- [ ] <Next action>\n\n## <Next Section>\n\n- [ ] <Another action>\n- [x] <Already-done example>\n</DELIVERABLE>\n\n<REASONING>\n[400+ words explaining why each section and item matters.]\n</REASONING>\n\`\`\`\n\n`;
+
+        modeInstructions += `## 🔒 MANDATORY DELIVERABLE RULES — NOT NEGOTIABLE\n\n`;
+        modeInstructions += `1. The DELIVERABLE MUST use GFM markdown checkbox syntax. Every actionable line MUST start with \`- [ ]\` (unchecked) or \`- [x]\` (pre-checked). The server parser ONLY detects those two markers. Tables, numbered lists, plain bullets, "Step 1:" headings, or prose paragraphs WILL NOT become a checklist artifact.\n`;
+        modeInstructions += `2. Group related items under \`## Section Name\` headings. The first \`#\` line becomes the checklist title; every subsequent \`##\` becomes a section grouping on the board.\n`;
+        modeInstructions += `3. If an item has a short clarifier (deadline, form number, threshold), put it on the next line indented two spaces — the parser picks it up as the item's hint.\n`;
+        modeInstructions += `4. Minimum item counts:\n`;
+        modeInstructions += `   - Personal / simple checklist: at least 10 items (2–3 sections).\n`;
+        modeInstructions += `   - Compliance / filing checklist (ITR, GST, TDS, audit, MCA): at least 20 items (4+ sections).\n`;
+        modeInstructions += `   - Year-end or audit-prep checklist: at least 30 items (5+ sections).\n`;
+        modeInstructions += `5. Each checkbox line is ONE atomic action — something a user can mark done in under 10 minutes. Break large items into sub-items rather than stuffing clauses into one line.\n`;
+        modeInstructions += `6. Do NOT repeat the items in the REASONING block — it explains *why* the list is structured that way, not *what* the items are.\n`;
+        modeInstructions += `7. Example shape for "ITR preparation for salaried individual, FY 2025-26":\n`;
+        modeInstructions += `\`\`\`\n<DELIVERABLE>\n# ITR Preparation — Salaried Individual (FY 2025-26)\n\n## Identity & Credentials\n\n- [ ] PAN card — verify details match\n- [ ] Aadhaar linked to PAN\n- [ ] Income-tax portal login working\n- [ ] Bank account pre-validated on portal for refund\n\n## Income Documents\n\n- [ ] Form 16 Part A from employer\n- [ ] Form 16 Part B from employer\n- [ ] All monthly salary slips\n- [ ] Bank statements for FY 2025-26 (all accounts)\n- [ ] FD / RD interest certificates\n\n## Tax Credit Verification\n\n- [ ] Form 26AS downloaded and reconciled with Form 16\n- [ ] AIS (Annual Information Statement) reviewed\n- [ ] TIS reviewed for mismatches\n\n## Regime & Deductions (if Old Regime)\n\n- [ ] Section 80C investment proofs (LIC, PPF, ELSS)\n- [ ] Section 80D health insurance receipts\n- [ ] HRA rent receipts & landlord PAN (if rent > ₹1 L/yr)\n- [ ] Home-loan interest certificate (Section 24b)\n- [ ] Donation receipts with PAN (Section 80G)\n\n## Capital Gains (if applicable)\n\n- [ ] Equity MF capital gain statement\n- [ ] Broker P&L for share trading\n- [ ] Crypto / VDA transaction report\n\n## Bank & Asset Disclosures\n\n- [ ] All bank accounts (incl. dormant) — account number + IFSC\n- [ ] Disclose foreign assets / income if applicable (triggers ITR-2)\n\n## Final Pre-Filing Checks\n\n- [ ] Correct ITR form chosen (ITR-1 vs ITR-2)\n- [ ] Residential status confirmed (Section 6)\n- [ ] Old vs New regime comparison done\n- [ ] Self-assessment tax paid if liability > 0\n</DELIVERABLE>\n\n<REASONING>\n[400+ words on why each section matters, common missed items, and the reconciliation mindset.]\n</REASONING>\n\`\`\`\n\n`;
+
+        modeInstructions += `## ❌ DO NOT\n\n`;
+        modeInstructions += `- Do NOT output a "Step 1:" / "Step 2:" flow — that's workflow mode, not checklist.\n`;
+        modeInstructions += `- Do NOT output a markdown table of items (| col | col |) — those are not interactive checkboxes.\n`;
+        modeInstructions += `- Do NOT output numbered lists like "1. item\\n2. item" — must be \`- [ ]\`.\n`;
+        modeInstructions += `- Do NOT pre-check items with \`- [x]\` unless the item is genuinely already done for the user (e.g., "already filed last year").\n`;
+        modeInstructions += `- Do NOT emit the checklist outside the <DELIVERABLE> tags — the extractor reads from inside that block first.\n\n`;
         break;
         
       case 'workflow':

@@ -36,7 +36,7 @@ export function ChatViewSwitcher({ value, onChange }: { value: ChatView; onChang
         onClick={() => onChange("board")}
         data-testid="view-switch-board"
       >
-        Whiteboard
+        Output
       </button>
     </div>
   );

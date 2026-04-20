@@ -10,17 +10,34 @@ import { validateEnvironmentOrThrow, getEnvironmentInfo } from "./utils/envValid
 import { getFeatureFlags, getDisabledFeatures } from "./config/featureFlags";
 import { toolRegistry } from "./services/tools/registry";
 import { readWhiteboardTool } from "./services/tools/readWhiteboard.tool";
+import { updateChecklistTool } from "./services/tools/updateChecklist.tool";
 
 // Register tools at module load (idempotent; ignore "already registered" if hot-reloaded)
-try {
-  toolRegistry.register(readWhiteboardTool);
-  console.log('[Startup] ✓ Registered tool: read_whiteboard');
-} catch (err: any) {
-  if (err?.message?.includes('already registered')) {
-    // Safe to ignore in dev / double-bootstrap scenarios
-  } else {
-    console.error('[Startup] Failed to register read_whiteboard tool:', err);
+function safeRegister(tool: { name: string }, register: () => void) {
+  try {
+    register();
+    console.log(`[Startup] ✓ Registered tool: ${tool.name}`);
+  } catch (err: any) {
+    if (err?.message?.includes('already registered')) {
+      // Safe to ignore in dev / double-bootstrap scenarios
+    } else {
+      console.error(`[Startup] Failed to register ${tool.name} tool:`, err);
+    }
   }
+}
+safeRegister(readWhiteboardTool, () => toolRegistry.register(readWhiteboardTool));
+safeRegister(updateChecklistTool, () => toolRegistry.register(updateChecklistTool));
+
+// One-shot: purge the AI response cache on boot when PURGE_AI_CACHE_ON_BOOT=true.
+// We had stale 67-char stubs cached from an earlier interrupted stream that
+// kept being served to every user with the same query. Setting this env var
+// and restarting wipes them. Safe to leave off after the first clean boot.
+if (process.env.PURGE_AI_CACHE_ON_BOOT === "true") {
+  import('./services/hybridCache').then(({ AIResponseCache }) => {
+    AIResponseCache.purgeAll()
+      .then(n => console.log(`[Startup] Purged ${n} stale AI cache entries`))
+      .catch(err => console.error('[Startup] Cache purge failed:', err));
+  });
 }
 
 // =============================================================================

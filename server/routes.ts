@@ -36,7 +36,7 @@ import { getClientFeatures, isFeatureEnabled } from "./config/featureFlags";
 import { documentIngestion } from "./services/core/documentIngestion";
 import { continuousLearning } from "./services/core/continuousLearning";
 import { voiceService } from "./services/voice/voiceService";
-import { listArtifactsByConversation, createArtifact } from "./services/whiteboard/repository";
+import { listArtifactsByConversation, createArtifact, updateArtifactState } from "./services/whiteboard/repository";
 import { buildBoardXlsxBuffer } from "./services/whiteboard/exportXlsx";
 import { buildBoardPptxBuffer } from "./services/whiteboard/exportPptx";
 import { buildBoardPdfBuffer } from "./services/whiteboard/exportPdf";
@@ -987,6 +987,25 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
     await backfillIfNeeded(id);
     const artifacts = await listArtifactsByConversation(id);
     res.json({ artifacts });
+  });
+
+  // Update the mutable state of a single artifact (currently: checklist toggles).
+  // Body: { state: { ... } } — shallow-merged with the existing state jsonb.
+  app.patch("/api/conversations/:id/whiteboard/:artifactId/state", requireAuth, async (req, res) => {
+    const userId = getCurrentUserId(req);
+    if (!userId) return res.status(401).json({ error: "Not authenticated" });
+    const { id, artifactId } = req.params;
+    const conversation = await storage.getConversation(id);
+    if (!conversation) return res.status(404).json({ error: "Conversation not found" });
+    if (conversation.userId !== userId) return res.status(403).json({ error: "Access denied" });
+
+    const patch = (req.body ?? {}).state;
+    if (!patch || typeof patch !== "object") {
+      return res.status(400).json({ error: "bad_state", message: "Expected body.state to be an object" });
+    }
+    const updated = await updateArtifactState(artifactId, id, patch as Record<string, unknown>);
+    if (!updated) return res.status(404).json({ error: "artifact_not_found" });
+    res.json({ artifact: updated });
   });
 
   app.post("/api/conversations/:id/whiteboard/export", requireAuth, async (req, res) => {
@@ -4558,13 +4577,15 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
   app.post("/api/chat/stream", chatRateLimiter, requireAuth, async (req, res) => {
     try {
       const userId = getCurrentUserId(req);
-      const { 
-        conversationId, 
-        query, 
+      const {
+        conversationId,
+        query,
         profileId = null,
         chatMode: rawChatMode,
-        documentAttachment
+        documentAttachment,
+        selection,
       } = req.body;
+      const _selection = selection as { artifactIds?: string[]; highlightedText?: string } | undefined;
 
       // CRITICAL: Normalize chat mode at request boundary to ensure consistency
       const chatMode = normalizeChatMode(rawChatMode);
@@ -4718,9 +4739,38 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
         let fullResponse = '';
         let result: any;
         let fromCache = false;
-        
-        // Only use cache if no document attachment
-        if (!attachmentBuffer) {
+
+        // Decide whether this request is context-dependent. If it is, skip the
+        // shared AI response cache entirely — that cache is keyed only on
+        // (query, chatMode, userTier) and would serve a response computed in a
+        // DIFFERENT conversation with different artifacts / selection. That's
+        // how we got "which items did I check?" answered with a generic
+        // clarifying question.
+        const hasSelection =
+          !!_selection &&
+          ((Array.isArray(_selection.artifactIds) && _selection.artifactIds.length > 0) ||
+            (typeof _selection.highlightedText === "string" && _selection.highlightedText.trim().length > 0));
+
+        let hasWhiteboardArtifacts = false;
+        if (conversation?.id) {
+          try {
+            const priorArtifacts = await listArtifactsByConversation(conversation.id);
+            hasWhiteboardArtifacts = priorArtifacts.length > 0;
+          } catch {
+            // non-fatal; if we can't check, err on the side of bypassing cache
+            hasWhiteboardArtifacts = true;
+          }
+        }
+
+        const skipCache = hasSelection || hasWhiteboardArtifacts;
+        if (skipCache) {
+          console.log(
+            `[SSE] Cache BYPASS — context-dependent request (hasSelection=${hasSelection}, hasWhiteboardArtifacts=${hasWhiteboardArtifacts})`,
+          );
+        }
+
+        // Only use cache if no document attachment AND no per-conversation context.
+        if (!attachmentBuffer && !skipCache) {
           const cachedResponse = await AIResponseCache.getFullResponse(query, chatMode, userTier);
           if (cachedResponse) {
             console.log(`[SSE] Cache HIT - returning cached response with visualization`);
@@ -4878,8 +4928,12 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
           sendThinking('generating', 'Generating response...');
           await new Promise(resolve => setTimeout(resolve, 100));
           
-          // Cache the response for future use (only if no attachment)
-          if (!attachmentBuffer && result.metadata) {
+          // Cache the response for future use — BUT only when the response is
+          // context-independent. Context-dependent responses (per-conversation
+          // selections, per-conversation whiteboard artifacts) would leak into
+          // unrelated conversations and produce wrong answers. Document
+          // attachments are also always skipped.
+          if (!attachmentBuffer && !skipCache && result.metadata) {
             const toCache: CachedAIResponse = {
               response: result.response,
               modelUsed: result.modelUsed,

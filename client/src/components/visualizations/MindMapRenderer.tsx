@@ -3,37 +3,33 @@
  * Polished mindmap component rivaling VisualMind with animations and interactivity
  */
 
-import { useCallback, useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import {
   ReactFlow,
   Node,
   Edge,
   Background,
   Controls,
+  Handle,
   MarkerType,
+  Position,
   useNodesState,
   useEdgesState,
   MiniMap,
-  Panel,
   useReactFlow,
   ReactFlowProvider,
   NodeTypes,
 } from '@xyflow/react';
 import dagre from 'dagre';
-import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import {
-  Download,
-  ZoomIn,
-  ZoomOut,
-  Maximize2,
-  ChevronDown,
-  ChevronUp,
-} from 'lucide-react';
 import type { MindMapData, MindMapNode, MindMapEdge, MindMapLayout } from '@/../../shared/types/mindmap';
 
 interface MindMapRendererProps {
   data: MindMapData;
+  /** When true, suppresses the internal title/subtitle header. Set by wrappers
+   *  (MindmapArtifact when inside the whiteboard ArtifactCard) to avoid the
+   *  title being rendered twice. */
+  embedded?: boolean;
 }
 
 /**
@@ -81,10 +77,21 @@ function MindMapNode({ data }: { data: MindMapNode }) {
 
   return (
     <div
-      className={`${getNodeStyles()} ${getSizeClass()}`}
+      className={`${getNodeStyles()} ${getSizeClass()} relative`}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
+      {/* @xyflow/react requires custom nodes to declare their connection points.
+          Without <Handle> elements, edges are silently dropped. We expose both
+          target and source on all four sides so edges look right regardless of
+          which layout algorithm (radial/tree-vertical/tree-horizontal/organic)
+          placed this node. Handles are made invisible — the node looks plain,
+          but ReactFlow can now route edges through them. */}
+      <Handle type="target" position={Position.Top}    style={{ opacity: 0, pointerEvents: 'none' }} />
+      <Handle type="target" position={Position.Left}   style={{ opacity: 0, pointerEvents: 'none' }} />
+      <Handle type="source" position={Position.Right}  style={{ opacity: 0, pointerEvents: 'none' }} />
+      <Handle type="source" position={Position.Bottom} style={{ opacity: 0, pointerEvents: 'none' }} />
+
       <div className="flex items-center gap-2">
         {data.icon && (
           <span className="text-lg">{data.icon}</span>
@@ -96,7 +103,7 @@ function MindMapNode({ data }: { data: MindMapNode }) {
           )}
         </div>
       </div>
-      
+
       {data.metadata?.tags && data.metadata.tags.length > 0 && (
         <div className="flex flex-wrap gap-1 mt-1.5">
           {data.metadata.tags.map((tag: string, i: number) => (
@@ -361,7 +368,7 @@ const layoutAlgorithms = {
   },
 };
 
-function MindMapRendererInner({ data }: MindMapRendererProps) {
+function MindMapRendererInner({ data, embedded = false }: MindMapRendererProps) {
   const layout = data.layout || 'radial';
   const { nodes: layoutNodes, edges: layoutEdges } = useMemo(
     () => layoutAlgorithms[layout](data.nodes, data.edges),
@@ -370,8 +377,7 @@ function MindMapRendererInner({ data }: MindMapRendererProps) {
 
   const [nodes, setNodes, onNodesChange] = useNodesState(layoutNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(layoutEdges);
-  const { fitView, zoomIn, zoomOut } = useReactFlow();
-  const [isHeaderCollapsed, setIsHeaderCollapsed] = useState(false);
+  const { fitView } = useReactFlow();
 
   useEffect(() => {
     setNodes(layoutNodes);
@@ -380,91 +386,25 @@ function MindMapRendererInner({ data }: MindMapRendererProps) {
     setTimeout(() => fitView({ padding: 0.2, duration: 800 }), 100);
   }, [layoutNodes, layoutEdges, setNodes, setEdges, fitView]);
 
-  const handleExport = useCallback(async (format: 'png' | 'svg' | 'json') => {
-    if (format === 'json') {
-      const dataStr = JSON.stringify(data, null, 2);
-      const blob = new Blob([dataStr], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${data.title.replace(/\s+/g, '_')}_mindmap.json`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } else {
-      // For PNG/SVG export, you'd use html-to-image or similar library
-      console.log(`Export to ${format} - implement with html-to-image`);
-    }
-  }, [data]);
+  // Header is rendered only when a title is present AND we're not embedded
+  // inside an outer artifact card (which already shows the title). Action
+  // buttons (fullscreen / download) have been moved out of the renderer and
+  // into the wrapper level so there's a single source of truth per artifact.
+  const showHeader = !embedded && !!data.title;
 
   return (
     <div className="w-full h-[600px] relative border border-border rounded-lg overflow-hidden bg-background">
-      {/* Collapsible Header */}
-      {data.title && (
-        <div className={`absolute top-0 left-0 right-0 z-10 bg-background/95 backdrop-blur border-b border-border transition-all duration-200 ${isHeaderCollapsed ? 'px-4 py-2' : 'px-4 py-3'}`}>
-          <div className="flex items-center justify-between">
-            <div className={`flex-1 ${isHeaderCollapsed ? 'hidden' : 'block'}`}>
-              <h3 className="text-sm font-medium">{data.title}</h3>
-              {data.subtitle && (
-                <p className="text-xs text-muted-foreground mt-0.5">{data.subtitle}</p>
-              )}
-            </div>
-            <div className="flex items-center gap-1">
-              {!isHeaderCollapsed && (
-                <div className="flex gap-1 mr-2">
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => zoomIn({ duration: 300 })}
-                title="Zoom In"
-                className="h-7 w-7 p-0"
-              >
-                <ZoomIn className="h-3.5 w-3.5" />
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => zoomOut({ duration: 300 })}
-                title="Zoom Out"
-                className="h-7 w-7 p-0"
-              >
-                <ZoomOut className="h-3.5 w-3.5" />
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => fitView({ padding: 0.2, duration: 800 })}
-                title="Fit View"
-                className="h-7 w-7 p-0"
-              >
-                <Maximize2 className="h-3.5 w-3.5" />
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => handleExport('json')}
-                title="Export"
-                className="h-7 w-7 p-0"
-              >
-                <Download className="h-3.5 w-3.5" />
-              </Button>
-                </div>
-              )}
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => setIsHeaderCollapsed(!isHeaderCollapsed)}
-                title={isHeaderCollapsed ? 'Expand' : 'Collapse'}
-                className="h-7 w-7 p-0"
-              >
-                {isHeaderCollapsed ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronUp className="h-3.5 w-3.5" />}
-              </Button>
-            </div>
-          </div>
+      {showHeader && (
+        <div className="absolute top-0 left-0 right-0 z-10 bg-background/95 backdrop-blur border-b border-border px-4 py-3">
+          <h3 className="text-sm font-medium">{data.title}</h3>
+          {data.subtitle && (
+            <p className="text-xs text-muted-foreground mt-0.5">{data.subtitle}</p>
+          )}
         </div>
       )}
 
       {/* ReactFlow Canvas */}
-      <div className={data.title ? (isHeaderCollapsed ? 'h-[calc(100%-40px)] mt-[40px]' : 'h-[calc(100%-60px)] mt-[60px]') : 'h-full'}>
+      <div className={showHeader ? 'h-[calc(100%-60px)] mt-[60px]' : 'h-full'}>
         <ReactFlow
           nodes={nodes}
           edges={edges}

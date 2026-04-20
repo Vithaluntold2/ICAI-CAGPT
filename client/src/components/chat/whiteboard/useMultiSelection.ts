@@ -32,5 +32,14 @@ export function useMultiSelection(orderedIds: string[]) {
 
   const clear = useCallback(() => { setSelected(new Set()); setAnchor(null); }, []);
 
-  return { selected, click, clear };
+  const setMany = useCallback((ids: Iterable<string>) => {
+    const next = new Set(ids);
+    setSelected(next);
+    // Anchor at first id of the set (if any) so subsequent shift-click has a
+    // stable reference point.
+    const first = next.values().next().value;
+    if (first) setAnchor(first);
+  }, []);
+
+  return { selected, click, clear, setMany };
 }

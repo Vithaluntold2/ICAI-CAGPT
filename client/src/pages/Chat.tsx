@@ -664,103 +664,62 @@ export default function Chat() {
           //    and-braces: the cache is updated synchronously the moment
           //    the response lands, all subscribers re-render immediately.
           if (resolvedConvId) {
-            (async () => {
-              try {
-                // CANCEL any in-flight fetch on the whiteboard / messages keys
-                // BEFORE we start our own. Scenario this fixes:
-                //
-                // Initial message in a brand-new conversation →
-                //   onStart fires setActiveConversation(convId)
-                //   → useConversationArtifacts(convId) mounts, subscribes, and
-                //     kicks off queryFn /api/conversations/:id/whiteboard
-                //     (at this point the artifact is NOT yet persisted — the
-                //      orchestrator hasn't even finished running)
-                //   → streaming completes
-                //   → our onEnd fetches /whiteboard again, gets the populated
-                //     list, and setQueryData(...) caches it.
-                //
-                // If the FIRST (empty) fetch resolves AFTER our setQueryData,
-                // React Query's default behaviour is to overwrite the cache
-                // with whatever that late fetch returned — wiping out our
-                // good data. The result: the artifact resolves for a frame
-                // or two then the placeholder flips back to "loading…" and
-                // stays there until the component remounts (navigate away +
-                // back).
-                //
-                // cancelQueries tears down the in-flight subscriber's fetch
-                // so the late empty response is discarded.
-                await queryClient.cancelQueries({ queryKey: ['whiteboard', resolvedConvId] });
-                await queryClient.cancelQueries({ queryKey: ['/api/conversations', resolvedConvId, 'messages'] });
+            // 1. Push artifacts straight from the SSE end event into the
+            //    React Query cache. The server already had them in memory —
+            //    shipping them inline eliminates the refetch-and-race pattern
+            //    that was causing "[artifact … loading…]" to stick on
+            //    first-generate. No fetch, no ETag/304, no cancel-in-flight
+            //    gymnastics.
+            const inlineArtifacts = (metadata?.whiteboardArtifacts ?? []) as any[];
+            if (inlineArtifacts.length > 0) {
+              const byId: Record<string, any> = {};
+              for (const a of inlineArtifacts) byId[a.id] = a;
+              // Merge with any previously-cached artifacts (this conversation
+              // may already have older artifacts from prior turns).
+              const prev = queryClient.getQueryData<{ artifacts: any[]; byId: Record<string, any> }>(
+                ['whiteboard', resolvedConvId],
+              );
+              const mergedArtifacts = prev?.artifacts
+                ? [...prev.artifacts.filter(a => !byId[a.id]), ...inlineArtifacts]
+                : inlineArtifacts;
+              const mergedById = { ...(prev?.byId ?? {}), ...byId };
+              queryClient.setQueryData(
+                ['whiteboard', resolvedConvId],
+                { artifacts: mergedArtifacts, byId: mergedById },
+              );
+            }
 
-                // Run both in parallel — they're independent.
-                const [fresh, wbRes] = await Promise.all([
-                  conversationApi.getMessages(resolvedConvId),
-                  fetch(`/api/conversations/${resolvedConvId}/whiteboard`, {
-                    credentials: 'include',
-                  }).then(r => r.ok ? r.json() : { artifacts: [] }),
-                ]);
-
-                // ORDER MATTERS HERE.
-                //
-                // The placeholder resolver in ReactMarkdown reads
-                // `artifactsData?.byId?.[id]` — where artifactsData comes
-                // from useConversationArtifacts, keyed by ['whiteboard',
-                // convId]. If we call setMessages BEFORE priming the
-                // whiteboard cache, the re-render triggered by setMessages
-                // reads a stale (empty) byId and renders the "[artifact …
-                // loading…]" fallback, and that render sticks — subsequent
-                // cache updates don't invalidate the already-rendered
-                // tree for reasons related to the observer timing.
-                //
-                // Priming the whiteboard cache FIRST (and messages cache
-                // second) means when setMessages fires at the end, React's
-                // upcoming re-render sees both (a) the new message content
-                // with the <artifact /> placeholder AND (b) the cached
-                // artifact by id — in the same commit. Placeholder resolves
-                // on the first render, no navigation-away-and-back needed.
-
-                const artifacts = (wbRes?.artifacts ?? []) as any[];
-                const byId: Record<string, any> = {};
-                for (const a of artifacts) byId[a.id] = a;
-                console.log('[Chat] post-stream whiteboard refresh', {
-                  convId: resolvedConvId,
-                  artifactCount: artifacts.length,
-                  artifactIds: artifacts.map(a => a.id),
-                });
-
-                // 1. Whiteboard cache first.
-                queryClient.setQueryData(
-                  ['whiteboard', resolvedConvId],
-                  { artifacts, byId },
-                );
-                queryClient.invalidateQueries({ queryKey: ['whiteboard', resolvedConvId] });
-                queryClient.refetchQueries({ queryKey: ['whiteboard', resolvedConvId] });
-
-                // 2. Messages cache.
-                queryClient.setQueryData(
-                  ['/api/conversations', resolvedConvId, 'messages'],
-                  fresh,
-                );
-
-                // 3. Finally, the local messages state. This is what
-                //    actually causes Chat to re-render with the new
-                //    content containing <artifact /> placeholders.
-                //    Both caches above are already populated, so the
-                //    placeholder lookups succeed on the first render.
-                const freshMsg = messageId
-                  ? fresh.messages.find((m: any) => m.id === messageId)
-                  : undefined;
-                if (freshMsg) {
-                  setMessages(prev => prev.map(msg =>
-                    msg.id === messageId
-                      ? { ...msg, content: freshMsg.content }
-                      : msg
-                  ));
+            // 2. Update the message content locally with the server-processed
+            //    version (which has <artifact> placeholders and inlined
+            //    formula results). Prefer whiteboardUpdatedContent from the
+            //    end event if available — skips a round-trip.
+            const serverContent = (metadata?.whiteboardUpdatedContent as string | null) ?? null;
+            if (serverContent && messageId) {
+              setMessages(prev => prev.map(msg =>
+                msg.id === messageId ? { ...msg, content: serverContent } : msg
+              ));
+            } else if (messageId) {
+              // Fallback: fetch messages list to pick up DB-stored content.
+              // This path runs only if the server didn't inline
+              // whiteboardUpdatedContent (legacy / non-artifact turns).
+              (async () => {
+                try {
+                  const fresh = await conversationApi.getMessages(resolvedConvId);
+                  const freshMsg = fresh.messages.find((m: any) => m.id === messageId);
+                  if (freshMsg) {
+                    setMessages(prev => prev.map(msg =>
+                      msg.id === messageId ? { ...msg, content: freshMsg.content } : msg
+                    ));
+                  }
+                  queryClient.setQueryData(
+                    ['/api/conversations', resolvedConvId, 'messages'],
+                    fresh,
+                  );
+                } catch (err) {
+                  console.warn('[Chat] fallback messages refetch failed', err);
                 }
-              } catch (err) {
-                console.warn('[Chat] post-stream refetch failed', err);
-              }
-            })();
+              })();
+            }
           }
 
           // Clear the flag after 2 seconds to allow future message loads

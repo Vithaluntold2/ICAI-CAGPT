@@ -262,7 +262,7 @@ const getLayoutedElements = (nodes: Node[], edges: Edge[], layout: string = 'dag
   return { nodes: layoutedNodes, edges };
 };
 
-const getNodeStyle = (type: string, theme: ColorTheme) => {
+const getNodeStyle = (type: string, theme: ColorTheme, isDark: boolean = false) => {
   const baseStyle = {
     padding: '20px 24px',
     borderRadius: '16px',
@@ -331,21 +331,36 @@ const getNodeStyle = (type: string, theme: ColorTheme) => {
           zIndex: 20
         }
       };
-    default:
+    default: {
       backgroundColor = theme.step;
       // Step nodes often use pastel / light gradients. Pick text color by
       // sampling the first hex in the gradient: if the luminance is high
       // (light background) → dark text; else → white text with shadow.
       const firstHex = backgroundColor.match(/#[0-9a-fA-F]{6}/)?.[0] ?? '#e0e7ff';
-      const isLight = hexLuminance(firstHex) > 0.55;
+      const origIsLight = hexLuminance(firstHex) > 0.55;
+      // Dark mode: blend each hex stop in the step gradient toward the dark
+      // card color (~#23252a / --card). Preserves each theme's hue identity
+      // (purple stays purple, orange stays orange) but darkens the overall
+      // fill so pastel-biased themes don't paint near-white nodes on a dark
+      // canvas. Text colour is forced to white in dark mode so no combination
+      // of theme × mode yields low-contrast unreadable text.
+      const stepBackground = isDark
+        ? backgroundColor.replace(/#[0-9a-fA-F]{6}/g, (hex) =>
+            `color-mix(in srgb, ${hex} 25%, #1a1b1f)`)
+        : backgroundColor;
       return {
         ...baseStyle,
         ...hoverTransform,
-        background: backgroundColor,
-        color: isLight ? '#0f172a' : '#ffffff',
-        textShadow: isLight ? 'none' : '0 2px 8px rgba(0,0,0,0.3)',
-        border: isLight ? '1px solid rgba(15,23,42,0.08)' : 'none',
+        background: stepBackground,
+        color: isDark ? '#ffffff' : (origIsLight ? '#0f172a' : '#ffffff'),
+        textShadow: isDark
+          ? '0 2px 8px rgba(0,0,0,0.6)'
+          : (origIsLight ? 'none' : '0 2px 8px rgba(0,0,0,0.3)'),
+        border: isDark
+          ? '1px solid rgba(255,255,255,0.08)'
+          : (origIsLight ? '1px solid rgba(15,23,42,0.08)' : 'none'),
       };
+    }
   }
 };
 
@@ -380,6 +395,15 @@ function WorkflowRendererInner({ nodes: nodesInput, edges: edgesInput, title, la
     return colorThemes[0];
   });
 
+  // Track dark-mode state as React state so the node-rebuild useEffect fires
+  // when the user toggles the theme toggle. Without this, flipping dark mode
+  // while a non-paired theme (e.g. Royal Purple) is selected leaves the
+  // node styles frozen with light-mode colors — getNodeStyle only runs inside
+  // the rebuild effect, and that effect's deps don't otherwise include `.dark`.
+  const [isDark, setIsDark] = useState<boolean>(() =>
+    typeof document !== "undefined" && document.documentElement.classList.contains("dark")
+  );
+
   // Follow live theme toggles + catch the initial state. The useState
   // initializer above reads `.dark` at render time — too early if the app
   // applies dark mode from a parent useEffect (which fires AFTER our render
@@ -390,12 +414,13 @@ function WorkflowRendererInner({ nodes: nodesInput, edges: edgesInput, title, la
   useEffect(() => {
     if (typeof document === "undefined") return;
     const syncTheme = () => {
-      const isDark = document.documentElement.classList.contains("dark");
+      const nextIsDark = document.documentElement.classList.contains("dark");
+      setIsDark(nextIsDark);
       setSelectedTheme(prev => {
-        if (prev.name === "CA GPT Classic" && isDark) {
+        if (prev.name === "CA GPT Classic" && nextIsDark) {
           return colorThemes.find(t => t.name === "Midnight Professional") ?? prev;
         }
-        if (prev.name === "Midnight Professional" && !isDark) {
+        if (prev.name === "Midnight Professional" && !nextIsDark) {
           return colorThemes[0];
         }
         return prev;
@@ -699,7 +724,7 @@ function WorkflowRendererInner({ nodes: nodesInput, edges: edgesInput, title, la
         },
         position: { x: 0, y: idx * 150 },
         style: {
-          ...getNodeStyle(node.type, theme),
+          ...getNodeStyle(node.type, theme, isDark),
           width: dims.width,
           height: dims.height,
           padding: compactMode ? '8px 12px' : '20px 24px',
@@ -799,7 +824,7 @@ function WorkflowRendererInner({ nodes: nodesInput, edges: edgesInput, title, la
       const padding = nodes.length > 30 ? 0.1 : nodes.length > 15 ? 0.15 : 0.2;
       reactFlowInstance?.fitView({ padding, duration: 800 });
     }, 100);
-  }, [nodes, edges, activeTheme, animateEdges, currentLayout, isAnimating, animationProgress, searchTerm, compactMode]);
+  }, [nodes, edges, activeTheme, animateEdges, currentLayout, isAnimating, animationProgress, searchTerm, compactMode, isDark]);
 
   // Dynamic height based on workflow size. Scale linearly with node count so
   // tall vertical flows aren't compressed to ~18% zoom (nodes become specks).

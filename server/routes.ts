@@ -5229,6 +5229,14 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
         console.log(`[SSE] Response metadata - chatMode: ${chatMode}, showInOutputPane: ${result.metadata.showInOutputPane}, hasVisualization: ${!!result.metadata.visualization}, hasSpreadsheet: ${!!metadata.spreadsheetData}`);
 
         // Send end signal with FULL metadata (including spreadsheet and Excel data)
+        //
+        // whiteboardArtifacts: carry the full just-persisted artifact rows in
+        // the end event. The client pushes them directly into its React Query
+        // cache, no refetch required. We were seeing "[artifact … loading…]"
+        // stuck on first-generate because a separate post-stream fetch raced
+        // against the initial (empty-result) fetch that had kicked off when
+        // setActiveConversation first mounted the subscriber — plus ETag/304
+        // issues etc. Handing the data inline eliminates all of that.
         sendSSE({
           type: 'end',
           messageId: assistantMessage.id,
@@ -5245,7 +5253,10 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
             excelFilename: metadata.excelFilename,
             excelCacheKey: metadata.excelCacheKey,
             // Include calculation indicator
-            hasCalculation: metadata.hasCalculation
+            hasCalculation: metadata.hasCalculation,
+            // NEW: full artifact rows so client can prime its cache without fetching
+            whiteboardArtifacts: result.whiteboardArtifacts ?? [],
+            whiteboardUpdatedContent: result.whiteboardUpdatedContent ?? null,
           }
         });
 

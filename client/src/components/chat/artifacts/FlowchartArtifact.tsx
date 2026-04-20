@@ -20,11 +20,21 @@ async function ensureMermaid() {
     if (!mermaidInitialized) {
       m.initialize({
         startOnLoad: false,
-        theme: "default",
+        // Mermaid v11's `look: "handDrawn"` renders via rough.js — sketchy
+        // strokes + Excalidraw-ish aesthetic instead of the boxy default. Paired
+        // with `theme: "neutral"` (cleaner than "default") this is the biggest
+        // aesthetic upgrade Mermaid ships. Per-diagram `%%{init}%%` directives
+        // below still override `theme` for dark/light mode.
+        look: "handDrawn",
+        handDrawnSeed: 1,
+        theme: "neutral",
         // "strict" rejects anything non-trivial; "loose" tolerates more real-world
         // mermaid output (including inline HTML like <br/> in node labels).
         securityLevel: "loose",
         suppressErrorRendering: true,
+        flowchart: {
+          curve: "basis",
+        },
       });
       mermaidInitialized = true;
     }
@@ -74,14 +84,19 @@ function normalizeMermaidSource(src: string): string {
  * the current light/dark mode — Mermaid's global initialize() locks a theme,
  * but per-diagram directives override it. Without this, dark-mode users see
  * a bright white flowchart "stuck to a chalkboard" on the dark canvas.
+ *
+ * The directive also re-declares `look: handDrawn`. Per-diagram `%%{init}%%`
+ * replaces the global init wholesale for the fields it mentions, so if we
+ * only override `theme` the sketchy look flips back to boxy-classic. Keep the
+ * two in sync here, not in two separate places.
  */
 function withThemeDirective(src: string): string {
   if (typeof document === "undefined") return src;
   const isDark = document.documentElement.classList.contains("dark");
   // If the source already carries its own init directive, respect it.
   if (/^\s*%%\s*\{\s*init\s*:/.test(src)) return src;
-  const theme = isDark ? "dark" : "default";
-  return `%%{init: {'theme':'${theme}'}}%%\n${src}`;
+  const theme = isDark ? "dark" : "neutral";
+  return `%%{init: {'look':'handDrawn','handDrawnSeed':1,'theme':'${theme}'}}%%\n${src}`;
 }
 
 export function FlowchartArtifact({ payload }: { payload: { source: string } }) {

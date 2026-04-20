@@ -1,474 +1,258 @@
 /**
- * MindMapRenderer - Interactive Mindmap Visualization
- * Polished mindmap component rivaling VisualMind with animations and interactivity
+ * MindMapRenderer — Mind Elixir powered mindmap.
+ *
+ * Replaces the prior @xyflow/react implementation, which required manual
+ * theming, dark-mode MutationObserver hacks, and per-node luminance math just
+ * to stay legible. Mind Elixir ships `THEME` / `DARK_THEME` palettes, native
+ * `exportPng` / `exportSvg`, and its own layout engine — so all of that goes
+ * away and we keep a lot less surface to maintain.
  */
 
-import { useEffect, useState, useMemo } from 'react';
-import {
-  ReactFlow,
-  Node,
-  Edge,
-  Background,
-  Controls,
-  Handle,
-  MarkerType,
-  Position,
-  useNodesState,
-  useEdgesState,
-  MiniMap,
-  useReactFlow,
-  ReactFlowProvider,
-  NodeTypes,
-} from '@xyflow/react';
-import dagre from 'dagre';
-import { Badge } from '@/components/ui/badge';
-import type { MindMapData, MindMapNode, MindMapEdge, MindMapLayout } from '@/../../shared/types/mindmap';
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from "react";
+import MindElixir, {
+  type MindElixirInstance,
+  type MindElixirData,
+  type NodeObj,
+} from "mind-elixir";
+import "mind-elixir/style";
+import type { MindMapData, MindMapNode, MindMapEdge } from "@/../../shared/types/mindmap";
+
+export interface MindMapRendererHandle {
+  /** Capture the current mindmap as a PNG blob. Returns null if the instance
+   *  isn't mounted yet. Used by the artifact wrapper's download menu. */
+  exportPng: () => Promise<Blob | null>;
+  /** Capture the current mindmap as an SVG blob. */
+  exportSvg: () => Blob | null;
+}
 
 interface MindMapRendererProps {
   data: MindMapData;
-  /** When true, suppresses the internal title/subtitle header. Set by wrappers
-   *  (MindmapArtifact when inside the whiteboard ArtifactCard) to avoid the
-   *  title being rendered twice. */
+  /** When true, suppresses the internal title/subtitle header. Set by
+   *  wrappers that already render the title, to avoid duplication. */
   embedded?: boolean;
 }
 
 /**
- * Custom node component with clean styling
+ * Convert the server's flat `{nodes, edges}` payload into the nested
+ * `{nodeData: {topic, children[]}}` shape Mind Elixir expects.
+ *
+ * Root selection:
+ *   1. The first node with `type: 'root'` wins.
+ *   2. Otherwise, pick a node with no incoming edge (a natural tree root).
+ *   3. Fall back to the first node if neither applies.
+ *
+ * Orphans (nodes unreachable from root) are attached under root so nothing
+ * silently disappears from a malformed payload.
  */
-function MindMapNode({ data }: { data: MindMapNode }) {
-  const [isHovered, setIsHovered] = useState(false);
+function toMindElixirData(data: MindMapData): MindElixirData {
+  const nodes: MindMapNode[] = Array.isArray(data.nodes) ? data.nodes : [];
+  const edges: MindMapEdge[] = Array.isArray(data.edges) ? data.edges : [];
 
-  const getNodeStyles = () => {
-    const baseStyles = 'transition-all duration-200 rounded-lg border shadow-sm';
-    const nodeType = data.type || 'leaf';
-    
-    // Clean monochromatic styling that works in both modes
-    const styleMap: Record<string, string> = {
-      root: 'bg-foreground text-background border-foreground font-bold',
-      primary: 'bg-foreground/90 text-background border-foreground/90',
-      secondary: 'bg-foreground/10 text-foreground border-foreground/20',
-      tertiary: 'bg-background text-foreground border-border',
-      leaf: 'bg-background text-foreground border-border',
+  if (nodes.length === 0) {
+    return {
+      nodeData: {
+        id: "empty",
+        topic: data.title || "Empty mindmap",
+      },
     };
+  }
 
-    return `${baseStyles} ${styleMap[nodeType] || styleMap.leaf} ${
-      isHovered ? 'scale-105 shadow-md' : 'scale-100'
-    }`;
+  const nodeById = new Map(nodes.map((n) => [n.id, n]));
+  const childrenById = new Map<string, string[]>();
+  const hasIncoming = new Set<string>();
+
+  for (const edge of edges) {
+    if (!nodeById.has(edge.source) || !nodeById.has(edge.target)) continue;
+    const list = childrenById.get(edge.source) ?? [];
+    list.push(edge.target);
+    childrenById.set(edge.source, list);
+    hasIncoming.add(edge.target);
+  }
+
+  const rootNode =
+    nodes.find((n) => n.type === "root") ??
+    nodes.find((n) => !hasIncoming.has(n.id)) ??
+    nodes[0];
+
+  const visited = new Set<string>();
+  const build = (id: string): NodeObj | null => {
+    if (visited.has(id)) return null; // break cycles
+    visited.add(id);
+    const n = nodeById.get(id);
+    if (!n) return null;
+
+    const childIds = childrenById.get(id) ?? [];
+    const children = childIds
+      .map(build)
+      .filter((c): c is NodeObj => c !== null);
+
+    const tags =
+      n.metadata?.tags && n.metadata.tags.length > 0
+        ? [...n.metadata.tags]
+        : undefined;
+
+    return {
+      id: n.id,
+      topic: n.label,
+      note: n.description,
+      icons: n.icon ? [n.icon] : undefined,
+      tags,
+      children: children.length > 0 ? children : undefined,
+    };
   };
 
-  const getSizeClass = () => {
-    switch (data.type) {
-      case 'root': return 'px-6 py-4 min-w-[200px]';
-      case 'primary': return 'px-5 py-3 min-w-[160px]';
-      case 'secondary': return 'px-4 py-2.5 min-w-[140px]';
-      case 'tertiary': return 'px-3 py-2 min-w-[120px]';
-      default: return 'px-3 py-2 min-w-[100px]';
+  const rootData = build(rootNode.id);
+  if (!rootData) {
+    // Unreachable in practice — `build` only returns null on cycle revisit,
+    // and `rootNode.id` hasn't been visited yet. Kept for type narrowing.
+    return {
+      nodeData: { id: rootNode.id, topic: rootNode.label },
+    };
+  }
+
+  // Attach any nodes the BFS didn't reach (missing/malformed edges) so the
+  // user still sees them instead of a silent drop.
+  const orphans: NodeObj[] = [];
+  for (const n of nodes) {
+    if (!visited.has(n.id)) {
+      const orphan = build(n.id);
+      if (orphan) orphans.push(orphan);
     }
-  };
+  }
+  if (orphans.length > 0) {
+    rootData.children = [...(rootData.children ?? []), ...orphans];
+  }
 
-  const getFontSize = () => {
-    switch (data.type) {
-      case 'root': return 'text-base font-semibold';
-      case 'primary': return 'text-sm font-medium';
-      case 'secondary': return 'text-sm';
-      default: return 'text-xs';
-    }
-  };
-
-  return (
-    <div
-      className={`${getNodeStyles()} ${getSizeClass()} relative`}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
-    >
-      {/* @xyflow/react requires custom nodes to declare their connection points.
-          Without <Handle> elements, edges are silently dropped. We expose both
-          target and source on all four sides so edges look right regardless of
-          which layout algorithm (radial/tree-vertical/tree-horizontal/organic)
-          placed this node. Handles are made invisible — the node looks plain,
-          but ReactFlow can now route edges through them. */}
-      <Handle type="target" position={Position.Top}    style={{ opacity: 0, pointerEvents: 'none' }} />
-      <Handle type="target" position={Position.Left}   style={{ opacity: 0, pointerEvents: 'none' }} />
-      <Handle type="source" position={Position.Right}  style={{ opacity: 0, pointerEvents: 'none' }} />
-      <Handle type="source" position={Position.Bottom} style={{ opacity: 0, pointerEvents: 'none' }} />
-
-      <div className="flex items-center gap-2">
-        {data.icon && (
-          <span className="text-lg">{data.icon}</span>
-        )}
-        <div className="flex-1">
-          <div className={getFontSize()}>{data.label}</div>
-          {data.description && (
-            <div className="text-xs mt-0.5 opacity-70">{data.description}</div>
-          )}
-        </div>
-      </div>
-
-      {data.metadata?.tags && data.metadata.tags.length > 0 && (
-        <div className="flex flex-wrap gap-1 mt-1.5">
-          {data.metadata.tags.map((tag: string, i: number) => (
-            <Badge key={i} variant="outline" className="text-[10px] px-1 py-0 h-4">
-              {tag}
-            </Badge>
-          ))}
-        </div>
-      )}
-    </div>
-  );
+  return { nodeData: rootData };
 }
 
-const nodeTypes: NodeTypes = {
-  mindmapNode: MindMapNode,
-};
+const MindMapRenderer = forwardRef<MindMapRendererHandle, MindMapRendererProps>(
+  function MindMapRenderer({ data, embedded = false }, ref) {
+    const containerRef = useRef<HTMLDivElement>(null);
+    const instanceRef = useRef<MindElixirInstance | null>(null);
 
-/**
- * Layout algorithms for different mindmap styles
- */
-const layoutAlgorithms = {
-  'radial': (nodes: MindMapNode[], edges: MindMapEdge[]) => {
-    // Radial layout: root at center, branches radiating outward
-    const root = nodes.find(n => n.type === 'root');
-    if (!root) return { nodes: [], edges: [] };
+    const mindData = useMemo(() => toMindElixirData(data), [data]);
+    const safeNodes = Array.isArray(data.nodes) ? data.nodes : [];
 
-    const levels = new Map<string, number>();
-    const children = new Map<string, string[]>();
-    
-    // Build hierarchy
-    edges.forEach(edge => {
-      if (!children.has(edge.source)) {
-        children.set(edge.source, []);
-      }
-      children.get(edge.source)!.push(edge.target);
-    });
+    // Mount / re-mount on data changes. Mind Elixir also exposes `refresh`,
+    // but recreating the instance is simpler and keeps the dark-theme choice
+    // consistent with whatever `.dark` state is current.
+    useEffect(() => {
+      const el = containerRef.current;
+      if (!el || safeNodes.length === 0) return;
 
-    // Calculate levels (BFS)
-    const queue: Array<[string, number]> = [[root.id, 0]];
-    levels.set(root.id, 0);
-    
-    while (queue.length > 0) {
-      const [nodeId, level] = queue.shift()!;
-      const nodeChildren = children.get(nodeId) || [];
-      nodeChildren.forEach(childId => {
-        if (!levels.has(childId)) {
-          levels.set(childId, level + 1);
-          queue.push([childId, level + 1]);
-        }
+      const isDark =
+        typeof document !== "undefined" &&
+        document.documentElement.classList.contains("dark");
+
+      const instance = new MindElixir({
+        el,
+        direction: MindElixir.SIDE,
+        editable: false,
+        contextMenu: false,
+        toolBar: false,
+        keypress: false,
+        allowUndo: false,
+        theme: isDark ? MindElixir.DARK_THEME : MindElixir.THEME,
       });
+      instance.init(mindData);
+      instanceRef.current = instance;
+
+      return () => {
+        try {
+          instance.destroy();
+        } catch {
+          // Mind Elixir's destroy throws on certain unmount races; the DOM
+          // is being torn down anyway, so swallow silently.
+        }
+        instanceRef.current = null;
+      };
+    }, [mindData, safeNodes.length]);
+
+    // Live light/dark toggle. Without this, a user flipping the theme while
+    // a mindmap is already rendered would see stale colors until they
+    // regenerate the artifact.
+    useEffect(() => {
+      if (typeof document === "undefined") return;
+      const sync = () => {
+        const instance = instanceRef.current;
+        if (!instance) return;
+        const isDark = document.documentElement.classList.contains("dark");
+        instance.changeTheme(isDark ? MindElixir.DARK_THEME : MindElixir.THEME, true);
+      };
+      const obs = new MutationObserver(sync);
+      obs.observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ["class"],
+      });
+      return () => obs.disconnect();
+    }, []);
+
+    useImperativeHandle(
+      ref,
+      () => ({
+        exportPng: async () => {
+          const i = instanceRef.current;
+          if (!i) return null;
+          try {
+            return await i.exportPng();
+          } catch (err) {
+            console.error("[MindMapRenderer] exportPng failed:", err);
+            return null;
+          }
+        },
+        exportSvg: () => {
+          const i = instanceRef.current;
+          if (!i) return null;
+          try {
+            return i.exportSvg();
+          } catch (err) {
+            console.error("[MindMapRenderer] exportSvg failed:", err);
+            return null;
+          }
+        },
+      }),
+      []
+    );
+
+    if (safeNodes.length === 0) {
+      return (
+        <div
+          className="w-full rounded-lg border border-border bg-muted/20 p-8 flex flex-col items-center justify-center text-center"
+          style={{ minHeight: 240 }}
+        >
+          <div className="text-3xl mb-2">🧠</div>
+          <p className="text-sm font-medium">No mindmap to display</p>
+          <p className="text-xs text-muted-foreground mt-1 max-w-md">
+            The mindmap generation produced no nodes. This can happen if the
+            response was empty or malformed — try re-sending the request.
+          </p>
+        </div>
+      );
     }
 
-    // Position nodes radially
-    const radius = 250;
-    const centerX = 0;
-    const centerY = 0;
+    const showHeader = !embedded && !!data.title;
 
-    const flowNodes: Node[] = nodes.map((node) => {
-      const level = levels.get(node.id) || 0;
-      const siblingsAtLevel = Array.from(levels.entries())
-        .filter(([_, l]) => l === level)
-        .map(([id]) => id);
-      
-      const indexAtLevel = siblingsAtLevel.indexOf(node.id);
-      const angleStep = (2 * Math.PI) / Math.max(siblingsAtLevel.length, 1);
-      const angle = angleStep * indexAtLevel;
-      
-      const distance = level * radius;
-      const x = centerX + distance * Math.cos(angle);
-      const y = centerY + distance * Math.sin(angle);
-
-      return {
-        id: node.id,
-        type: 'mindmapNode',
-        position: { x, y },
-        data: {
-          label: node.label,
-          description: node.description,
-          icon: node.icon,
-          nodeType: node.type,
-          metadata: node.metadata,
-        },
-        draggable: true,
-      };
-    });
-
-    const flowEdges: Edge[] = edges.map((edge, i) => ({
-      id: edge.id || `e-${i}`,
-      source: edge.source,
-      target: edge.target,
-      type: 'smoothstep',
-      animated: true,
-      className: 'mindmap-edge',
-      style: {
-        strokeWidth: edge.weight || 2,
-      },
-      markerEnd: {
-        type: MarkerType.ArrowClosed,
-        width: 16,
-        height: 16,
-      },
-      label: edge.label,
-    }));
-
-    return { nodes: flowNodes, edges: flowEdges };
-  },
-
-  'tree-vertical': (nodes: MindMapNode[], edges: MindMapEdge[]) => {
-    // Use dagre for tree layout
-    const g = new dagre.graphlib.Graph();
-    g.setDefaultEdgeLabel(() => ({}));
-    g.setGraph({ rankdir: 'TB', ranksep: 120, nodesep: 80 });
-
-    nodes.forEach((node) => {
-      g.setNode(node.id, { width: 200, height: 80 });
-    });
-
-    edges.forEach((edge) => {
-      g.setEdge(edge.source, edge.target);
-    });
-
-    dagre.layout(g);
-
-    const flowNodes: Node[] = nodes.map((node) => {
-      const nodeWithPosition = g.node(node.id);
-      return {
-        id: node.id,
-        type: 'mindmapNode',
-        position: {
-          x: nodeWithPosition.x - 100,
-          y: nodeWithPosition.y - 40,
-        },
-        data: {
-          label: node.label,
-          description: node.description,
-          icon: node.icon,
-          nodeType: node.type,
-          metadata: node.metadata,
-        },
-        draggable: true,
-      };
-    });
-
-    const flowEdges: Edge[] = edges.map((edge, i) => ({
-      id: edge.id || `e-${i}`,
-      source: edge.source,
-      target: edge.target,
-      type: 'smoothstep',
-      animated: true,
-      className: 'mindmap-edge',
-      style: {
-        strokeWidth: edge.weight || 2,
-      },
-      markerEnd: {
-        type: MarkerType.ArrowClosed,
-        width: 16,
-        height: 16,
-      },
-      label: edge.label,
-    }));
-
-    return { nodes: flowNodes, edges: flowEdges };
-  },
-
-  'tree-horizontal': (nodes: MindMapNode[], edges: MindMapEdge[]) => {
-    const g = new dagre.graphlib.Graph();
-    g.setDefaultEdgeLabel(() => ({}));
-    g.setGraph({ rankdir: 'LR', ranksep: 150, nodesep: 80 });
-
-    nodes.forEach((node) => {
-      g.setNode(node.id, { width: 200, height: 80 });
-    });
-
-    edges.forEach((edge) => {
-      g.setEdge(edge.source, edge.target);
-    });
-
-    dagre.layout(g);
-
-    const flowNodes: Node[] = nodes.map((node) => {
-      const nodeWithPosition = g.node(node.id);
-      return {
-        id: node.id,
-        type: 'mindmapNode',
-        position: {
-          x: nodeWithPosition.x - 100,
-          y: nodeWithPosition.y - 40,
-        },
-        data: {
-          label: node.label,
-          description: node.description,
-          icon: node.icon,
-          nodeType: node.type,
-          metadata: node.metadata,
-        },
-        draggable: true,
-      };
-    });
-
-    const flowEdges: Edge[] = edges.map((edge, i) => ({
-      id: edge.id || `e-${i}`,
-      source: edge.source,
-      target: edge.target,
-      type: 'smoothstep',
-      animated: true,
-      className: 'mindmap-edge',
-      style: {
-        strokeWidth: edge.weight || 2,
-      },
-      markerEnd: {
-        type: MarkerType.ArrowClosed,
-        width: 16,
-        height: 16,
-      },
-      label: edge.label,
-    }));
-
-    return { nodes: flowNodes, edges: flowEdges };
-  },
-
-  'organic': (nodes: MindMapNode[], edges: MindMapEdge[]) => {
-    // Force-directed layout (simplified version)
-    // In production, you'd use D3-force or similar
-    return layoutAlgorithms['radial'](nodes, edges);
-  },
-
-  'timeline': (nodes: MindMapNode[], edges: MindMapEdge[]) => {
-    // Linear timeline layout
-    const flowNodes: Node[] = nodes.map((node, i) => ({
-      id: node.id,
-      type: 'mindmapNode',
-      position: { x: i * 250, y: 0 },
-      data: {
-        label: node.label,
-        description: node.description,
-        icon: node.icon,
-        nodeType: node.type,
-        metadata: node.metadata,
-      },
-      draggable: true,
-    }));
-
-    const flowEdges: Edge[] = edges.map((edge, i) => ({
-      id: edge.id || `e-${i}`,
-      source: edge.source,
-      target: edge.target,
-      type: 'smoothstep',
-      animated: true,
-      className: 'mindmap-edge',
-      style: {
-        strokeWidth: edge.weight || 2,
-      },
-      markerEnd: {
-        type: MarkerType.ArrowClosed,
-        width: 16,
-        height: 16,
-      },
-      label: edge.label,
-    }));
-
-    return { nodes: flowNodes, edges: flowEdges };
-  },
-};
-
-function MindMapRendererInner({ data, embedded = false }: MindMapRendererProps) {
-  const layout = data.layout || 'radial';
-  // Payload from a failed or in-flight generation can arrive with nodes/edges
-  // missing. layoutAlgorithms iterate them directly — guard before handing off
-  // so we don't crash the whole chat view on mount.
-  const safeNodes = Array.isArray(data.nodes) ? data.nodes : [];
-  const safeEdges = Array.isArray(data.edges) ? data.edges : [];
-  const { nodes: layoutNodes, edges: layoutEdges } = useMemo(
-    () => layoutAlgorithms[layout](safeNodes, safeEdges),
-    [safeNodes, safeEdges, layout]
-  );
-
-  const [nodes, setNodes, onNodesChange] = useNodesState(layoutNodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState(layoutEdges);
-  const { fitView } = useReactFlow();
-
-  useEffect(() => {
-    setNodes(layoutNodes);
-    setEdges(layoutEdges);
-    // Fit view after layout
-    setTimeout(() => fitView({ padding: 0.2, duration: 800 }), 100);
-  }, [layoutNodes, layoutEdges, setNodes, setEdges, fitView]);
-
-  // Header is rendered only when a title is present AND we're not embedded
-  // inside an outer artifact card (which already shows the title). Action
-  // buttons (fullscreen / download) have been moved out of the renderer and
-  // into the wrapper level so there's a single source of truth per artifact.
-  const showHeader = !embedded && !!data.title;
-
-  // Empty-state — show a clear message when no nodes were produced, instead
-  // of a silent blank canvas that looks like a rendering bug.
-  if (safeNodes.length === 0) {
     return (
-      <div
-        className="w-full rounded-lg border border-border bg-muted/20 p-8 flex flex-col items-center justify-center text-center"
-        style={{ minHeight: 240 }}
-      >
-        <div className="text-3xl mb-2">🧠</div>
-        <p className="text-sm font-medium">No mindmap to display</p>
-        <p className="text-xs text-muted-foreground mt-1 max-w-md">
-          The mindmap generation produced no nodes. This can happen if the
-          response was empty or malformed — try re-sending the request.
-        </p>
+      <div className="w-full h-[600px] relative border border-border rounded-lg overflow-hidden bg-background">
+        {showHeader && (
+          <div className="absolute top-0 left-0 right-0 z-10 bg-background/95 backdrop-blur border-b border-border px-4 py-3">
+            <h3 className="text-sm font-medium">{data.title}</h3>
+            {data.subtitle && (
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {data.subtitle}
+              </p>
+            )}
+          </div>
+        )}
+
+        <div
+          ref={containerRef}
+          className={showHeader ? "h-[calc(100%-60px)] mt-[60px]" : "h-full"}
+        />
       </div>
     );
   }
+);
 
-  return (
-    <div className="w-full h-[600px] relative border border-border rounded-lg overflow-hidden bg-background">
-      {showHeader && (
-        <div className="absolute top-0 left-0 right-0 z-10 bg-background/95 backdrop-blur border-b border-border px-4 py-3">
-          <h3 className="text-sm font-medium">{data.title}</h3>
-          {data.subtitle && (
-            <p className="text-xs text-muted-foreground mt-0.5">{data.subtitle}</p>
-          )}
-        </div>
-      )}
-
-      {/* ReactFlow Canvas */}
-      <div className={showHeader ? 'h-[calc(100%-60px)] mt-[60px]' : 'h-full'}>
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
-          nodeTypes={nodeTypes}
-          fitView
-          fitViewOptions={{
-            padding: 0.2,
-            maxZoom: 1.5,
-            minZoom: 0.3,
-          }}
-          nodesDraggable={true}
-          nodesConnectable={false}
-          elementsSelectable={true}
-          panOnDrag={true}
-          zoomOnScroll={true}
-          minZoom={0.2}
-          maxZoom={2.5}
-          defaultViewport={{ x: 0, y: 0, zoom: 1 }}
-        >
-          <Background gap={20} size={1} />
-          <Controls
-            position="bottom-right"
-            showInteractive={false}
-          />
-          <MiniMap
-            position="bottom-left"
-            nodeColor={() => 'hsl(var(--foreground))'}
-            maskColor="hsl(var(--background) / 0.8)"
-          />
-        </ReactFlow>
-      </div>
-    </div>
-  );
-}
-
-export default function MindMapRenderer(props: MindMapRendererProps) {
-  return (
-    <ReactFlowProvider>
-      <MindMapRendererInner {...props} />
-    </ReactFlowProvider>
-  );
-}
+export default MindMapRenderer;

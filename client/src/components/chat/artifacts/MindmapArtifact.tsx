@@ -8,14 +8,17 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import MindMapRenderer from "../../visualizations/MindMapRenderer";
+import MindMapRenderer, {
+  type MindMapRendererHandle,
+} from "../../visualizations/MindMapRenderer";
 
 export function MindmapArtifact({ payload, embedded = false }: { payload: any; embedded?: boolean }) {
-  const bodyRef = useRef<HTMLDivElement>(null);
+  const rendererRef = useRef<MindMapRendererHandle>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
-  // Export via html-to-image snapshot of the React Flow viewport so the PNG/SVG
-  // matches what the user sees. JSON dumps the raw mindmap structure.
+  // Export delegates to Mind Elixir's native exporters — no more html-to-image
+  // or `.react-flow__viewport` selector hackery. JSON still dumps the raw
+  // payload so the structured source is downloadable.
   const handleExport = useCallback(async (format: "png" | "svg" | "json") => {
     const baseName = ((payload?.title as string) || "mindmap").replace(/[^a-z0-9_-]+/gi, "_");
 
@@ -32,36 +35,19 @@ export function MindmapArtifact({ payload, embedded = false }: { payload: any; e
       return;
     }
 
-    const root = bodyRef.current;
-    const viewport = (root?.querySelector(".react-flow__viewport") as HTMLElement | null)
-      ?? (root?.querySelector(".react-flow") as HTMLElement | null);
-    if (!viewport) {
-      console.error("[MindmapArtifact] export target not found");
+    const blob = format === "png"
+      ? await rendererRef.current?.exportPng()
+      : rendererRef.current?.exportSvg();
+    if (!blob) {
+      console.error(`[MindmapArtifact] ${format} export returned no blob`);
       return;
     }
-    try {
-      const htmlToImage = await import("html-to-image");
-      const options = {
-        pixelRatio: format === "png" ? 2 : 1,
-        backgroundColor: "#ffffff",
-        cacheBust: true,
-        // Avoid html-to-image@1.11.x `font.trim()` crash during @font-face
-        // embedding; snapshots use system/browser fonts instead.
-        skipFonts: true,
-        filter: (node: HTMLElement) =>
-          !node.classList?.contains("react-flow__minimap")
-          && !node.classList?.contains("react-flow__controls"),
-      };
-      const dataUrl = format === "png"
-        ? await htmlToImage.toPng(viewport, options)
-        : await htmlToImage.toSvg(viewport, options);
-      const a = document.createElement("a");
-      a.href = dataUrl;
-      a.download = `${baseName}.${format}`;
-      a.click();
-    } catch (err) {
-      console.error(`[MindmapArtifact] ${format} export failed:`, err);
-    }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${baseName}.${format}`;
+    a.click();
+    URL.revokeObjectURL(url);
   }, [payload]);
 
   // While fullscreen: Escape exits, and body scroll is locked so the overlay
@@ -136,8 +122,8 @@ export function MindmapArtifact({ payload, embedded = false }: { payload: any; e
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
-      <div ref={bodyRef} className={bodyClass}>
-        <MindMapRenderer data={payload} embedded={embedded} />
+      <div className={bodyClass}>
+        <MindMapRenderer ref={rendererRef} data={payload} embedded={embedded} />
       </div>
     </div>
   );

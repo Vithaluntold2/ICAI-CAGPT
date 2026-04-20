@@ -647,30 +647,6 @@
   overflow-x: auto;
 }
 
-/* ReactFlow Mindmap Edge Styles - Works in both light and dark modes */
-.react-flow__edge-path.mindmap-edge,
-.react-flow__edge.mindmap-edge path {
-  stroke: hsl(var(--foreground)) !important;
-  stroke-opacity: 0.5;
-}
-
-.react-flow__edge.mindmap-edge .react-flow__edge-path {
-  stroke: hsl(var(--foreground)) !important;
-  stroke-opacity: 0.5;
-}
-
-/* Arrow markers */
-.react-flow__edge.mindmap-edge marker,
-.react-flow__edge.mindmap-edge marker path {
-  fill: hsl(var(--foreground)) !important;
-  stroke: hsl(var(--foreground)) !important;
-}
-
-/* Animated edge glow on hover */
-.react-flow__edge.mindmap-edge:hover path {
-  stroke-opacity: 0.8;
-}
-
 /* ReactFlow Controls styling for both modes */
 .react-flow__controls {
   background: hsl(var(--background)) !important;

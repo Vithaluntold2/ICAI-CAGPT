@@ -175,6 +175,19 @@ export class AIOrchestrator {
     // Step 2: Route to appropriate model and solvers
     const routingDecision = queryTriageService.routeQuery(classification, userTier, !!options?.attachment);
 
+    // Attachments are pre-extracted to text by documentAnalyzerAgent in Phase 1
+    // and inlined into the prompt. Azure Document Intelligence in the provider
+    // chain would then throw NO_DOCUMENT because we don't forward the buffer
+    // (see line ~683). Swap it out so we don't burn a guaranteed-failed request
+    // before falling through to Azure OpenAI.
+    if (routingDecision.preferredProvider === AIProviderName.AZURE_DOCUMENT_INTELLIGENCE) {
+      console.log('[Orchestrator] Swapping Azure DI → Azure OpenAI (document already pre-extracted)');
+      routingDecision.preferredProvider = AIProviderName.AZURE_OPENAI;
+      routingDecision.fallbackProviders = routingDecision.fallbackProviders.filter(
+        p => p !== AIProviderName.AZURE_OPENAI
+      );
+    }
+
     // Calculation mode emits sheet blocks with formula cell-refs. gpt-4o-mini
     // drifts on cell indexing (self-refs, off-by-one across rows) which lands
     // as #ERR in the rendered spreadsheet. Force gpt-4o for these requests.

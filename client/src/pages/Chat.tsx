@@ -41,11 +41,13 @@ import remarkMath from "remark-math";
 import remarkGfm from "remark-gfm";
 import rehypeKatex from "rehype-katex";
 import rehypeRaw from "rehype-raw";
+import rehypeHighlight from "rehype-highlight";
 import { rehypeArtifactPlaceholder } from "@/components/chat/rehypeArtifactPlaceholder";
 import { normalizeMath } from "@/lib/mathNormalizer";
 import { ArtifactRenderer } from "@/components/chat/artifacts/ArtifactRenderer";
 import { FlowchartArtifact } from "@/components/chat/artifacts/FlowchartArtifact";
 import { MindmapArtifact } from "@/components/chat/artifacts/MindmapArtifact";
+import { CodeBlockWithCopy } from "@/components/chat/CodeBlockWithCopy";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { 
   Table, 
@@ -161,6 +163,22 @@ interface Profile {
   name: string;
   type: 'business' | 'personal' | 'family';
   isDefault: boolean;
+}
+
+/**
+ * Recursive text extraction for ReactMarkdown code-block children.
+ * rehype-highlight wraps tokens in <span class="hljs-*">, so children may be
+ * a nested array of spans. For diagram blocks (mermaid/mindmap) we need the
+ * plain source string regardless of highlighting.
+ */
+function extractCodeText(node: React.ReactNode): string {
+  if (typeof node === "string") return node;
+  if (typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(extractCodeText).join("");
+  if (node && typeof node === "object" && "props" in node) {
+    return extractCodeText((node as any).props?.children);
+  }
+  return "";
 }
 
 export default function Chat() {
@@ -1372,27 +1390,36 @@ export default function Chat() {
                               {message.content ? (
                                 <ReactMarkdown
                                   remarkPlugins={[remarkMath, remarkGfm]}
-                                  rehypePlugins={[rehypeRaw, rehypeArtifactPlaceholder, rehypeKatex]}
+                                  rehypePlugins={[
+                                    rehypeRaw,
+                                    rehypeArtifactPlaceholder,
+                                    rehypeKatex,
+                                    // rehype-highlight wraps tokens in <span class="hljs-*">;
+                                    // ignoreMissing=true makes it a no-op for languages hljs
+                                    // doesn't ship (like 'mermaid' and 'mindmap'), so those still
+                                    // reach our custom <code> handler with plain-text children.
+                                    [rehypeHighlight, { ignoreMissing: true, detect: false }],
+                                  ]}
                                   components={{
                                     // Render fenced diagram blocks as actual diagrams instead of
                                     // raw code. Currently handled languages: ```mermaid (flowcharts
                                     // via FlowchartArtifact) and ```mindmap (JSON → MindmapArtifact).
-                                    // Other languages fall through to the default <code>.
-                                    code: ({ className, children, ...props }: any) => {
-                                      if (typeof className === "string" && /language-mermaid/.test(className)) {
-                                        const source = Array.isArray(children)
-                                          ? children.join("")
-                                          : String(children ?? "");
+                                    // Other fenced blocks render with syntax highlighting + copy button.
+                                    code: ({ className, children, inline, ...props }: any) => {
+                                      // Inline `code` spans keep default rendering
+                                      if (inline || typeof className !== "string") {
+                                        return <code className={className} {...props}>{children}</code>;
+                                      }
+                                      if (/language-mermaid/.test(className)) {
+                                        const source = extractCodeText(children);
                                         return (
                                           <div className="my-4 not-prose">
                                             <FlowchartArtifact payload={{ source }} />
                                           </div>
                                         );
                                       }
-                                      if (typeof className === "string" && /language-mindmap/.test(className)) {
-                                        const raw = Array.isArray(children)
-                                          ? children.join("")
-                                          : String(children ?? "");
+                                      if (/language-mindmap/.test(className)) {
+                                        const raw = extractCodeText(children);
                                         try {
                                           const payload = JSON.parse(raw);
                                           return (
@@ -1410,8 +1437,11 @@ export default function Chat() {
                                           );
                                         }
                                       }
-                                      return <code className={className} {...props}>{children}</code>;
+                                      // Fenced block with a recognised language → copy button + hljs styling
+                                      return <CodeBlockWithCopy className={className}>{children}</CodeBlockWithCopy>;
                                     },
+                                    // Suppress the default <pre> wrapper — CodeBlockWithCopy brings its own.
+                                    pre: ({ children }: any) => <>{children}</>,
                                     "artifact-placeholder": ({ id }: any) => {
                                       const artifact = artifactsData?.byId?.[id];
                                       if (!artifact) {

@@ -415,16 +415,32 @@ export class AIOrchestrator {
           console.log('[Orchestrator] AI-driven Excel model generated:', result.stats);
         } else {
           console.warn('[Orchestrator] AI Excel generation failed, falling back to legacy:', result.errors);
-          // Fall back to legacy generator
+          // Fall back to legacy generator — but ONLY if the heuristic parser
+          // actually detected something to generate. `parseUserRequest` uses
+          // regex pattern matching (DCF / NPV / tax / depreciation / etc.);
+          // queries that don't match any pattern produce an empty request and
+          // `createCalculationWorkbook` would write just the banner header
+          // with zero calculation content. That banner-only xlfx then gets
+          // cached and served on download — hence the "only green banner,
+          // no content" bug. If there's nothing to generate, let the AI's
+          // ```sheet``` block path (metadata.spreadsheetData) own the export.
           const spreadsheetRequest = await excelOrchestrator.parseUserRequest(enrichedQuery, undefined);
-          excelWorkbook = await excelOrchestrator.createCalculationWorkbook(spreadsheetRequest);
-          // Extract preview from legacy workbook
-          if (excelWorkbook.workbook) {
-            try {
-              spreadsheetPreviewData = excelOrchestrator.extractSpreadsheetPreview(excelWorkbook.workbook);
-            } catch (e) {
-              console.warn('[Orchestrator] Failed to extract spreadsheet preview:', e);
+          const hasRequestContent =
+            (spreadsheetRequest.calculations?.length ?? 0) > 0
+            || (spreadsheetRequest.tables?.length ?? 0) > 0
+            || (spreadsheetRequest.formulas?.length ?? 0) > 0
+            || (spreadsheetRequest.data?.length ?? 0) > 0;
+          if (hasRequestContent) {
+            excelWorkbook = await excelOrchestrator.createCalculationWorkbook(spreadsheetRequest);
+            if (excelWorkbook.workbook) {
+              try {
+                spreadsheetPreviewData = excelOrchestrator.extractSpreadsheetPreview(excelWorkbook.workbook);
+              } catch (e) {
+                console.warn('[Orchestrator] Failed to extract spreadsheet preview:', e);
+              }
             }
+          } else {
+            console.log('[Orchestrator] Skipping legacy xlsx — empty request, AI sheet blocks will handle download');
           }
         }
       } catch (error) {
@@ -475,16 +491,27 @@ export class AIOrchestrator {
             outputLocation: 'B80'
           });
         }
-        
-        excelWorkbook = await excelOrchestrator.createCalculationWorkbook(spreadsheetRequest);
-        console.log('[Orchestrator] Excel workbook generated with', excelWorkbook.formulasUsed.length, 'formulas');
-        // Extract preview from calculation workbook
-        if (excelWorkbook.workbook) {
-          try {
-            spreadsheetPreviewData = excelOrchestrator.extractSpreadsheetPreview(excelWorkbook.workbook);
-          } catch (e) {
-            console.warn('[Orchestrator] Failed to extract spreadsheet preview:', e);
+
+        // Only build the legacy xlsx if the merged request has something to
+        // render. Without this, queries that triggered calculation-mode but
+        // didn't populate a recognised calc type yield a banner-only file.
+        const hasRequestContent =
+          (spreadsheetRequest.calculations?.length ?? 0) > 0
+          || (spreadsheetRequest.tables?.length ?? 0) > 0
+          || (spreadsheetRequest.formulas?.length ?? 0) > 0
+          || (spreadsheetRequest.data?.length ?? 0) > 0;
+        if (hasRequestContent) {
+          excelWorkbook = await excelOrchestrator.createCalculationWorkbook(spreadsheetRequest);
+          console.log('[Orchestrator] Excel workbook generated with', excelWorkbook.formulasUsed.length, 'formulas');
+          if (excelWorkbook.workbook) {
+            try {
+              spreadsheetPreviewData = excelOrchestrator.extractSpreadsheetPreview(excelWorkbook.workbook);
+            } catch (e) {
+              console.warn('[Orchestrator] Failed to extract spreadsheet preview:', e);
+            }
           }
+        } else {
+          console.log('[Orchestrator] Skipping legacy xlsx — empty request, AI sheet blocks will handle download');
         }
       } catch (error) {
         console.error('[Orchestrator] Excel generation failed:', error);

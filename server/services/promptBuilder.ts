@@ -145,6 +145,15 @@ export class PromptBuilder {
       `VLOOKUP, XLOOKUP, NPV, IRR, PMT, FV, PV, SUMIFS, COUNTIFS all work.\n` +
       `• For payback period with a cumulative column J: \`=MATCH(TRUE, J2:J7>=0, 0)\` (plus adjustment ` +
       `for the offset) works and is portable.\n\n` +
+      `CSV CELL FORMAT inside \`\`\`sheet\`\`\` blocks:\n` +
+      `• Columns are separated by commas. Any CELL that itself contains a comma MUST be wrapped in ` +
+      `double quotes. This catches Indian-format numbers (₹3,00,000), ranges ("₹3,00,001 – ₹7,00,000"), ` +
+      `and anything with a thousands separator.\n` +
+      `• RIGHT:  Slab,Taxable portion,Tax\\n  "Up to ₹3,00,000",0,0\\n  "₹3,00,001 – ₹7,00,000","4,00,000",=B3*0.05\n` +
+      `• WRONG:  Up to ₹3,00,000,0,0   ← the comma in ₹3,00,000 splits this into 4 columns\n` +
+      `• Prefer plain integers without thousand separators for pure-numeric cells (e.g. \`400000\` ` +
+      `not \`4,00,000\`) — the renderer will format grouping on display. Only use grouping when the ` +
+      `cell is text (a label, a range, a description) and quote it.\n\n` +
       `NEVER write: "I cannot calculate", "Excel will compute this", "you'll need to run this ` +
       `in Excel", "the formula computes but I won't", or similar. The engine is always on. ` +
       `Write the formula; the user sees the number.\n\n` +

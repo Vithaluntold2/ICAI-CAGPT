@@ -177,21 +177,62 @@ function parseSheetBlock(body: string): ParsedBlock | null {
 /* ───────────────────────── helpers ───────────────────────── */
 
 /**
+ * Grouped-number patterns that the AI emits with commas INSIDE the number
+ * (Indian lakhs `₹3,00,000`, US/Western `$1,000,000`). The CSV splitter
+ * used to break on those commas and turn one cell into 3-4 fragments,
+ * wrecking row layouts and making formulas point to the wrong cells.
+ *
+ * We protect them by replacing internal commas with a unit separator (\x1F)
+ * before splitting, then restoring after. Pattern: currency/Rs/INR prefix
+ * OR a digit-followed-by-comma-followed-by-digits sequence long enough to
+ * look like a grouped number (not `a, b` in a formula).
+ *
+ * Match is intentionally conservative:
+ *   ✓ ₹3,00,000    ✓ ₹1,500,000   ✓ $1,234,567.89
+ *   ✓ 3,00,000     ✓ 1,000,000    ✓ 75,000
+ *   ✗ a, b         ✗ name, dept   ✗ hello, world
+ *
+ * Two-digit trailing group (`3,00`) wouldn't match — those are too
+ * ambiguous to disambiguate from prose commas, so the AI needs to quote
+ * those cells. The common cases (lakhs and millions) are handled.
+ */
+// Lookbehind/ahead guards keep the match on complete numbers only. Without
+// them, a plain comma-separated number pair like "400000,20000" would get
+// partially matched (e.g. the "0,200" slice of it) and its internal comma
+// protected — fusing two real cells into one. The guards require:
+//   - no digit immediately before the start (so we don't pick up a
+//     fragment of a longer number)
+//   - no digit immediately after the end (ditto for trailing)
+const PROTECT_NUMBER_RE =
+  /(?<![0-9])(?:[₹$€£]|Rs\.?\s*|INR\s*)?\d{1,3}(?:,\d{2,3})+(?:\.\d+)?(?![0-9])/g;
+const COMMA_PLACEHOLDER = '\x1F';
+
+function protectGroupedNumbers(line: string): string {
+  return line.replace(PROTECT_NUMBER_RE, match => match.replace(/,/g, COMMA_PLACEHOLDER));
+}
+
+function restoreGroupedNumbers(cell: string): string {
+  return cell.replace(new RegExp(COMMA_PLACEHOLDER, 'g'), ',');
+}
+
+/**
  * CSV splitter that respects BOTH quoted fields AND formula paren depth.
  * The AI doesn't reliably quote cells containing commas inside Excel formulas,
  * so when we're inside a formula's parentheses (e.g. `=IF(a, b, c)`,
  * `=NPV(rate, range)`, `=LAMBDA(a, b, a+b)`), commas are literal, not
- * separators.
+ * separators. Same protection for grouped numbers like `₹3,00,000`.
  */
 function splitCsvLine(line: string): string[] {
+  // Shield grouped-number commas before we look for delimiters.
+  const protectedLine = protectGroupedNumbers(line);
   const out: string[] = [];
   let cur = '';
   let inQuotes = false;
   let parenDepth = 0;
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
+  for (let i = 0; i < protectedLine.length; i++) {
+    const ch = protectedLine[i];
     if (inQuotes) {
-      if (ch === '"' && line[i + 1] === '"') { cur += '"'; i++; }
+      if (ch === '"' && protectedLine[i + 1] === '"') { cur += '"'; i++; }
       else if (ch === '"') { inQuotes = false; }
       else { cur += ch; }
     } else {
@@ -203,7 +244,7 @@ function splitCsvLine(line: string): string[] {
     }
   }
   out.push(cur);
-  return out.map(s => s.trim());
+  return out.map(s => restoreGroupedNumbers(s).trim());
 }
 
 function coerceCell(v: unknown): string | number | null {

@@ -1354,6 +1354,7 @@ export default function Chat() {
                 byId={artifactsData?.byId ?? {}}
                 onSend={(text, selection) => handleSend(text, selection)}
                 isStreaming={isStreaming || sendMessageMutation.isPending}
+                conversationId={activeConversation}
               />
             </div>
           ) : (

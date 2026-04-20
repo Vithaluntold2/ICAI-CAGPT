@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { useConversationArtifacts } from "@/hooks/useConversationArtifacts";
 import { useMultiSelection } from "./useMultiSelection";
 import { useSelectionContext } from "./useSelectionContext";
@@ -12,6 +12,23 @@ export function Whiteboard({ conversationId }: { conversationId: string }) {
   const { selected, click, clear } = useMultiSelection(orderedIds);
   const setArtifacts = useSelectionContext(s => s.setArtifacts);
   const artifacts = data?.artifacts ?? [];
+
+  // Cmd/Ctrl+K — when there is a multi-selection, push it into the
+  // composer's selection context and focus the PIP composer textarea.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const isK = e.key === "k" || e.key === "K";
+      if (!isK) return;
+      if (!(e.metaKey || e.ctrlKey)) return;
+      if (selected.size === 0) return;
+      e.preventDefault();
+      setArtifacts([...selected]);
+      const el = document.querySelector<HTMLTextAreaElement>('[data-testid="composer-input"]');
+      el?.focus();
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [selected, setArtifacts]);
 
   if (artifacts.length === 0) {
     return (

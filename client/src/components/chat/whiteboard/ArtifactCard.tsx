@@ -90,15 +90,10 @@ export function ArtifactCard({
           </DropdownMenu>
         </div>
       </div>
-      {/* Inner scroll container. `overflow-auto` is intentional — not every
-          renderer manages its own scroll, and Recharts' ResponsiveContainer
-          forces a fixed height (e.g. 400px) which would get silently clipped
-          by `overflow-hidden` when the stored card minHeight is smaller.
-          Renderers that DO scroll internally (spreadsheet viewer) don't
-          double-scroll because their content fits inside this area's size;
-          the outer scrollbar only appears when their intrinsic size exceeds
-          the card. */}
-      <div className="flex-1 min-h-0 overflow-auto relative">
+      <div className="p-2 flex-1 overflow-auto">
+        {/* `embedded` tells the child renderers that this card already shows
+            the title + kind + menu in its own header — so they should suppress
+            their own redundant title chrome to avoid duplication. */}
         <ArtifactRenderer artifact={artifact} conversationId={conversationId} embedded />
       </div>
     </div>

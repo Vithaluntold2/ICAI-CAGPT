@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Download, Maximize2, Minimize2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import MindMapRenderer from "../../visualizations/MindMapRenderer";
 
-function MindmapArtifactInner({ payload, embedded = false }: { payload: any; embedded?: boolean }) {
+export function MindmapArtifact({ payload, embedded = false }: { payload: any; embedded?: boolean }) {
   const bodyRef = useRef<HTMLDivElement>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
@@ -80,24 +80,20 @@ function MindmapArtifactInner({ payload, embedded = false }: { payload: any; emb
     };
   }, [isFullscreen]);
 
-  // Container style: three layouts here.
-  //   - fullscreen:  portal + fixed inset-0 overlay (escapes whiteboard transform).
-  //   - embedded:    fills the ArtifactCard exactly, no own border (card has it).
-  //   - standalone:  provides its own card chrome (for chat inline rendering).
-  // Fullscreen is later portalled to <body> so its `fixed` positioning escapes
-  // any transformed ancestor (whiteboard applies CSS transforms, which would
-  // otherwise scope `fixed` to the canvas instead of the viewport).
+  // Container style: in-place card vs a full-viewport overlay. Fullscreen is
+  // later portalled to <body> so its `fixed` positioning escapes any
+  // transformed ancestor (the whiteboard canvas applies CSS transforms, which
+  // would otherwise scope `fixed` to the canvas instead of the viewport).
   const containerClass = isFullscreen
-    ? "fixed inset-0 z-50 bg-card flex flex-col"
-    : embedded
-      ? "relative h-full w-full"
-      : "bg-card border rounded-lg p-4 relative";
+    ? "fixed inset-0 z-50 bg-card p-4 flex flex-col"
+    : "bg-card border rounded-lg p-4 relative";
 
-  // MindMapRenderer's own root is `h-[600px]` — override it to `h-full w-full`
-  // on the first descendant div so the renderer stretches to its parent in
-  // fullscreen and embedded modes.
-  const bodyClass = isFullscreen || embedded
-    ? "h-full w-full [&>div:first-child]:!h-full [&>div:first-child]:!w-full"
+  // When fullscreen, the inner MindMapRenderer needs to fill the whole
+  // overlay. MindMapRenderer's own root is `h-[600px]` — we override it to
+  // `h-full w-full` on the first descendant div so the renderer stretches
+  // to its parent without touching its source.
+  const bodyClass = isFullscreen
+    ? "flex-1 min-h-0 [&>div:first-child]:!h-full [&>div:first-child]:!w-full"
     : "";
 
   const tree = (
@@ -148,17 +144,3 @@ function MindmapArtifactInner({ payload, embedded = false }: { payload: any; emb
 
   return isFullscreen ? createPortal(tree, document.body) : tree;
 }
-
-/**
- * Memoised export. The inner component's `payload` prop is a parsed JSON
- * object — when the source string is the same, callers (Chat.tsx,
- * ArtifactRenderer) must hand us the same reference or React.memo won't
- * help. MindmapCodeBlock / ChartMessageRich already memoise their parse;
- * the whiteboard artifact row naturally caches its payload.
- *
- * Without this memo, every parent re-render (e.g. the user typing in the
- * composer causing Chat.tsx to re-render) walks into MindMapRenderer's
- * useEffect, re-runs the dagre layout, calls setNodes/setEdges, and
- * ReactFlow visibly "flashes" the mindmap.
- */
-export const MindmapArtifact = memo(MindmapArtifactInner);

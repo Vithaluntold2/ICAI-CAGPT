@@ -31,12 +31,7 @@ export default function FinancialLineChart({
       {title && (
         <h3 className="text-lg font-semibold mb-4 text-center">{title}</h3>
       )}
-      {/* Explicit pixel height on the wrapper gives ResponsiveContainer a
-          stable measurement baseline. Without it, flex-layout parents can
-          report 0×0 on first paint and Recharts renders title+legend with
-          an invisible plot area, never recovering. */}
-      <div style={{ width: '100%', height: 400 }}>
-      <ResponsiveContainer width="100%" height="100%">
+      <ResponsiveContainer width="100%" height={400}>
         <LineChart data={data} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
           <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
           <XAxis 
@@ -72,7 +67,6 @@ export default function FinancialLineChart({
           ))}
         </LineChart>
       </ResponsiveContainer>
-      </div>
     </div>
   );
 }

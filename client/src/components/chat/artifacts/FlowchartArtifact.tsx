@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -69,13 +69,7 @@ function normalizeMermaidSource(src: string): string {
   return out.trim();
 }
 
-function FlowchartArtifactInner({
-  payload,
-  embedded = false,
-}: {
-  payload: { source: string };
-  embedded?: boolean;
-}) {
+export function FlowchartArtifact({ payload }: { payload: { source: string } }) {
   const ref = useRef<HTMLDivElement>(null);
   const [status, setStatus] = useState<"idle" | "rendering" | "ok" | "error">("idle");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -178,57 +172,37 @@ function FlowchartArtifactInner({
     );
   }
 
-  const toolbar = status === "ok" ? (
-    <div className="absolute top-2 right-2 z-10 flex items-center gap-0.5 rounded-md border bg-background shadow-sm">
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            size="sm"
-            variant="ghost"
-            className="h-7 w-7 p-0"
-            title="Download…"
-            data-testid="flowchart-download"
-          >
-            <Download className="h-3.5 w-3.5" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuItem onClick={() => handleExport("png")}>
-            PNG image
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => handleExport("svg")}>
-            SVG image
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </div>
-  ) : null;
-
-  const body = (
-    <>
+  return (
+    <div className="relative w-full h-full overflow-auto">
       {status === "rendering" && (
         <div className="p-3 text-xs text-muted-foreground italic">Rendering…</div>
       )}
-      {toolbar}
+      {status === "ok" && (
+        <div className="absolute top-2 right-2 z-10">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 w-7 p-0 bg-background/90 backdrop-blur shadow-sm"
+                title="Download…"
+                data-testid="flowchart-download"
+              >
+                <Download className="h-3.5 w-3.5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => handleExport("png")}>
+                PNG image
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleExport("svg")}>
+                SVG image
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      )}
       <div ref={ref} className="flex justify-center items-start p-2" />
-    </>
-  );
-
-  // Same container for embedded and standalone — mermaid renders an SVG with
-  // intrinsic size; a wrapping card-with-max-h collapses the SVG inside a
-  // zero-height parent. The mermaid SVG itself carries the visible box.
-  return (
-    <div className="relative w-full h-full overflow-auto" data-embedded={embedded || undefined}>
-      {body}
     </div>
   );
 }
-
-/**
- * Memoised public export. Without memo, every parent re-render (e.g. Chat
- * re-rendering on each composer keystroke) runs mermaid.render() again,
- * briefly wiping and redrawing the SVG — looks like the diagram is flashing.
- * Callers (MindmapCodeBlock / ArtifactRenderer) hand us a stable
- * `{ source }` payload so React.memo short-circuits cleanly.
- */
-export const FlowchartArtifact = memo(FlowchartArtifactInner);

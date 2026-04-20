@@ -3,12 +3,7 @@
  * Polished mindmap component rivaling VisualMind with animations and interactivity
  */
 
-import { memo, useEffect, useRef, useState, useMemo } from 'react';
-// ReactFlow base stylesheet is required — without it, nodes render without
-// dimensions and edges route to nowhere, producing a visually-empty canvas.
-// (WorkflowRenderer imports the same file; mindmap was relying on workflow
-// being loaded first, which breaks on pages with only mindmaps.)
-import '@xyflow/react/dist/style.css';
+import { useEffect, useState, useMemo } from 'react';
 import {
   ReactFlow,
   Node,
@@ -40,17 +35,12 @@ interface MindMapRendererProps {
 /**
  * Custom node component with clean styling
  */
-function MindMapNode({ data }: { data: any }) {
+function MindMapNode({ data }: { data: MindMapNode }) {
   const [isHovered, setIsHovered] = useState(false);
 
-  // Layout algorithms pass the original node.type as `data.nodeType` (because
-  // ReactFlow reserves `type` on the outer node record). Read `nodeType` here
-  // with `type` as a fallback — without this, every node falls through to the
-  // "leaf" style which is `bg-background text-foreground`, i.e. identical to
-  // the canvas background → invisible in both light and dark modes.
   const getNodeStyles = () => {
     const baseStyles = 'transition-all duration-200 rounded-lg border shadow-sm';
-    const nodeType = data.nodeType || data.type || 'leaf';
+    const nodeType = data.type || 'leaf';
     
     // Clean monochromatic styling that works in both modes
     const styleMap: Record<string, string> = {
@@ -66,11 +56,8 @@ function MindMapNode({ data }: { data: any }) {
     }`;
   };
 
-  // Same nodeType-vs-type mismatch as getNodeStyles above.
-  const resolvedType = data.nodeType || data.type;
-
   const getSizeClass = () => {
-    switch (resolvedType) {
+    switch (data.type) {
       case 'root': return 'px-6 py-4 min-w-[200px]';
       case 'primary': return 'px-5 py-3 min-w-[160px]';
       case 'secondary': return 'px-4 py-2.5 min-w-[140px]';
@@ -80,7 +67,7 @@ function MindMapNode({ data }: { data: any }) {
   };
 
   const getFontSize = () => {
-    switch (resolvedType) {
+    switch (data.type) {
       case 'root': return 'text-base font-semibold';
       case 'primary': return 'text-sm font-medium';
       case 'secondary': return 'text-sm';
@@ -93,9 +80,6 @@ function MindMapNode({ data }: { data: any }) {
       className={`${getNodeStyles()} ${getSizeClass()} relative`}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
-      data-mindmap-node-type={resolvedType ?? "UNSET"}
-      data-mindmap-raw-type={data.type ?? "NONE"}
-      data-mindmap-raw-nodetype={data.nodeType ?? "NONE"}
     >
       {/* @xyflow/react requires custom nodes to declare their connection points.
           Without <Handle> elements, edges are silently dropped. We expose both
@@ -399,19 +383,13 @@ function MindMapRendererInner({ data, embedded = false }: MindMapRendererProps) 
   const [nodes, setNodes, onNodesChange] = useNodesState(layoutNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(layoutEdges);
   const { fitView } = useReactFlow();
-  const canvasWrapperRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setNodes(layoutNodes);
     setEdges(layoutEdges);
-    // fitView only makes sense in non-embedded contexts where the container
-    // has a stable pixel size at mount. In embedded mode we rely on
-    // defaultViewport at a fixed zoom (see the ReactFlow component below) to
-    // dodge the late-measurement bug entirely.
-    if (!embedded) {
-      setTimeout(() => fitView({ padding: 0.2, duration: 800 }), 100);
-    }
-  }, [layoutNodes, layoutEdges, setNodes, setEdges, fitView, embedded]);
+    // Fit view after layout
+    setTimeout(() => fitView({ padding: 0.2, duration: 800 }), 100);
+  }, [layoutNodes, layoutEdges, setNodes, setEdges, fitView]);
 
   // Header is rendered only when a title is present AND we're not embedded
   // inside an outer artifact card (which already shows the title). Action
@@ -438,7 +416,7 @@ function MindMapRendererInner({ data, embedded = false }: MindMapRendererProps) 
   }
 
   return (
-    <div className={`relative overflow-hidden bg-background ${embedded ? "w-full h-full" : "w-full h-[600px] border border-border rounded-lg"}`}>
+    <div className="w-full h-[600px] relative border border-border rounded-lg overflow-hidden bg-background">
       {showHeader && (
         <div className="absolute top-0 left-0 right-0 z-10 bg-background/95 backdrop-blur border-b border-border px-4 py-3">
           <h3 className="text-sm font-medium">{data.title}</h3>
@@ -449,29 +427,18 @@ function MindMapRendererInner({ data, embedded = false }: MindMapRendererProps) 
       )}
 
       {/* ReactFlow Canvas */}
-      <div
-        ref={canvasWrapperRef}
-        className={showHeader ? 'h-[calc(100%-60px)] mt-[60px]' : 'h-full'}
-      >
+      <div className={showHeader ? 'h-[calc(100%-60px)] mt-[60px]' : 'h-full'}>
         <ReactFlow
           nodes={nodes}
           edges={edges}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           nodeTypes={nodeTypes}
-          // fitView is deliberately OFF in embedded mode. Inside the
-          // whiteboard's CSS-transformed canvas, ReactFlow's initial
-          // measurement of our parent's size is unreliable and fitView locks
-          // in a tiny scale (~0.31) that it never recovers from, even with
-          // ResizeObserver re-fits. We opt for a stable defaultViewport at
-          // readable zoom instead — user pans / uses Controls to explore.
-          // Standalone (chat) and fullscreen paths still fitView since their
-          // containers have a stable pixel size at mount.
-          fitView={!embedded}
+          fitView
           fitViewOptions={{
             padding: 0.2,
             maxZoom: 1.5,
-            minZoom: 0.5,
+            minZoom: 0.3,
           }}
           nodesDraggable={true}
           nodesConnectable={false}
@@ -480,7 +447,7 @@ function MindMapRendererInner({ data, embedded = false }: MindMapRendererProps) 
           zoomOnScroll={true}
           minZoom={0.2}
           maxZoom={2.5}
-          defaultViewport={embedded ? { x: 40, y: 40, zoom: 0.8 } : { x: 0, y: 0, zoom: 1 }}
+          defaultViewport={{ x: 0, y: 0, zoom: 1 }}
         >
           <Background gap={20} size={1} />
           <Controls
@@ -498,20 +465,10 @@ function MindMapRendererInner({ data, embedded = false }: MindMapRendererProps) 
   );
 }
 
-/**
- * Memoised public API for MindMapRenderer. Without memo, every parent
- * re-render (e.g. Chat re-rendering on each composer keystroke) walks into
- * MindMapRendererInner's useEffect, re-runs the dagre layout, and calls
- * setNodes/setEdges — ReactFlow visibly "flashes" the mindmap. memo
- * short-circuits when `data` and `embedded` are reference-equal; callers
- * are responsible for handing us a stable `data` reference.
- */
-const MindMapRenderer = memo(function MindMapRenderer(props: MindMapRendererProps) {
+export default function MindMapRenderer(props: MindMapRendererProps) {
   return (
     <ReactFlowProvider>
       <MindMapRendererInner {...props} />
     </ReactFlowProvider>
   );
-});
-
-export default MindMapRenderer;
+}

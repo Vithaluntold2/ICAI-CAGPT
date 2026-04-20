@@ -39,9 +39,7 @@ export default function FinancialPieChart({
       {title && (
         <h3 className="text-lg font-semibold mb-4 text-center">{title}</h3>
       )}
-      {/* Explicit pixel height — see FinancialLineChart for the rationale. */}
-      <div style={{ width: '100%', height: 400 }}>
-      <ResponsiveContainer width="100%" height="100%">
+      <ResponsiveContainer width="100%" height={400}>
         <PieChart>
           <Pie
             data={data}
@@ -71,7 +69,6 @@ export default function FinancialPieChart({
           <Legend />
         </PieChart>
       </ResponsiveContainer>
-      </div>
     </div>
   );
 }

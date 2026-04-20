@@ -2,7 +2,6 @@ import { useCallback, useRef } from "react";
 import { Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import VisualizationRenderer, { type ChartData } from "../../visualizations/VisualizationRenderer";
-import { ArtifactToolbar } from "./ArtifactToolbar";
 
 export function ChartArtifact({
   payload,
@@ -22,54 +21,38 @@ export function ChartArtifact({
         pixelRatio: 2,
         backgroundColor: "#ffffff",
         cacheBust: true,
+        // html-to-image@1.11.x crashes on `font.trim()` during @font-face
+        // embedding when the computed font shorthand is undefined; skipping
+        // fonts avoids that code path. Snapshot still uses system fonts.
         skipFonts: true,
       });
       const a = document.createElement("a");
       a.href = dataUrl;
-      const base = ((payload as any)?.title || "chart").replace(/[^a-z0-9_-]+/gi, "_");
+      const base = (payload?.title || "chart").replace(/[^a-z0-9_-]+/gi, "_");
       a.download = `${base}.png`;
       a.click();
     } catch (err) {
       console.error("[ChartArtifact] PNG export failed:", err);
     }
-  }, [payload]);
+  }, [payload?.title]);
 
-  // Embedded mode (inside ArtifactCard on the whiteboard): the card owns the
-  // border + header + background, so we render the chart directly with just
-  // the floating toolbar. Standalone mode (inline in chat): we provide our
-  // own card chrome so the chart doesn't look naked in the conversation.
-  const toolbar = (
-    <ArtifactToolbar>
-      <Button
-        size="sm"
-        variant="ghost"
-        className="h-7 w-7 p-0"
-        onClick={handleDownload}
-        title="Download as PNG"
-        data-testid="chart-download"
-      >
-        <Download className="h-3.5 w-3.5" />
-      </Button>
-    </ArtifactToolbar>
-  );
-
-  if (embedded) {
-    return (
-      <div ref={bodyRef} className="relative h-full w-full overflow-auto">
-        {toolbar}
-        <VisualizationRenderer chartData={payload} embedded />
-      </div>
-    );
-  }
-
-  // Standalone (chat inline): padding keeps the chart off the border, and
-  // VisualizationRenderer's internal responsive containers need a measurable
-  // box. p-4 plus the chart's own height gives the wrapper a real size in a
-  // zero-height parent (the .my-4 not-prose div in chat markdown).
   return (
-    <div ref={bodyRef} className="relative bg-card border rounded-lg p-4">
-      {toolbar}
-      <VisualizationRenderer chartData={payload} />
+    <div className="bg-card border rounded-lg p-4 relative">
+      <div className="absolute top-2 right-2 z-10">
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 w-7 p-0 bg-background/90 backdrop-blur shadow-sm"
+          onClick={handleDownload}
+          title="Download as PNG"
+          data-testid="chart-download"
+        >
+          <Download className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+      <div ref={bodyRef}>
+        <VisualizationRenderer chartData={payload} embedded={embedded} />
+      </div>
     </div>
   );
 }

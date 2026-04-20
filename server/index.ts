@@ -403,8 +403,8 @@ app.use((req, res, next) => {
     host,
   };
   
-  // Only enable reusePort on non-Windows systems
-  if (process.platform !== 'win32') {
+  // reusePort is unsupported on Windows and unreliable on macOS (ENOTSUP)
+  if (process.platform !== 'win32' && process.platform !== 'darwin') {
     listenOptions.reusePort = true;
   }
   

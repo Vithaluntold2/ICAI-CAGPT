@@ -58,7 +58,7 @@ export interface ConditionalFormat {
 }
 
 export interface CalculationRequest {
-  type: 'tax' | 'npv' | 'irr' | 'depreciation' | 'amortization' | 'loan' | 'custom';
+  type: 'tax' | 'tax-india-regime' | 'npv' | 'irr' | 'depreciation' | 'amortization' | 'loan' | 'custom';
   inputs: Record<string, number | string>;
   outputLocation?: string;
 }
@@ -145,7 +145,34 @@ export class ExcelOrchestrator {
     }
 
     // Extract calculation requirements (existing logic)
-    if (queryLower.includes('tax')) {
+    // Indian-tax regime comparison takes precedence over generic US tax template
+    const indianTaxSignal = /old regime|new regime|115\s*bac|\b80\s*c\b|\b80\s*d\b|\bhra\b|\bfy\s*\d{4}|\bay\s*\d{4}|₹|rupee|\bindian?\b/i;
+    const indianTaxDetected = indianTaxSignal.test(userQuery);
+
+    if (indianTaxDetected) {
+      const parseRupee = (raw: string | undefined): number | undefined => {
+        if (!raw) return undefined;
+        const digits = raw.replace(/[^\d]/g, '');
+        return digits ? parseInt(digits, 10) : undefined;
+      };
+      const grab = (re: RegExp): number | undefined =>
+        parseRupee(userQuery.match(re)?.[1]);
+
+      const inputs: Record<string, number> = {
+        gross: grab(/gross(?:\s+total)?\s+income[^₹\d]*(?:₹|rs\.?|inr)?\s*([\d,]+)/i) ?? 2500000,
+        hra: grab(/hra[^₹\d]*(?:₹|rs\.?)?\s*([\d,]+)/i) ?? 0,
+        sec80c: grab(/80\s*c[^₹\d]*(?:₹|rs\.?)?\s*([\d,]+)/i) ?? 0,
+        sec80d: grab(/80\s*d[^₹\d]*(?:₹|rs\.?)?\s*([\d,]+)/i) ?? 0,
+        stdOld: 50000,
+        stdNew: 75000,
+      };
+
+      request.calculations?.push({
+        type: 'tax-india-regime',
+        inputs,
+        outputLocation: 'A1',
+      });
+    } else if (queryLower.includes('tax')) {
       request.calculations?.push({
         type: 'tax',
         inputs: {},
@@ -364,6 +391,8 @@ ${macro.code}
     switch (calc.type) {
       case 'tax':
         return this.addTaxCalculation(sheet, calc.inputs, currentRow);
+      case 'tax-india-regime':
+        return this.addIndianTaxRegimeComparison(sheet, calc.inputs, currentRow);
       case 'npv':
         return this.addNPVCalculation(sheet, calc.inputs, currentRow);
       case 'irr':
@@ -436,24 +465,24 @@ ${macro.code}
     sheet.getCell(`B${row}`).numFmt = '0.00%';
     row++;
 
-    // Federal Tax Calculated
+    // Federal Tax Calculated = Taxable Income × Federal Rate
     sheet.getCell(`A${row}`).value = 'Federal Tax';
-    sheet.getCell(`B${row}`).value = { formula: `B${row - 2}*B${row - 1}` };
-    sheet.getCell(`B${row}`).numFmt = '$#,##0.00';
-    formulas.push({
-      cell: `B${row}`,
-      formula: `B${row - 2}*B${row - 1}`,
-      description: 'Taxable Income × Federal Rate'
-    });
-    row++;
-
-    // State Tax Calculated
-    sheet.getCell(`A${row}`).value = 'State Tax';
     sheet.getCell(`B${row}`).value = { formula: `B${row - 3}*B${row - 2}` };
     sheet.getCell(`B${row}`).numFmt = '$#,##0.00';
     formulas.push({
       cell: `B${row}`,
       formula: `B${row - 3}*B${row - 2}`,
+      description: 'Taxable Income × Federal Rate'
+    });
+    row++;
+
+    // State Tax Calculated = Taxable Income × State Rate
+    sheet.getCell(`A${row}`).value = 'State Tax';
+    sheet.getCell(`B${row}`).value = { formula: `B${row - 4}*B${row - 2}` };
+    sheet.getCell(`B${row}`).numFmt = '$#,##0.00';
+    formulas.push({
+      cell: `B${row}`,
+      formula: `B${row - 4}*B${row - 2}`,
       description: 'Taxable Income × State Rate'
     });
     row++;
@@ -476,17 +505,244 @@ ${macro.code}
     });
     row++;
 
-    // Effective Tax Rate
+    // Effective Tax Rate = Total Tax ÷ Taxable Income
     sheet.getCell(`A${row}`).value = 'Effective Tax Rate';
-    sheet.getCell(`B${row}`).value = { formula: `B${row - 1}/B${row - 5}` };
+    sheet.getCell(`B${row}`).value = { formula: `B${row - 1}/B${row - 6}` };
     sheet.getCell(`B${row}`).numFmt = '0.00%';
     formulas.push({
       cell: `B${row}`,
-      formula: `B${row - 1}/B${row - 5}`,
+      formula: `B${row - 1}/B${row - 6}`,
       description: 'Total Tax ÷ Taxable Income'
     });
 
     return { formulas, nextRow: row + 3 };
+  }
+
+  /**
+   * Add Indian tax regime comparison (Old vs New under s.115BAC) for FY 2024-25
+   * Renders side-by-side slab-wise tax with cess, 87A rebate, and tax-saving delta.
+   * Expected inputs: gross, hra, sec80c, sec80d, stdOld, stdNew
+   */
+  private addIndianTaxRegimeComparison(
+    sheet: ExcelJS.Worksheet,
+    inputs: Record<string, any>,
+    startRow: number
+  ): { formulas: FormulaDefinition[]; nextRow: number } {
+    const formulas: FormulaDefinition[] = [];
+    const n = (v: any, fallback: number): number =>
+      typeof v === 'number' && !Number.isNaN(v) ? v : fallback;
+
+    const gross = n(inputs.gross, 2500000);
+    const hra = n(inputs.hra, 0);
+    const sec80c = n(inputs.sec80c, 0);
+    const sec80d = n(inputs.sec80d, 0);
+    const stdOld = n(inputs.stdOld, 50000);
+    const stdNew = n(inputs.stdNew, 75000);
+
+    let row = startRow;
+
+    sheet.mergeCells(`A${row}:C${row}`);
+    const title = sheet.getCell(`A${row}`);
+    title.value = 'Tax Regime Comparison – FY 2024-25 (AY 2025-26)';
+    title.font = { bold: true, size: 14, color: { argb: 'FFFFFFFF' } };
+    title.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E40AF' } };
+    title.alignment = { horizontal: 'center' };
+    row += 2;
+
+    const header = (label: string, colB: string, colC: string) => {
+      sheet.getCell(`A${row}`).value = label;
+      sheet.getCell(`B${row}`).value = colB;
+      sheet.getCell(`C${row}`).value = colC;
+      ['A', 'B', 'C'].forEach(c => {
+        const cell = sheet.getCell(`${c}${row}`);
+        cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF374151' } };
+        cell.alignment = { horizontal: c === 'A' ? 'left' : 'right' };
+      });
+      row++;
+    };
+    header('Particulars', 'Old Regime (₹)', 'New Regime – 115BAC (₹)');
+
+    const rupee = '₹#,##0';
+    const putMoney = (col: 'B' | 'C', value: number | { formula: string }) => {
+      const cell = sheet.getCell(`${col}${row}`);
+      cell.value = value as any;
+      cell.numFmt = rupee;
+    };
+
+    const grossRow = row;
+    sheet.getCell(`A${row}`).value = 'Gross Total Income';
+    putMoney('B', gross);
+    putMoney('C', gross);
+    row++;
+
+    const stdRow = row;
+    sheet.getCell(`A${row}`).value = 'Less: Standard Deduction';
+    putMoney('B', stdOld);
+    putMoney('C', stdNew);
+    row++;
+
+    const hraRow = row;
+    sheet.getCell(`A${row}`).value = 'Less: HRA Exemption u/s 10(13A)';
+    putMoney('B', hra);
+    putMoney('C', 0);
+    row++;
+
+    const c80Row = row;
+    sheet.getCell(`A${row}`).value = 'Less: Deduction u/s 80C';
+    putMoney('B', sec80c);
+    putMoney('C', 0);
+    row++;
+
+    const d80Row = row;
+    sheet.getCell(`A${row}`).value = 'Less: Deduction u/s 80D';
+    putMoney('B', sec80d);
+    putMoney('C', 0);
+    row++;
+
+    const taxableRow = row;
+    sheet.getCell(`A${row}`).value = 'Taxable Income';
+    sheet.getCell(`A${row}`).font = { bold: true };
+    const taxableB = `B${grossRow}-B${stdRow}-B${hraRow}-B${c80Row}-B${d80Row}`;
+    const taxableC = `C${grossRow}-C${stdRow}-C${hraRow}-C${c80Row}-C${d80Row}`;
+    sheet.getCell(`B${row}`).value = { formula: taxableB } as any;
+    sheet.getCell(`B${row}`).numFmt = rupee;
+    sheet.getCell(`B${row}`).font = { bold: true };
+    sheet.getCell(`C${row}`).value = { formula: taxableC } as any;
+    sheet.getCell(`C${row}`).numFmt = rupee;
+    sheet.getCell(`C${row}`).font = { bold: true };
+    formulas.push({ cell: `B${row}`, formula: taxableB, description: 'Old Regime taxable income' });
+    formulas.push({ cell: `C${row}`, formula: taxableC, description: 'New Regime taxable income' });
+    row += 2;
+
+    sheet.getCell(`A${row}`).value = 'Tax on Slabs';
+    sheet.getCell(`A${row}`).font = { bold: true, italic: true };
+    row++;
+
+    // Old Regime slabs (Individual <60, FY 2024-25): 0/5%/20%/30% with breakpoints 2.5L/5L/10L
+    const slabOld: Array<[string, string]> = [
+      ['  Up to ₹2,50,000 @ Nil', `MAX(0,MIN(B${taxableRow},250000))*0`],
+      ['  ₹2,50,001 – ₹5,00,000 @ 5%', `MAX(0,MIN(B${taxableRow},500000)-250000)*0.05`],
+      ['  ₹5,00,001 – ₹10,00,000 @ 20%', `MAX(0,MIN(B${taxableRow},1000000)-500000)*0.20`],
+      ['  Above ₹10,00,000 @ 30%', `MAX(0,B${taxableRow}-1000000)*0.30`],
+    ];
+    const oldSlabStart = row;
+    slabOld.forEach(([label, f]) => {
+      sheet.getCell(`A${row}`).value = label;
+      sheet.getCell(`B${row}`).value = { formula: f } as any;
+      sheet.getCell(`B${row}`).numFmt = rupee;
+      sheet.getCell(`C${row}`).value = '—';
+      sheet.getCell(`C${row}`).alignment = { horizontal: 'right' };
+      formulas.push({ cell: `B${row}`, formula: f, description: `Old regime slab: ${label.trim()}` });
+      row++;
+    });
+    const oldSlabEnd = row - 1;
+
+    // New Regime slabs (115BAC, Budget July 2024): 0/5/10/15/20/30 with 3L/7L/10L/12L/15L
+    const slabNew: Array<[string, string]> = [
+      ['  Up to ₹3,00,000 @ Nil', `MAX(0,MIN(C${taxableRow},300000))*0`],
+      ['  ₹3,00,001 – ₹7,00,000 @ 5%', `MAX(0,MIN(C${taxableRow},700000)-300000)*0.05`],
+      ['  ₹7,00,001 – ₹10,00,000 @ 10%', `MAX(0,MIN(C${taxableRow},1000000)-700000)*0.10`],
+      ['  ₹10,00,001 – ₹12,00,000 @ 15%', `MAX(0,MIN(C${taxableRow},1200000)-1000000)*0.15`],
+      ['  ₹12,00,001 – ₹15,00,000 @ 20%', `MAX(0,MIN(C${taxableRow},1500000)-1200000)*0.20`],
+      ['  Above ₹15,00,000 @ 30%', `MAX(0,C${taxableRow}-1500000)*0.30`],
+    ];
+    const newSlabStart = row;
+    slabNew.forEach(([label, f]) => {
+      sheet.getCell(`A${row}`).value = label;
+      sheet.getCell(`B${row}`).value = '—';
+      sheet.getCell(`B${row}`).alignment = { horizontal: 'right' };
+      sheet.getCell(`C${row}`).value = { formula: f } as any;
+      sheet.getCell(`C${row}`).numFmt = rupee;
+      formulas.push({ cell: `C${row}`, formula: f, description: `New regime slab: ${label.trim()}` });
+      row++;
+    });
+    const newSlabEnd = row - 1;
+    row++;
+
+    const slabSumRow = row;
+    sheet.getCell(`A${row}`).value = 'Tax on Slabs (Subtotal)';
+    const subB = `SUM(B${oldSlabStart}:B${oldSlabEnd})`;
+    const subC = `SUM(C${newSlabStart}:C${newSlabEnd})`;
+    sheet.getCell(`B${row}`).value = { formula: subB } as any;
+    sheet.getCell(`B${row}`).numFmt = rupee;
+    sheet.getCell(`C${row}`).value = { formula: subC } as any;
+    sheet.getCell(`C${row}`).numFmt = rupee;
+    formulas.push({ cell: `B${row}`, formula: subB, description: 'Sum of old regime slab tax' });
+    formulas.push({ cell: `C${row}`, formula: subC, description: 'Sum of new regime slab tax' });
+    row++;
+
+    const rebateRow = row;
+    sheet.getCell(`A${row}`).value = 'Less: Rebate u/s 87A';
+    const rebateB = `IF(B${taxableRow}<=500000,MIN(B${slabSumRow},12500),0)`;
+    const rebateC = `IF(C${taxableRow}<=700000,MIN(C${slabSumRow},25000),0)`;
+    sheet.getCell(`B${row}`).value = { formula: rebateB } as any;
+    sheet.getCell(`B${row}`).numFmt = rupee;
+    sheet.getCell(`C${row}`).value = { formula: rebateC } as any;
+    sheet.getCell(`C${row}`).numFmt = rupee;
+    formulas.push({ cell: `B${row}`, formula: rebateB, description: '87A rebate (old: TI≤5L, cap 12,500)' });
+    formulas.push({ cell: `C${row}`, formula: rebateC, description: '87A rebate (new: TI≤7L, cap 25,000)' });
+    row++;
+
+    const afterRebateRow = row;
+    sheet.getCell(`A${row}`).value = 'Tax after Rebate';
+    sheet.getCell(`B${row}`).value = { formula: `B${slabSumRow}-B${rebateRow}` } as any;
+    sheet.getCell(`B${row}`).numFmt = rupee;
+    sheet.getCell(`C${row}`).value = { formula: `C${slabSumRow}-C${rebateRow}` } as any;
+    sheet.getCell(`C${row}`).numFmt = rupee;
+    row++;
+
+    const surchargeRow = row;
+    sheet.getCell(`A${row}`).value = 'Add: Surcharge (nil if TI ≤ ₹50L)';
+    sheet.getCell(`B${row}`).value = 0;
+    sheet.getCell(`B${row}`).numFmt = rupee;
+    sheet.getCell(`C${row}`).value = 0;
+    sheet.getCell(`C${row}`).numFmt = rupee;
+    row++;
+
+    const cessRow = row;
+    sheet.getCell(`A${row}`).value = 'Add: Health & Education Cess @ 4%';
+    sheet.getCell(`B${row}`).value = { formula: `(B${afterRebateRow}+B${surchargeRow})*0.04` } as any;
+    sheet.getCell(`B${row}`).numFmt = rupee;
+    sheet.getCell(`C${row}`).value = { formula: `(C${afterRebateRow}+C${surchargeRow})*0.04` } as any;
+    sheet.getCell(`C${row}`).numFmt = rupee;
+    row++;
+
+    const totalRow = row;
+    sheet.getCell(`A${row}`).value = 'Total Tax Liability';
+    sheet.getCell(`A${row}`).font = { bold: true };
+    const totalB = `B${afterRebateRow}+B${surchargeRow}+B${cessRow}`;
+    const totalC = `C${afterRebateRow}+C${surchargeRow}+C${cessRow}`;
+    sheet.getCell(`B${row}`).value = { formula: totalB } as any;
+    sheet.getCell(`B${row}`).numFmt = rupee;
+    sheet.getCell(`B${row}`).font = { bold: true };
+    sheet.getCell(`B${row}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFEB3B' } };
+    sheet.getCell(`C${row}`).value = { formula: totalC } as any;
+    sheet.getCell(`C${row}`).numFmt = rupee;
+    sheet.getCell(`C${row}`).font = { bold: true };
+    sheet.getCell(`C${row}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFEB3B' } };
+    formulas.push({ cell: `B${row}`, formula: totalB, description: 'Old regime total tax' });
+    formulas.push({ cell: `C${row}`, formula: totalC, description: 'New regime total tax' });
+    row += 2;
+
+    sheet.getCell(`A${row}`).value = 'Tax Saving (Old vs New)';
+    sheet.getCell(`A${row}`).font = { bold: true };
+    const saveFormula = `C${totalRow}-B${totalRow}`;
+    sheet.getCell(`B${row}`).value = { formula: saveFormula } as any;
+    sheet.getCell(`B${row}`).numFmt = rupee;
+    sheet.getCell(`B${row}`).font = { bold: true, color: { argb: 'FF065F46' } };
+    sheet.getCell(`C${row}`).value = {
+      formula: `IF(${saveFormula}>0,"Old Regime is cheaper",IF(${saveFormula}<0,"New Regime is cheaper","Both equal"))`,
+    } as any;
+    sheet.getCell(`C${row}`).font = { italic: true };
+    formulas.push({ cell: `B${row}`, formula: saveFormula, description: 'Positive => Old regime saves more' });
+    row += 2;
+
+    sheet.getColumn('A').width = 46;
+    sheet.getColumn('B').width = 22;
+    sheet.getColumn('C').width = 28;
+
+    return { formulas, nextRow: row + 1 };
   }
 
   /**

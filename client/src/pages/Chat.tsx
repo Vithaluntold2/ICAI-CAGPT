@@ -1353,6 +1353,7 @@ export default function Chat() {
                 messages={messages.map(m => ({ id: m.id, role: m.role, content: m.content }))}
                 byId={artifactsData?.byId ?? {}}
                 onSend={(text, selection) => handleSend(text, selection)}
+                isStreaming={isStreaming || sendMessageMutation.isPending}
               />
             </div>
           ) : (

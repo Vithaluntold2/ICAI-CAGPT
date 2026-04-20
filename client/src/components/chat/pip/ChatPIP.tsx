@@ -30,11 +30,12 @@ interface Msg {
 }
 
 export function ChatPIP({
-  messages, byId, onSend,
+  messages, byId, onSend, isStreaming,
 }: {
   messages: Msg[];
   byId: Record<string, WhiteboardArtifact>;
   onSend: (text: string, selection: ComposerSelection | undefined) => void;
+  isStreaming?: boolean;
 }) {
   const [state, setState] = useState<PIPState>(readState);
   const dragging = useRef<{ dx: number; dy: number } | null>(null);
@@ -95,7 +96,7 @@ export function ChatPIP({
       </div>
       {!state.collapsed && (
         <>
-          <PIPTranscript messages={messages} byId={byId} />
+          <PIPTranscript messages={messages} byId={byId} isStreaming={isStreaming} />
           <div className="border-t p-2">
             <Composer onSend={onSend} placeholder="Ask…" />
           </div>

@@ -44,6 +44,7 @@ import rehypeRaw from "rehype-raw";
 import rehypeHighlight from "rehype-highlight";
 import { rehypeArtifactPlaceholder } from "@/components/chat/rehypeArtifactPlaceholder";
 import { normalizeMath } from "@/lib/mathNormalizer";
+import { normalizeArtifactPlaceholders } from "@/lib/normalizeArtifactPlaceholders";
 import { ArtifactRenderer } from "@/components/chat/artifacts/ArtifactRenderer";
 import { FlowchartArtifact } from "@/components/chat/artifacts/FlowchartArtifact";
 import { MindmapArtifact } from "@/components/chat/artifacts/MindmapArtifact";
@@ -1526,7 +1527,7 @@ export default function Chat() {
                                     ),
                                   } as any}
                                 >
-                                  {normalizeMath(message.content)}
+                                  {normalizeMath(normalizeArtifactPlaceholders(message.content))}
                                 </ReactMarkdown>
                               ) : (
                                 <div className="space-y-2">

@@ -115,7 +115,7 @@ export function buildArtifactsForMessage(input: BuildArtifactsInput): BuildArtif
   if (precomputed.visualization) {
     const title = precomputed.visualization.title ?? "Chart";
     const id = place("chart", title, summarize(title, "chart"), precomputed.visualization);
-    updatedContent = `${updatedContent.trimEnd()}\n<artifact id="${id}" />`;
+    updatedContent = `${updatedContent.trimEnd()}\n<artifact id="${id}"></artifact>`;
   }
   if (precomputed.workflow) {
     const title = precomputed.workflow.title ?? "Workflow";
@@ -135,12 +135,12 @@ export function buildArtifactsForMessage(input: BuildArtifactsInput): BuildArtif
       isLargeWorkflow: rawWorkflow.isLargeWorkflow ?? config.isLargeWorkflow,
     };
     const id = place("workflow", title, summarize(title, "workflow"), flatPayload);
-    updatedContent = `${updatedContent.trimEnd()}\n<artifact id="${id}" />`;
+    updatedContent = `${updatedContent.trimEnd()}\n<artifact id="${id}"></artifact>`;
   }
   if (precomputed.mindmap) {
     const title = precomputed.mindmap.title ?? "Mindmap";
     const id = place("mindmap", title, summarize(title, "mindmap"), precomputed.mindmap);
-    updatedContent = `${updatedContent.trimEnd()}\n<artifact id="${id}" />`;
+    updatedContent = `${updatedContent.trimEnd()}\n<artifact id="${id}"></artifact>`;
   }
   if (precomputed.spreadsheet) {
     const title = precomputed.spreadsheet.title ?? "Spreadsheet";
@@ -153,7 +153,7 @@ export function buildArtifactsForMessage(input: BuildArtifactsInput): BuildArtif
       undefined,
       sizeOverride,
     );
-    updatedContent = `${updatedContent.trimEnd()}\n<artifact id="${id}" />`;
+    updatedContent = `${updatedContent.trimEnd()}\n<artifact id="${id}"></artifact>`;
   }
   if (precomputed.document) {
     const title = precomputed.document.title ?? "Document";
@@ -173,7 +173,7 @@ export function buildArtifactsForMessage(input: BuildArtifactsInput): BuildArtif
   const flowcharts = extractFlowcharts(updatedContent);
   for (const fc of flowcharts) {
     const id = place("flowchart", fc.title, fc.summary, { source: fc.source });
-    updatedContent = updatedContent.replace(fc.rawMatch, `<artifact id="${id}" />`);
+    updatedContent = updatedContent.replace(fc.rawMatch, `<artifact id="${id}"></artifact>`);
   }
 
   // Inline ```mindmap fenced blocks: promote to persisted whiteboard artifacts
@@ -183,7 +183,7 @@ export function buildArtifactsForMessage(input: BuildArtifactsInput): BuildArtif
   const mindmapFences = extractMindmaps(updatedContent);
   for (const mm of mindmapFences) {
     const id = place("mindmap", mm.title, mm.summary, mm.payload);
-    updatedContent = updatedContent.replace(mm.rawMatch, `<artifact id="${id}" />`);
+    updatedContent = updatedContent.replace(mm.rawMatch, `<artifact id="${id}"></artifact>`);
   }
 
   // Strip any remaining ```mindmap``` fences — these are malformed or empty
@@ -202,7 +202,7 @@ export function buildArtifactsForMessage(input: BuildArtifactsInput): BuildArtif
   const chartSpecs = extractCharts(updatedContent);
   for (const c of chartSpecs) {
     const id = place("chart", c.title, c.summary, c.payload);
-    updatedContent = updatedContent.replace(c.rawMatch, `<artifact id="${id}" />`);
+    updatedContent = updatedContent.replace(c.rawMatch, `<artifact id="${id}"></artifact>`);
   }
 
   // Mode-gated: checklist artifacts are only extracted in checklist mode.
@@ -224,9 +224,9 @@ export function buildArtifactsForMessage(input: BuildArtifactsInput): BuildArtif
         { checkedIds: initialCheckedIds, updatedAt: new Date().toISOString() },
       );
       if (checklist.rawMatch) {
-        updatedContent = updatedContent.replace(checklist.rawMatch, `<artifact id="${id}" />`);
+        updatedContent = updatedContent.replace(checklist.rawMatch, `<artifact id="${id}"></artifact>`);
       } else {
-        updatedContent = `${updatedContent.trimEnd()}\n<artifact id="${id}" />`;
+        updatedContent = `${updatedContent.trimEnd()}\n<artifact id="${id}"></artifact>`;
       }
     }
   }

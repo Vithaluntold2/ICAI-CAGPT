@@ -12,6 +12,7 @@ import { Copy, Check } from "lucide-react";
 import { ArtifactRenderer } from "./artifacts/ArtifactRenderer";
 import { useConversationArtifacts } from "@/hooks/useConversationArtifacts";
 import { normalizeMath } from "@/lib/mathNormalizer";
+import { normalizeArtifactPlaceholders } from "@/lib/normalizeArtifactPlaceholders";
 
 // NOTE: highlight.js theme CSS (e.g. `highlight.js/styles/github-dark.css`)
 // must be imported once at the app entry point (main.tsx) — rehype-highlight
@@ -84,7 +85,7 @@ export function ChatMessageRich({
           },
         } as any}
       >
-        {normalizeMath(content)}
+        {normalizeMath(normalizeArtifactPlaceholders(content))}
       </ReactMarkdown>
     </div>
   );

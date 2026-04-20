@@ -1116,8 +1116,14 @@ function WorkflowRendererInner({ nodes: nodesInput, edges: edgesInput, title, la
       {/* React Flow Canvas. Fullscreen + embedded both use flex-1 inside the
           flex-col container (parent's height drives the canvas). Standalone
           uses % calc so it subtracts the header height from its fixed
-          containerHeight. */}
-      <div className={(isFullscreen || embedded) ? "flex-1 min-h-0" : title ? "h-[calc(100%-72px)]" : "h-full"}>
+          containerHeight. minHeight in embedded mode is a safety net: if the
+          parent's flex-1 chain somehow resolves to 0 (or the WorkflowRenderer's
+          internal header wraps to multiple rows and eats the rest), ReactFlow
+          still has a measurable viewport and renders. */}
+      <div
+        className={(isFullscreen || embedded) ? "flex-1 min-h-0" : title ? "h-[calc(100%-72px)]" : "h-full"}
+        style={embedded ? { minHeight: 320 } : undefined}
+      >
         <ReactFlow
           nodes={flowNodes}
           edges={flowEdges}

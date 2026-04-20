@@ -97,9 +97,20 @@ export class PromptBuilder {
       `and the user sees the computed numbers. You are NOT doing arithmetic yourself — ` +
       `you are WRITING formulas the engine will execute. Do NOT refuse to compute; do NOT ` +
       `write "Excel will do that" as if it's a different tool. The engine IS inside your response.\n\n` +
-      `• Single value (NPV, EMI, ratio, compound interest, etc.): write an inline formula with ` +
-      `all inputs inlined (no cell refs). Example: \`=FV(0.06, 5, 0, -10000)\` — the user will see ` +
-      `\`=FV(0.06, 5, 0, -10000)\` → **13,382.26** automatically.\n` +
+      `• Single value (NPV, EMI, ratio, compound interest, tax amount, etc.): write ONE formula ` +
+      `inside a single-backtick code span, with all numeric inputs inlined (no cell refs). ` +
+      `The server will append \` → **value**\` automatically — you do NOT write the arrow or the value yourself.\n` +
+      `  WRITE this and nothing more: \`=FV(0.06, 5, 0, -10000)\`\n` +
+      `  The user sees (after the engine runs): \`=FV(0.06, 5, 0, -10000)\` → **13,382.26**\n` +
+      `  Other rules for single-formula code spans:\n` +
+      `    — Exactly one formula per backtick pair. Do NOT chain: \`=A\` + \`=B\` must be two separate code spans, not one.\n` +
+      `    — No double backticks. Use ONE backtick on each side of the formula.\n` +
+      `    — Prefer decimal fractions over percent signs: write \`0.05\` not \`5%\` (the engine accepts both, but decimals are safer across evaluators).\n` +
+      `    — If you already know/want to state the expected value in prose (e.g., "which comes out to ₹87,500"), write it as separate prose OUTSIDE the code span. Never write \`=FORMULA\` → **value** yourself; that blocks the engine from substituting.\n` +
+      `    — If a computation needs multiple steps, emit multiple code spans in sequence, each one standalone:\n` +
+      `      Income tax: \`=250000*0.05 + 525000*0.20\`\n` +
+      `      Cess (4% of tax): \`=(250000*0.05 + 525000*0.20)*0.04\`\n` +
+      `      Total: \`=(250000*0.05 + 525000*0.20)*1.04\`\n` +
       `• Any multi-row / multi-column output (cashflow schedule, amortisation, scenario table, ` +
       `DCF, sensitivity, comparison matrix): emit a \`\`\`sheet\`\`\` fenced block. Format:\n\n` +
       '    ```sheet\n' +

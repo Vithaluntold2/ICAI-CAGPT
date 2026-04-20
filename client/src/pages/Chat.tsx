@@ -645,36 +645,35 @@ export default function Chat() {
           // Refetch conversation list immediately to update sidebar
           queryClient.invalidateQueries({ queryKey: ['/api/conversations'] });
 
-          // Invalidate the whiteboard artifact cache so any <artifact id="…" />
-          // placeholders that just streamed in can resolve against the freshly
-          // persisted artifacts. Without this, placeholders fell back to the
-          // "artifact loading…" state until the user did a full page refresh.
-          // Use the closure-local `resolvedConvId` — setActiveConversation in
-          // onStart may not have settled yet when onEnd runs, so the React
-          // state `activeConversation` can still be null here for a new
-          // conversation's first message.
+          // After SSE ends, fetch BOTH messages and whiteboard artifacts
+          // directly and prime their React Query caches. Invalidation alone
+          // is unreliable here:
+          //
+          //  - Messages query key is an array (['/api/conversations', id,
+          //    'messages']); an invalidation with a string key wouldn't
+          //    match. Even matching keys get blocked by the
+          //    justFinishedStreamingRef guard on the syncing useEffect.
+          //
+          //  - Whiteboard query has staleTime: 30_000. Invalidation marks
+          //    stale and SHOULD refetch if subscribed — but we've seen
+          //    artifacts remain in the "[artifact … loading…]" state until
+          //    a hard page refresh. Direct fetch + setQueryData is belt-
+          //    and-braces: the cache is updated synchronously the moment
+          //    the response lands, all subscribers re-render immediately.
           if (resolvedConvId) {
-            queryClient.invalidateQueries({ queryKey: ['whiteboard', resolvedConvId] });
-
-            // Directly fetch the authoritative message content from the server
-            // and replace it in local state. Three reasons we do this instead
-            // of just invalidating the messages query:
-            //
-            //  1. The messages `useQuery` uses the key
-            //     ['/api/conversations', activeConversation, 'messages'] —
-            //     an array. An invalidation with a string key wouldn't match.
-            //  2. Even when the key matches, the useEffect that syncs
-            //     messagesData → local state skips updates while
-            //     justFinishedStreamingRef.current is true (which stays set
-            //     for 2s after stream end). Without bypassing this guard,
-            //     the mid-stream raw content (with partial ```mindmap```
-            //     fences that JSON.parse chokes on) stays visible.
-            //  3. The stored DB content has server-processed <artifact>
-            //     placeholders replacing the raw fences; that's what we
-            //     want in chat, not the raw streaming text.
             (async () => {
               try {
-                const fresh = await conversationApi.getMessages(resolvedConvId);
+                // Run both in parallel — they're independent.
+                const [fresh, wbRes] = await Promise.all([
+                  conversationApi.getMessages(resolvedConvId),
+                  fetch(`/api/conversations/${resolvedConvId}/whiteboard`, {
+                    credentials: 'include',
+                  }).then(r => r.ok ? r.json() : { artifacts: [] }),
+                ]);
+
+                // Messages: splice fresh content (with server-injected
+                // <artifact /> placeholders) into local state for the just-
+                // completed message, bypassing the streaming-guard effect.
                 const freshMsg = messageId
                   ? fresh.messages.find((m: any) => m.id === messageId)
                   : undefined;
@@ -685,13 +684,25 @@ export default function Chat() {
                       : msg
                   ));
                 }
-                // Prime the query cache so subsequent reads see the fresh data.
                 queryClient.setQueryData(
                   ['/api/conversations', resolvedConvId, 'messages'],
                   fresh,
                 );
+
+                // Whiteboard: build the same { artifacts, byId } shape the
+                // useConversationArtifacts hook produces and push it into
+                // the cache directly. Ensures artifact-placeholder lookups
+                // resolve to the freshly persisted artifact on the NEXT
+                // render — no more "[artifact … loading…]" gap.
+                const artifacts = (wbRes?.artifacts ?? []) as any[];
+                const byId: Record<string, any> = {};
+                for (const a of artifacts) byId[a.id] = a;
+                queryClient.setQueryData(
+                  ['whiteboard', resolvedConvId],
+                  { artifacts, byId },
+                );
               } catch (err) {
-                console.warn('[Chat] post-stream message refetch failed', err);
+                console.warn('[Chat] post-stream refetch failed', err);
               }
             })();
           }

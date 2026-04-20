@@ -370,9 +370,14 @@ const layoutAlgorithms = {
 
 function MindMapRendererInner({ data, embedded = false }: MindMapRendererProps) {
   const layout = data.layout || 'radial';
+  // Payload from a failed or in-flight generation can arrive with nodes/edges
+  // missing. layoutAlgorithms iterate them directly — guard before handing off
+  // so we don't crash the whole chat view on mount.
+  const safeNodes = Array.isArray(data.nodes) ? data.nodes : [];
+  const safeEdges = Array.isArray(data.edges) ? data.edges : [];
   const { nodes: layoutNodes, edges: layoutEdges } = useMemo(
-    () => layoutAlgorithms[layout](data.nodes, data.edges),
-    [data.nodes, data.edges, layout]
+    () => layoutAlgorithms[layout](safeNodes, safeEdges),
+    [safeNodes, safeEdges, layout]
   );
 
   const [nodes, setNodes, onNodesChange] = useNodesState(layoutNodes);
@@ -391,6 +396,24 @@ function MindMapRendererInner({ data, embedded = false }: MindMapRendererProps) 
   // buttons (fullscreen / download) have been moved out of the renderer and
   // into the wrapper level so there's a single source of truth per artifact.
   const showHeader = !embedded && !!data.title;
+
+  // Empty-state — show a clear message when no nodes were produced, instead
+  // of a silent blank canvas that looks like a rendering bug.
+  if (safeNodes.length === 0) {
+    return (
+      <div
+        className="w-full rounded-lg border border-border bg-muted/20 p-8 flex flex-col items-center justify-center text-center"
+        style={{ minHeight: 240 }}
+      >
+        <div className="text-3xl mb-2">🧠</div>
+        <p className="text-sm font-medium">No mindmap to display</p>
+        <p className="text-xs text-muted-foreground mt-1 max-w-md">
+          The mindmap generation produced no nodes. This can happen if the
+          response was empty or malformed — try re-sending the request.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="w-full h-[600px] relative border border-border rounded-lg overflow-hidden bg-background">

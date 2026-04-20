@@ -361,7 +361,14 @@ function hexLuminance(hex: string): number {
   return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
 }
 
-function WorkflowRendererInner({ nodes, edges, title, layout = 'dagre-tb', embedded = false }: WorkflowRendererProps) {
+function WorkflowRendererInner({ nodes: nodesInput, edges: edgesInput, title, layout = 'dagre-tb', embedded = false }: WorkflowRendererProps) {
+  // Payloads from failed/in-flight server generations can arrive with
+  // nodes/edges missing entirely. Defend the first `.length` access on line
+  // below — otherwise WorkflowRenderer blows up on mount and takes the whole
+  // chat view with it via the error boundary.
+  const nodes = Array.isArray(nodesInput) ? nodesInput : [];
+  const edges = Array.isArray(edgesInput) ? edgesInput : [];
+
   const [selectedTheme, setSelectedTheme] = useState<ColorTheme>(colorThemes[0]);
   const [animateEdges, setAnimateEdges] = useState(true);
   const [customTheme, setCustomTheme] = useState<ColorTheme | null>(null);
@@ -758,6 +765,26 @@ function WorkflowRendererInner({ nodes, edges, title, layout = 'dagre-tb', embed
 
   // Dynamic height based on workflow size
   const containerHeight = nodes.length > 40 ? 900 : nodes.length > 20 ? 800 : 700;
+
+  // Early return when no workflow data is available — shows a clear message
+  // instead of an empty canvas, so a failed generation is obvious to the user
+  // and doesn't masquerade as a blank successful result.
+  if (nodes.length === 0) {
+    return (
+      <div
+        className="w-full border rounded-xl p-8 flex flex-col items-center justify-center text-center bg-muted/20"
+        style={{ minHeight: 240 }}
+      >
+        <GitBranch className="h-8 w-8 text-muted-foreground mb-3" />
+        <p className="text-sm font-medium">No workflow to display</p>
+        <p className="text-xs text-muted-foreground mt-1 max-w-md">
+          The workflow generation produced no steps. This can happen if the
+          agent pipeline failed or the response was empty — try re-sending the
+          request.
+        </p>
+      </div>
+    );
+  }
 
   // While fullscreen, lock body scroll + bind Escape to exit. On toggle, give
   // React Flow a beat to settle the new container size then re-fit so the

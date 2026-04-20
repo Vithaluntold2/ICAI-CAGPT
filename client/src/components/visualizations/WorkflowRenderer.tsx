@@ -755,7 +755,7 @@ function WorkflowRendererInner({ nodes: nodesInput, edges: edgesInput, title, la
     );
     setNodes(newLayoutedNodes);
     setEdges(newLayoutedEdges);
-    
+
     setTimeout(() => {
       // Better fit view padding for large workflows
       const padding = nodes.length > 30 ? 0.1 : nodes.length > 15 ? 0.15 : 0.2;
@@ -763,8 +763,11 @@ function WorkflowRendererInner({ nodes: nodesInput, edges: edgesInput, title, la
     }, 100);
   }, [nodes, edges, activeTheme, animateEdges, currentLayout, isAnimating, animationProgress, searchTerm, compactMode]);
 
-  // Dynamic height based on workflow size
-  const containerHeight = nodes.length > 40 ? 900 : nodes.length > 20 ? 800 : 700;
+  // Dynamic height based on workflow size. Scale linearly with node count so
+  // tall vertical flows aren't compressed to ~18% zoom (nodes become specks).
+  // Clamped between a minimum (small horizontal flows stay at 700) and a
+  // maximum (a 50-node flow doesn't produce a 10,000px card).
+  const containerHeight = Math.max(700, Math.min(2400, nodes.length * 180 + 100));
 
   // Early return when no workflow data is available — shows a clear message
   // instead of an empty canvas, so a failed generation is obvious to the user

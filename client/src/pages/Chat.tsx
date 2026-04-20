@@ -689,18 +689,40 @@ export default function Chat() {
                   fresh,
                 );
 
-                // Whiteboard: build the same { artifacts, byId } shape the
-                // useConversationArtifacts hook produces and push it into
-                // the cache directly. Ensures artifact-placeholder lookups
-                // resolve to the freshly persisted artifact on the NEXT
-                // render — no more "[artifact … loading…]" gap.
+                // Whiteboard: triple-belt so the artifact actually lands in
+                // the React Query cache that chat placeholder resolution
+                // reads from. Earlier we relied on setQueryData alone and
+                // users still saw "[artifact … loading…]" until navigating
+                // out and back. Combining all three guarantees the cache
+                // updates for every subscriber:
+                //
+                //   1. setQueryData  — primes the cache synchronously with
+                //      the exact shape `useConversationArtifacts` returns
+                //      ({ artifacts, byId }), so subscribers that read the
+                //      cache on their next render get fresh data without
+                //      waiting for a fetch.
+                //   2. invalidateQueries — marks the key stale, so the next
+                //      time a subscriber mounts or observes, it refetches
+                //      rather than trusting whatever's cached. Defends
+                //      against future setQueryData races.
+                //   3. refetchQueries — forces an immediate background
+                //      refetch right now, which fires subscriber updates
+                //      via React Query's standard notification path (some-
+                //      times more reliable than setQueryData's notifier).
                 const artifacts = (wbRes?.artifacts ?? []) as any[];
                 const byId: Record<string, any> = {};
                 for (const a of artifacts) byId[a.id] = a;
+                console.log('[Chat] post-stream whiteboard refresh', {
+                  convId: resolvedConvId,
+                  artifactCount: artifacts.length,
+                  artifactIds: artifacts.map(a => a.id),
+                });
                 queryClient.setQueryData(
                   ['whiteboard', resolvedConvId],
                   { artifacts, byId },
                 );
+                queryClient.invalidateQueries({ queryKey: ['whiteboard', resolvedConvId] });
+                queryClient.refetchQueries({ queryKey: ['whiteboard', resolvedConvId] });
               } catch (err) {
                 console.warn('[Chat] post-stream refetch failed', err);
               }

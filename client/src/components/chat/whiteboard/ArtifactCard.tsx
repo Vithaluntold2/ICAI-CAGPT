@@ -90,11 +90,15 @@ export function ArtifactCard({
           </DropdownMenu>
         </div>
       </div>
-      {/* No inner padding, no outer scroll — the renderer owns its own
-          viewport (via `embedded=true`). Prevents the double-scrollbar effect
-          on large spreadsheets and long documents, and removes a padding ring
-          that was competing with each renderer's own internal padding. */}
-      <div className="flex-1 min-h-0 overflow-hidden relative">
+      {/* Inner scroll container. `overflow-auto` is intentional — not every
+          renderer manages its own scroll, and Recharts' ResponsiveContainer
+          forces a fixed height (e.g. 400px) which would get silently clipped
+          by `overflow-hidden` when the stored card minHeight is smaller.
+          Renderers that DO scroll internally (spreadsheet viewer) don't
+          double-scroll because their content fits inside this area's size;
+          the outer scrollbar only appears when their intrinsic size exceeds
+          the card. */}
+      <div className="flex-1 min-h-0 overflow-auto relative">
         <ArtifactRenderer artifact={artifact} conversationId={conversationId} embedded />
       </div>
     </div>

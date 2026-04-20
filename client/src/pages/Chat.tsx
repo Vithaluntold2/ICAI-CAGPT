@@ -496,6 +496,14 @@ export default function Chat() {
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       }]);
       
+      // Capture the conversation id inside this request's closure. Needed
+      // because onStart may fire `setActiveConversation(convId)` for a brand-
+      // new conversation, and by the time onEnd runs, the React state
+      // `activeConversation` is still the stale value in this closure. The
+      // ref pattern gives onEnd the actual server-side conversation id so
+      // cache invalidations target the right keys.
+      let resolvedConvId: string | null = activeConversation ?? null;
+
       // Use SSE streaming
       const result = await chatApi.streamMessage({
         conversationId: activeConversation,
@@ -521,6 +529,10 @@ export default function Chat() {
           if (!activeConversation) {
             setActiveConversation(convId);
           }
+          // Mirror the server-side conversation id into our closure so
+          // onEnd can invalidate caches even before the React state update
+          // settles.
+          resolvedConvId = convId;
         },
         onThinking: (phase, detail) => {
           setCagptStatus(detail);
@@ -565,7 +577,25 @@ export default function Chat() {
           
           // Refetch conversation list immediately to update sidebar
           queryClient.invalidateQueries({ queryKey: ['/api/conversations'] });
-          
+
+          // Invalidate the whiteboard artifact cache so any <artifact id="…" />
+          // placeholders that just streamed in can resolve against the freshly
+          // persisted artifacts. Without this, placeholders fell back to the
+          // "artifact loading…" state until the user did a full page refresh.
+          // Use the closure-local `resolvedConvId` — setActiveConversation in
+          // onStart may not have settled yet when onEnd runs, so the React
+          // state `activeConversation` can still be null here for a new
+          // conversation's first message.
+          if (resolvedConvId) {
+            queryClient.invalidateQueries({ queryKey: ['whiteboard', resolvedConvId] });
+
+            // Also refetch the messages list so the stored message content
+            // (with server-injected <artifact /> placeholders) replaces the
+            // raw streamed text that has no placeholders. Otherwise chat
+            // keeps showing the pre-placeholder content for this session.
+            queryClient.invalidateQueries({ queryKey: [`/api/conversations/${resolvedConvId}/messages`] });
+          }
+
           // Clear the flag after 2 seconds to allow future message loads
           setTimeout(() => {
             justFinishedStreamingRef.current = false;

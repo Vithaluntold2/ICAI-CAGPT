@@ -123,71 +123,79 @@
 }
 
 .dark {
-  /* CA BRAND COLOR SYSTEM - DARK MODE */
-  
+  /* TRUE DARK THEME — Linear/Notion-leaning.
+   *
+   * Five-layer surface stack (darkest → lightest):
+   *   background → sidebar → muted → card → popover
+   * Each step lightens by ~3% to give clean perceptible elevation without
+   * feeling washed out. Hues sit at 220° (near-neutral, slightly cool) with
+   * low saturation so colour-accent elements (primary, charts) pop instead
+   * of competing with the surfaces.
+   *
+   * Text: off-white `0 0% 95%` (not pure white — less harsh for long sessions).
+   * Borders: two steps — subtle seams and slightly stronger card edges.
+   */
   --button-outline: rgba(255,255,255, .10);
   --badge-outline: rgba(255,255,255, .05);
   --opaque-button-border-intensity: 9;
-  --elevate-1: rgba(255,255,255, .06);
-  --elevate-2: rgba(255,255,255, .12);
-  
-  /* Premium Dark Backgrounds - CA Professional */
-  --background: 222 47% 11%;         /* Standard Dark Slate Background */
-  --foreground: 0 0% 100%;          /* Pure white - Maximum contrast */
-  --border: 215 20% 25%;            /* Subtle dividers */
-  --card: 200 18% 13%;              /* Elevated surface */
-  --card-foreground: 0 0% 100%;     /* Pure white */
-  --card-border: 215 18% 20%;       /* Card edges */
-  
-  /* Sidebar - CA Navy accents */
-  --sidebar: 200 20% 9%;            /* Matching background */
-  --sidebar-foreground: 0 0% 100%;  /* Pure white */
-  --sidebar-border: 215 20% 25%;    /* Dividers */
-  --sidebar-primary: 202 100% 26%;   /* CA Navy Blue */
+  --elevate-1: rgba(255,255,255, .04);
+  --elevate-2: rgba(255,255,255, .08);
+
+  /* Surface stack */
+  --background: 220 14% 7%;          /* #0f1012 — base canvas */
+  --foreground: 0 0% 95%;            /* #F2F2F2 — off-white primary text */
+  --border: 220 10% 20%;             /* #2e3036 — subtle seams */
+  --card: 220 10% 15%;               /* #23252a — artifacts, dialogs */
+  --card-foreground: 0 0% 95%;
+  --card-border: 220 10% 24%;        /* #393c43 — slightly stronger card edges */
+
+  /* Sidebar — layer 1, lifted above base */
+  --sidebar: 220 12% 10%;            /* #17181c */
+  --sidebar-foreground: 0 0% 95%;
+  --sidebar-border: 220 10% 20%;
+  --sidebar-primary: 202 85% 55%;    /* brightened CA navy for contrast on dark */
   --sidebar-primary-foreground: 0 0% 100%;
-  --sidebar-accent: 200 18% 16%;    /* Active item */
-  --sidebar-accent-foreground: 214 32% 91%; /* Light slate text */
-  --sidebar-ring: 202 100% 26%;      /* CA Navy */
-  
-  /* Popovers & Dropdowns */
-  --popover: 200 18% 13%;           /* Dark surface */
-  --popover-foreground: 0 0% 100%;
-  --popover-border: 215 18% 20%;    /* Dark edges */
-  
-  /* CA BRAND COLORS - Dark Mode */
-  --primary: 202 100% 26%;           /* CA Navy Blue */
+  --sidebar-accent: 220 10% 16%;     /* active item — step above sidebar */
+  --sidebar-accent-foreground: 0 0% 95%;
+  --sidebar-ring: 202 85% 55%;
+
+  /* Popovers / dropdowns — highest surface in the stack */
+  --popover: 220 9% 18%;             /* #2a2c32 */
+  --popover-foreground: 0 0% 95%;
+  --popover-border: 220 10% 24%;
+
+  /* Brand — brightened so buttons and rings remain visible on near-black */
+  --primary: 202 85% 55%;            /* visible CA navy (was 26%) */
   --primary-foreground: 0 0% 100%;
-  --secondary: 202 100% 30%;         /* Mid Navy */
-  --secondary-foreground: 0 0% 100%;
-  --muted: 200 18% 16%;             /* Dark muted */
-  --muted-foreground: 215 21% 66%;  /* Light gray */
-  
-  /* ACCENT - Professional Tone for CTAs */
-  --accent: 214 32% 91%;           /* Slate Accent */
-  --accent-foreground: 214 100% 95%; /* Light text */
-  
-  /* SUCCESS & GROWTH - Emerald for dopamine rewards */
-  --success: 160 84% 39%;           /* Emerald #10B981 - Achievements */
-  --success-foreground: 0 0% 100%;
-  
-  /* PREMIUM - Gold for exclusive features */
-  --gold: 38 92% 50%;               /* Gold #F59E0B - Luxury */
-  --gold-foreground: 222 47% 11%;   /* Dark text on gold */
-  
-  /* DESTRUCTIVE - Rose for critical actions */
-  --destructive: 351 83% 60%;       /* Rose #F43F5E - Urgent */
+  --secondary: 202 70% 40%;          /* deeper navy for secondary actions */
+  --secondary-foreground: 0 0% 95%;
+
+  /* Muted surfaces + text */
+  --muted: 220 10% 13%;              /* #1e1f24 — hover bgs, subtle fills */
+  --muted-foreground: 220 6% 62%;    /* #9b9da3 — clearly secondary text */
+
+  /* Accent — subtle elevation, NOT white-in-dark-mode like before */
+  --accent: 220 10% 20%;             /* matches border lightness */
+  --accent-foreground: 0 0% 90%;
+
+  /* Feedback colours */
+  --success: 160 70% 50%;
+  --success-foreground: 0 0% 10%;
+  --gold: 38 95% 60%;
+  --gold-foreground: 220 14% 7%;
+  --destructive: 0 65% 60%;
   --destructive-foreground: 0 0% 100%;
-  
-  /* Form Elements */
-  --input: 215 28% 27%;             /* Slate 700 */
-  --ring: 202 100% 40%;              /* CA Navy focus ring */
-  
-  /* Charts - CA Brand gradient palette */
-  --chart-1: 202 100% 26%;           /* CA Navy */
-  --chart-2: 214 32% 91%;          /* Slate Base */
-  --chart-3: 202 100% 30%;           /* Mid Navy */
-  --chart-4: 160 84% 39%;           /* Emerald */
-  --chart-5: 38 92% 50%;            /* Gold */
+
+  /* Form + focus */
+  --input: 220 10% 20%;
+  --ring: 202 85% 55%;
+
+  /* Charts — vibrant, distinguishable on dark backdrop */
+  --chart-1: 210 90% 60%;            /* bright blue */
+  --chart-2: 160 70% 55%;            /* emerald */
+  --chart-3: 40 90% 60%;             /* gold */
+  --chart-4: 285 60% 65%;            /* violet */
+  --chart-5: 0 65% 60%;              /* rose */
   --shadow-2xs: 0px 2px 0px 0px hsl(0 0% 0% / 0.00);
   --shadow-xs: 0px 2px 0px 0px hsl(0 0% 0% / 0.00);
   --shadow-sm: 0px 2px 0px 0px hsl(0 0% 0% / 0.00), 0px 1px 2px -1px hsl(0 0% 0% / 0.00);
@@ -663,4 +671,11 @@
 .react-flow__background pattern circle,
 .react-flow__background pattern rect {
   fill: hsl(var(--foreground) / 0.1) !important;
+}
+
+/* Darker mode needs a softer grid — at 95% off-white foreground, 10% opacity
+ * reads as hard snow dots. Drop to 4% so the texture is present but subliminal. */
+.dark .react-flow__background pattern circle,
+.dark .react-flow__background pattern rect {
+  fill: hsl(var(--foreground) / 0.04) !important;
 }

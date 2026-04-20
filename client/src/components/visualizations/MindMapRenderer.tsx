@@ -4,6 +4,11 @@
  */
 
 import { useEffect, useState, useMemo } from 'react';
+// ReactFlow base stylesheet is required — without it, nodes render without
+// dimensions and edges route to nowhere, producing a visually-empty canvas.
+// (WorkflowRenderer imports the same file; mindmap was relying on workflow
+// being loaded first, which breaks on pages with only mindmaps.)
+import '@xyflow/react/dist/style.css';
 import {
   ReactFlow,
   Node,

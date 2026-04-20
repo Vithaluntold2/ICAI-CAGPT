@@ -100,6 +100,9 @@ export function FlowchartArtifact({ payload }: { payload: { source: string } }) 
         pixelRatio: 2,
         backgroundColor: "#ffffff",
         cacheBust: true,
+        // Works around html-to-image@1.11.x crash on `font.trim()` during
+        // @font-face embedding when the computed font shorthand is undefined.
+        skipFonts: true,
       });
       const a = document.createElement("a");
       a.href = dataUrl;

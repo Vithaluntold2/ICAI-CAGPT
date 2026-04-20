@@ -437,6 +437,11 @@ function WorkflowRendererInner({ nodes, edges, title, layout = 'dagre-tb', embed
         pixelRatio: format === 'png' ? 2 : 1,
         backgroundColor: '#ffffff',
         cacheBust: true,
+        // skipFonts avoids a bug in html-to-image@1.11.x where `font.trim()` is
+        // called on an undefined value during @font-face embedding, crashing
+        // the export. With this flag, text renders in the system/browser font
+        // — acceptable for a snapshot; the PNG still looks fine.
+        skipFonts: true,
         // html-to-image tries to inline cross-origin images; swallow failures so the
         // main diagram still renders.
         filter: (node: HTMLElement) => !node.classList?.contains('react-flow__minimap'),

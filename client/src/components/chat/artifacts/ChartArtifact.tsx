@@ -21,6 +21,10 @@ export function ChartArtifact({
         pixelRatio: 2,
         backgroundColor: "#ffffff",
         cacheBust: true,
+        // html-to-image@1.11.x crashes on `font.trim()` during @font-face
+        // embedding when the computed font shorthand is undefined; skipping
+        // fonts avoids that code path. Snapshot still uses system fonts.
+        skipFonts: true,
       });
       const a = document.createElement("a");
       a.href = dataUrl;

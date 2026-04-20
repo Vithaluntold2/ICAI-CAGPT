@@ -1002,6 +1002,16 @@ export class AIOrchestrator {
       }
     }
 
+    // Deliverable Composer: the entire polished response IS the deliverable —
+    // this mode has no separate reasoning stream, and we don't force the AI to
+    // emit <DELIVERABLE>/<REASONING> tags. Promote the full response so it
+    // becomes a persisted document artifact on the whiteboard. Chat continues
+    // to echo the prose (mainResponse unchanged) — the extractPipeline skips
+    // the inline <artifact /> placeholder for documents to avoid duplication.
+    if (chatMode === 'deliverable-composer' && !deliverableContent && finalResponse?.trim()) {
+      deliverableContent = finalResponse;
+    }
+
     // Step 6: Log interaction for continuous learning (async, non-blocking)
     if (userId) {
       continuousLearning.logInteraction({

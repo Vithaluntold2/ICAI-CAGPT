@@ -138,13 +138,17 @@ export function buildArtifactsForMessage(input: BuildArtifactsInput): BuildArtif
   }
   if (precomputed.document) {
     const title = precomputed.document.title ?? "Document";
-    const id = place(
+    // Deliberately NOT appending an <artifact /> placeholder for documents —
+    // the document's content is already the chat prose, so inlining the
+    // artifact would render the same text twice. The artifact still exists on
+    // the whiteboard (selectable, referenceable, downloadable) — it's just
+    // not echoed inline in the chat stream.
+    place(
       "document",
       title,
       summarize(title, "document"),
       precomputed.document,
     );
-    updatedContent = `${updatedContent.trimEnd()}\n<artifact id="${id}" />`;
   }
 
   const flowcharts = extractFlowcharts(updatedContent);

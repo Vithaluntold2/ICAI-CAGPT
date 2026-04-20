@@ -45,6 +45,9 @@ export function MindmapArtifact({ payload, embedded = false }: { payload: any; e
         pixelRatio: format === "png" ? 2 : 1,
         backgroundColor: "#ffffff",
         cacheBust: true,
+        // Avoid html-to-image@1.11.x `font.trim()` crash during @font-face
+        // embedding; snapshots use system/browser fonts instead.
+        skipFonts: true,
         filter: (node: HTMLElement) =>
           !node.classList?.contains("react-flow__minimap")
           && !node.classList?.contains("react-flow__controls"),

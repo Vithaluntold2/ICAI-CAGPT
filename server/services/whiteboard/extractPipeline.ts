@@ -112,6 +112,101 @@ export function buildArtifactsForMessage(input: BuildArtifactsInput): BuildArtif
     return { width, height };
   }
 
+  // Workflow cards need to scale with node count or ReactFlow's fitView
+  // compresses a tall vertical flow into an unreadable 7% scale. Chat mode
+  // already does this via `containerHeight = nodes.length > 40 ? 900 : ...`
+  // — we match that logic for the whiteboard card so embedded workflows stay
+  // at a readable zoom. Width stays at the default unless the layout is
+  // horizontal (future work).
+  function computeWorkflowSize(payload: any): { width: number; height: number } {
+    const nodes: any[] = payload?.nodes ?? payload?.config?.nodes ?? [];
+    const layout: string = (payload?.layout ?? payload?.config?.layout ?? "").toLowerCase();
+    const count = nodes.length;
+    if (count === 0) return NATURAL_SIZE.workflow;
+
+    // Horizontal layouts (dagre-lr) grow wider, not taller — keep the default
+    // height but widen the card proportionally. For now, only the vertical
+    // case is optimised because that's where fitView's over-compression bites.
+    if (layout.includes("lr") || layout.includes("horizontal")) {
+      return {
+        width: Math.min(2400, 400 + count * 220),
+        height: 600,
+      };
+    }
+
+    // Vertical flow: each step node renders at ~130px tall with ~80px gap
+    // (ReactFlow dagre-tb default). Plus ~100px for the toolbar header.
+    const HEADER_PX = 100;
+    const STEP_PX = 200;           // 130 node + 70 gap
+    const MIN_H = 500;
+    const MAX_H = 2400;            // cap so a 40-step workflow doesn't produce a 8000px card
+    const height = Math.max(MIN_H, Math.min(MAX_H, HEADER_PX + count * STEP_PX));
+    return { width: 800, height };
+  }
+
+  // Mindmap cards follow the same fitView-shrinks-to-unreadable pattern as
+  // workflows. MindMapRenderer's radial algorithm places nodes at
+  // `level * 250px` radius, so a 4-level tree spans ~2000px in both
+  // dimensions. Tree layouts depend on breadth instead. We estimate the
+  // bounding box from node count + edge-graph depth and size the card so
+  // fitView doesn't compress past a readable zoom (~0.5+).
+  function computeMindmapSize(payload: any): { width: number; height: number } {
+    const nodes: any[] = payload?.nodes ?? [];
+    const edges: any[] = payload?.edges ?? [];
+    const count = nodes.length;
+    if (count === 0) return NATURAL_SIZE.mindmap;
+
+    // Build child adjacency and BFS from root (or first node) to get depth.
+    const children = new Map<string, string[]>();
+    for (const e of edges) {
+      const src = e?.source;
+      const tgt = e?.target;
+      if (!src || !tgt) continue;
+      const arr = children.get(src) ?? [];
+      arr.push(tgt);
+      children.set(src, arr);
+    }
+    const root = nodes.find(n => n?.type === "root") ?? nodes[0];
+    let maxDepth = 0;
+    let maxBreadth = 1;
+    if (root?.id) {
+      const queue: Array<[string, number]> = [[root.id, 0]];
+      const seen = new Set<string>([root.id]);
+      const byLevel = new Map<number, number>();
+      while (queue.length) {
+        const [id, d] = queue.shift()!;
+        maxDepth = Math.max(maxDepth, d);
+        byLevel.set(d, (byLevel.get(d) ?? 0) + 1);
+        for (const c of children.get(id) ?? []) {
+          if (!seen.has(c)) {
+            seen.add(c);
+            queue.push([c, d + 1]);
+          }
+        }
+      }
+      for (const n of byLevel.values()) maxBreadth = Math.max(maxBreadth, n);
+    }
+
+    const layout: string = (payload?.layout ?? "radial").toString().toLowerCase();
+    const MIN_W = 700, MAX_W = 2200, MIN_H = 500, MAX_H = 1800;
+
+    let width: number, height: number;
+    if (layout === "tree-vertical") {
+      // width = breadth * node spacing; height = depth * rank separation
+      width = Math.max(MIN_W, Math.min(MAX_W, maxBreadth * 220 + 200));
+      height = Math.max(MIN_H, Math.min(MAX_H, (maxDepth + 1) * 200 + 200));
+    } else if (layout === "tree-horizontal" || layout === "timeline") {
+      width = Math.max(MIN_W, Math.min(MAX_W, (maxDepth + 1) * 280 + 300));
+      height = Math.max(MIN_H, Math.min(MAX_H, maxBreadth * 140 + 200));
+    } else {
+      // radial / organic: roughly a square box 2 * radius * depth
+      const diameter = 2 * (maxDepth + 1) * 250 + 300;
+      width = Math.max(MIN_W, Math.min(MAX_W, diameter));
+      height = Math.max(MIN_H, Math.min(MAX_H, diameter));
+    }
+    return { width, height };
+  }
+
   if (precomputed.visualization) {
     const title = precomputed.visualization.title ?? "Chart";
     const id = place("chart", title, summarize(title, "chart"), precomputed.visualization);
@@ -134,12 +229,28 @@ export function buildArtifactsForMessage(input: BuildArtifactsInput): BuildArtif
       layout: rawWorkflow.layout ?? config.layout,
       isLargeWorkflow: rawWorkflow.isLargeWorkflow ?? config.isLargeWorkflow,
     };
-    const id = place("workflow", title, summarize(title, "workflow"), flatPayload);
+    const workflowSize = computeWorkflowSize(flatPayload);
+    const id = place(
+      "workflow",
+      title,
+      summarize(title, "workflow"),
+      flatPayload,
+      undefined,
+      workflowSize,
+    );
     updatedContent = `${updatedContent.trimEnd()}\n<artifact id="${id}"></artifact>`;
   }
   if (precomputed.mindmap) {
     const title = precomputed.mindmap.title ?? "Mindmap";
-    const id = place("mindmap", title, summarize(title, "mindmap"), precomputed.mindmap);
+    const mindmapSize = computeMindmapSize(precomputed.mindmap);
+    const id = place(
+      "mindmap",
+      title,
+      summarize(title, "mindmap"),
+      precomputed.mindmap,
+      undefined,
+      mindmapSize,
+    );
     updatedContent = `${updatedContent.trimEnd()}\n<artifact id="${id}"></artifact>`;
   }
   if (precomputed.spreadsheet) {

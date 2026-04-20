@@ -590,11 +590,44 @@ export default function Chat() {
           if (resolvedConvId) {
             queryClient.invalidateQueries({ queryKey: ['whiteboard', resolvedConvId] });
 
-            // Also refetch the messages list so the stored message content
-            // (with server-injected <artifact /> placeholders) replaces the
-            // raw streamed text that has no placeholders. Otherwise chat
-            // keeps showing the pre-placeholder content for this session.
-            queryClient.invalidateQueries({ queryKey: [`/api/conversations/${resolvedConvId}/messages`] });
+            // Directly fetch the authoritative message content from the server
+            // and replace it in local state. Three reasons we do this instead
+            // of just invalidating the messages query:
+            //
+            //  1. The messages `useQuery` uses the key
+            //     ['/api/conversations', activeConversation, 'messages'] —
+            //     an array. An invalidation with a string key wouldn't match.
+            //  2. Even when the key matches, the useEffect that syncs
+            //     messagesData → local state skips updates while
+            //     justFinishedStreamingRef.current is true (which stays set
+            //     for 2s after stream end). Without bypassing this guard,
+            //     the mid-stream raw content (with partial ```mindmap```
+            //     fences that JSON.parse chokes on) stays visible.
+            //  3. The stored DB content has server-processed <artifact>
+            //     placeholders replacing the raw fences; that's what we
+            //     want in chat, not the raw streaming text.
+            (async () => {
+              try {
+                const fresh = await conversationApi.getMessages(resolvedConvId);
+                const freshMsg = messageId
+                  ? fresh.messages.find((m: any) => m.id === messageId)
+                  : undefined;
+                if (freshMsg) {
+                  setMessages(prev => prev.map(msg =>
+                    msg.id === messageId
+                      ? { ...msg, content: freshMsg.content }
+                      : msg
+                  ));
+                }
+                // Prime the query cache so subsequent reads see the fresh data.
+                queryClient.setQueryData(
+                  ['/api/conversations', resolvedConvId, 'messages'],
+                  fresh,
+                );
+              } catch (err) {
+                console.warn('[Chat] post-stream message refetch failed', err);
+              }
+            })();
           }
 
           // Clear the flag after 2 seconds to allow future message loads
@@ -1461,12 +1494,35 @@ export default function Chat() {
                                             </div>
                                           );
                                         } catch (err: any) {
+                                          // Mid-stream: the JSON is still arriving and won't parse
+                                          // cleanly until the closing brace lands. Show a subtle
+                                          // "generating" hint instead of a red error banner so
+                                          // users don't see a flashing failure card for the
+                                          // 5-30 seconds it takes the mindmap to stream in.
+                                          //
+                                          // After streaming ends, the server's extractMindmaps
+                                          // replaces the fence with an <artifact /> placeholder
+                                          // in the stored message, so this branch only runs
+                                          // either (a) mid-stream, or (b) for a genuinely
+                                          // malformed mindmap that even the server extractor
+                                          // rejected. Only case (b) warrants the hard error —
+                                          // and we still let the user see the raw source
+                                          // inside a collapsible details block.
+                                          if (isStreaming) {
+                                            return (
+                                              <div className="my-4 not-prose text-xs text-muted-foreground italic flex items-center gap-2">
+                                                <span className="inline-block h-2 w-2 rounded-full bg-muted-foreground/50 animate-pulse" />
+                                                Generating mindmap…
+                                              </div>
+                                            );
+                                          }
                                           return (
-                                            <div className="my-4 not-prose text-xs">
-                                              <div className="font-medium text-red-600 mb-1">Mindmap JSON invalid</div>
-                                              <div className="text-muted-foreground">{err?.message ?? "parse error"}</div>
+                                            <details className="my-4 not-prose text-xs border border-amber-300 bg-amber-50 dark:bg-amber-950/20 rounded p-2">
+                                              <summary className="font-medium text-amber-700 dark:text-amber-400 cursor-pointer">
+                                                Mindmap couldn't be parsed — {err?.message ?? "invalid JSON"}
+                                              </summary>
                                               <pre className="mt-2 p-2 bg-muted rounded whitespace-pre-wrap break-all">{raw}</pre>
-                                            </div>
+                                            </details>
                                           );
                                         }
                                       }

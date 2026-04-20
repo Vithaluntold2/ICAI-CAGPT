@@ -12,6 +12,73 @@
  */
 
 import { aiProviderRegistry, AIProviderName } from './aiProviders';
+import { conversationMemory } from './conversationMemory';
+
+/**
+ * Deterministic extraction of facts already in the conversation. Used to build
+ * a "DO NOT ASK ABOUT" list for the clarifier so gpt-4o-mini never emits a
+ * redundant clarification request for jurisdiction / tax IDs / entity types
+ * the user has already provided. Regex-only — cheap and reliable; the richer
+ * context from memory (glossary + rolling summary) is layered on top.
+ */
+interface KnownFacts {
+  jurisdiction: string | null;  // canonical country/framework if detected
+  hasGstin: boolean;
+  hasPan: boolean;
+  hasTin: boolean;
+  entityType: string | null;
+}
+
+function extractKnownFactsFromHistory(
+  history: Array<{ role: string; content: string }>,
+): KnownFacts {
+  const text = history.map(h => h.content).join('\n');
+
+  const jurisdictionMatchers: Array<[string, RegExp]> = [
+    ['India',          /(?:^|\W)(?:india|indian)(?:\W|$)/i],
+    ['United States',  /(?:^|\W)(?:united\s+states|u\.?s\.?a\.?|usa|american)(?:\W|$)/i],
+    ['United Kingdom', /(?:^|\W)(?:united\s+kingdom|u\.?k\.?|britain|british)(?:\W|$)/i],
+    ['Canada',         /(?:^|\W)(?:canada|canadian)(?:\W|$)/i],
+    ['Australia',      /(?:^|\W)(?:australia|australian)(?:\W|$)/i],
+    ['Singapore',      /(?:^|\W)singapore(?:\W|$)/i],
+    ['Hong Kong',      /(?:^|\W)hong\s*kong(?:\W|$)/i],
+    ['UAE',            /(?:^|\W)(?:u\.?a\.?e\.?|united\s+arab\s+emirates|dubai|abu\s*dhabi)(?:\W|$)/i],
+    ['Germany',        /(?:^|\W)(?:germany|german)(?:\W|$)/i],
+    ['France',         /(?:^|\W)(?:france|french)(?:\W|$)/i],
+    ['IFRS',           /(?:^|\W)ifrs(?:\W|$)/i],
+    ['US GAAP',        /(?:^|\W)us\s*gaap(?:\W|$)/i],
+  ];
+  let jurisdiction: string | null = null;
+  for (const [canon, re] of jurisdictionMatchers) {
+    if (re.test(text)) { jurisdiction = canon; break; }
+  }
+
+  const hasGstin = /\b\d{2}[A-Z]{5}\d{4}[A-Z][A-Z\d]Z[A-Z\d]\b/i.test(text);
+  const hasPan   = /\b[A-Z]{5}\d{4}[A-Z]\b/.test(text);
+  const hasTin   = /\b(?:ein|tin|itin|tax\s*id(?:entification)?\s*(?:number|no)?)\s*[:\-]?\s*[A-Z0-9\-]{6,}/i.test(text);
+
+  const entityMatch = text.match(
+    /\b(pvt\.?\s*ltd\.?|private\s+limited|public\s+limited|llp|llc|sole\s*proprietor(?:ship)?|partnership|s-?corp|c-?corp|corporation|sole\s*trader|hindu\s*undivided\s*family|huf)\b/i
+  );
+  const entityType = entityMatch ? entityMatch[1] : null;
+
+  return { jurisdiction, hasGstin, hasPan, hasTin, entityType };
+}
+
+function buildDoNotAskBlock(facts: KnownFacts): string {
+  const lines: string[] = [];
+  if (facts.jurisdiction) {
+    lines.push(`- Jurisdiction / country: already provided (${facts.jurisdiction}). Do NOT ask which country, which jurisdiction, or which framework.`);
+  }
+  if (facts.hasGstin) lines.push(`- GSTIN: already provided in history. Do NOT ask for it.`);
+  if (facts.hasPan)   lines.push(`- PAN: already provided in history. Do NOT ask for it.`);
+  if (facts.hasTin)   lines.push(`- Tax ID (EIN/TIN/ITIN): already provided in history. Do NOT ask for it.`);
+  if (facts.entityType) {
+    lines.push(`- Entity type: already provided (${facts.entityType}). Do NOT ask about business structure / legal form.`);
+  }
+  if (lines.length === 0) return '';
+  return `\nALREADY PROVIDED — DO NOT ASK AGAIN:\n${lines.join('\n')}\n`;
+}
 
 export interface ClarificationContext {
   jurisdiction?: string;
@@ -130,10 +197,20 @@ class RequirementClarificationAIService {
    */
   async analyzeQueryAsync(
     query: string,
-    conversationHistory: Array<{ role: string; content: string }> = []
+    conversationHistory: Array<{ role: string; content: string }> = [],
+    conversationId?: string,
   ): Promise<ClarificationAnalysis> {
-    // Check cache first
-    const cacheKey = this.getCacheKey(query, conversationHistory);
+    // Cache key includes the known-facts fingerprint so a repeat query with
+    // new facts (e.g. jurisdiction now known) doesn't hit a stale entry.
+    const knownFacts = extractKnownFactsFromHistory(conversationHistory);
+    const factFingerprint = [
+      knownFacts.jurisdiction ?? '',
+      knownFacts.hasGstin ? 'gstin' : '',
+      knownFacts.hasPan ? 'pan' : '',
+      knownFacts.hasTin ? 'tin' : '',
+      knownFacts.entityType ?? '',
+    ].filter(Boolean).join('|');
+    const cacheKey = this.getCacheKey(query, conversationHistory) + '::' + factFingerprint;
     const cached = this.cache.get(cacheKey);
     if (cached && Date.now() - cached.timestamp < this.cacheTTL) {
       console.log('[ClarificationAI] Using cached analysis');
@@ -146,12 +223,42 @@ class RequirementClarificationAIService {
         ? `\nConversation history:\n${conversationHistory.map(m => `${m.role}: ${m.content}`).join('\n')}`
         : '';
 
+      // Deterministic negative list: facts already in history that gpt-4o-mini
+      // must not re-ask. This is the primary guarantee against context
+      // re-asks — if the regex finds "India" anywhere in history, the model
+      // sees an explicit "DO NOT ASK" instruction upfront.
+      const doNotAsk = buildDoNotAskBlock(knownFacts);
+
+      // Richer probabilistic context from the memory service — glossary of
+      // accumulated facts (names, organisations, amounts, dates, jurisdictions,
+      // tax IDs) plus the LLM-compressed rolling summary of older turns.
+      // Works on top of the do-not-ask list: one catches the obvious cases,
+      // the other gives the model nuance the regex can't capture.
+      let memoryContext = '';
+      if (conversationId) {
+        try {
+          await conversationMemory.hydrateIfEmpty(conversationId);
+          const glossary = conversationMemory.buildGlossaryBlock(conversationId);
+          const summary = conversationMemory.getPersistedSummary(conversationId);
+          const parts: string[] = [];
+          if (glossary) parts.push(glossary);
+          if (summary)  parts.push(`[Rolling summary of earlier turns]\n${summary}`);
+          if (parts.length > 0) {
+            memoryContext = `\n\nCONTEXT FROM EARLIER IN THIS CONVERSATION (treat these facts as already established — do not ask about them):\n${parts.join('\n\n')}\n`;
+          }
+        } catch (err) {
+          console.warn('[ClarificationAI] memory hydration failed:', (err as Error).message);
+        }
+      }
+
       const userMessage = `Analyze this query and determine if clarification is needed before providing professional advice:
 
 Query: "${query}"
-${historyContext}
-
-IMPORTANT: If the conversation history shows that the assistant ALREADY asked clarifying questions and the user has just answered them (providing jurisdiction, entity type, purpose, etc.), then set needsClarification=false and recommendedApproach="answer". Do NOT re-ask questions that the user just answered.
+${historyContext}${memoryContext}${doNotAsk}
+IMPORTANT:
+- If the conversation history OR the "ALREADY PROVIDED" list shows a fact, that fact IS known. Do NOT emit a missingContext item asking for it.
+- If the assistant has already asked clarifying questions and the user answered them, set needsClarification=false and recommendedApproach="answer".
+- Only flag missingContext for facts that are genuinely absent from history AND memory.
 
 Remember: Output ONLY valid JSON, no markdown formatting.`;
 

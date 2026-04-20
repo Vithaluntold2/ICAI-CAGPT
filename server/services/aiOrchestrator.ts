@@ -255,48 +255,21 @@ export class AIOrchestrator {
           clarificationAnalysis.recommendedApproach = 'answer';
         }
       } else {
-        // Use AI-powered async analysis (GPT-4o-mini chain-of-thought) for accurate detection
+        // Use AI-powered async analysis (GPT-4o-mini chain-of-thought) for accurate detection.
+        // The clarifier receives the conversationId so it can pull the memory
+        // glossary + rolling summary and build a deterministic "DO NOT ASK
+        // ABOUT" negative list from history — fixing context re-asks at the
+        // source instead of post-filtering the model's output.
         try {
           clarificationAnalysis = await requirementClarificationAIService.analyzeQueryAsync(
             query,
-            conversationHistory
+            conversationHistory,
+            options?.conversationId,
           );
           console.log(`[AIOrchestrator] AI clarification analysis: needsClarification=${clarificationAnalysis.needsClarification}, approach=${clarificationAnalysis.recommendedApproach}, missing=${clarificationAnalysis.missingContext.length} items`);
         } catch (err) {
           console.error('[AIOrchestrator] AI clarification analysis failed, falling back to heuristic:', err);
           clarificationAnalysis = requirementClarificationAIService.analyzeQuery(query, conversationHistory);
-        }
-      }
-      
-      // Don't re-ask for facts the user already provided earlier in the thread.
-      // gpt-4o-mini sometimes misses jurisdiction/entity/id mentions that live
-      // deep in a long raw history, so we apply a deterministic pass here using
-      // triage output + regex scans across the full conversation text.
-      if (clarificationAnalysis.missingContext.length > 0) {
-        const fullHistoryText = conversationHistory.map(h => h.content).join('\n');
-        const hasJurisdiction = (classification.jurisdiction && classification.jurisdiction.length > 0)
-          || /(?:^|\W)(india|indian|united\s*states|u\.?s\.?a?|american|uk|united\s*kingdom|british|canada|canadian|australia|australian|singapore|hong\s*kong|germany|france|netherlands|u\.?a\.?e\.?|dubai|ifrs|us\s*gaap)(?:\W|$)/i.test(fullHistoryText);
-        const hasGstin = /\b\d{2}[A-Z]{5}\d{4}[A-Z][A-Z\d]Z[A-Z\d]\b/i.test(fullHistoryText);
-        const hasPan   = /\b[A-Z]{5}\d{4}[A-Z]\b/.test(fullHistoryText);
-        const hasTin   = /\b(?:ein|tin|itin|tax\s*id(?:entification)?\s*(?:number|no)?)\s*[:\-]?\s*[A-Z0-9\-]{6,}/i.test(fullHistoryText);
-        const hasEntityType = /\b(pvt\.?\s*ltd\.?|private\s+limited|public\s+limited|llp|llc|sole\s*proprietor(?:ship)?|partnership|s-?corp|c-?corp|corporation|sole\s*trader|hindu\s*undivided\s*family|huf)\b/i.test(fullHistoryText);
-
-        const before = clarificationAnalysis.missingContext.length;
-        clarificationAnalysis.missingContext = clarificationAnalysis.missingContext.filter(m => {
-          const q = (m.suggestedQuestion || '').toLowerCase();
-          const cat = (m.category || '').toLowerCase();
-          if (hasJurisdiction && (cat === 'jurisdiction' || /jurisdiction|which\s+country|which\s+(state|nation)|country.*apply|applicable\s+country/.test(q))) return false;
-          if ((hasGstin || hasPan || hasTin) && /\b(gst(?:in)?|pan(?:\s*card)?|tin|ein|tax\s*id)\b/.test(q)) return false;
-          if (hasEntityType && (cat === 'entity_type' || /entity\s*type|type\s+of\s+(entity|company|business)|business\s+structure|legal\s+structure/.test(q))) return false;
-          return true;
-        });
-        const dropped = before - clarificationAnalysis.missingContext.length;
-        if (dropped > 0) {
-          console.log(`[AIOrchestrator] Dropped ${dropped} missingContext item(s) already answered in history (jurisdiction=${hasJurisdiction}, gstin=${hasGstin}, pan=${hasPan}, entity=${hasEntityType})`);
-        }
-        if (clarificationAnalysis.missingContext.length === 0 && clarificationAnalysis.needsClarification) {
-          clarificationAnalysis.needsClarification = false;
-          clarificationAnalysis.recommendedApproach = 'answer';
         }
       }
 

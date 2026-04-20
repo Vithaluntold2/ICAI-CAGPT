@@ -73,8 +73,8 @@ export class ScenarioDesigner extends EventEmitter implements AgentDefinition {
   async execute(input: AgentInput): Promise<AgentOutput> {
     console.log('[ScenarioDesigner] Designing scenario');
 
-    const baseCase = input.data.baseCase as any;
-    const variables = input.data.variables as string[];
+    const baseCase = (input.data.baseCase as any) || {};
+    const variables = (input.data.variables as string[]) || [];
     const context = input.data.context as string || '';
 
     try {
@@ -344,7 +344,7 @@ export class TaxImpactModeler extends EventEmitter implements AgentDefinition {
   async execute(input: AgentInput): Promise<AgentOutput> {
     console.log('[TaxImpactModeler] Modeling tax impact');
 
-    const scenarios = input.data.scenarios as any[];
+    const scenarios = (input.data.scenarios as any[]) || [];
     const jurisdiction = (input.data.jurisdiction as string) || 'India';
     const entityType = input.data.entityType as string || '';
 
@@ -504,7 +504,7 @@ export class FinancialProjector extends EventEmitter implements AgentDefinition 
   async execute(input: AgentInput): Promise<AgentOutput> {
     console.log('[FinancialProjector] Projecting financials');
 
-    const scenario = input.data.scenario as any;
+    const scenario = (input.data.scenario as any) || {};
     const years = (input.data.years as number) || 5;
     const industry = input.data.industry as string || '';
 
@@ -635,8 +635,8 @@ export class RegulatorySimulator extends EventEmitter implements AgentDefinition
   async execute(input: AgentInput): Promise<AgentOutput> {
     console.log('[RegulatorySimulator] Simulating regulatory changes');
 
-    const currentRegime = input.data.currentRegime as string;
-    const proposedChanges = input.data.proposedChanges as any[];
+    const currentRegime = (input.data.currentRegime as string) || '';
+    const proposedChanges = (input.data.proposedChanges as any[]) || [];
     const jurisdiction = input.data.jurisdiction as string || '';
 
     try {
@@ -770,8 +770,8 @@ export class WhatIfAnalyzer extends EventEmitter implements AgentDefinition {
   async execute(input: AgentInput): Promise<AgentOutput> {
     console.log('[WhatIfAnalyzer] Analyzing what-if scenarios');
 
-    const baseScenario = input.data.baseScenario as any;
-    const variations = input.data.variations as Array<{ variable: string; values: number[] }>;
+    const baseScenario = (input.data.baseScenario as any) || {};
+    const variations = (input.data.variations as Array<{ variable: string; values: number[] }>) || [];
 
     try {
       const analyses = variations.map(variation => 
@@ -910,11 +910,11 @@ export class SensitivityAnalyzer extends EventEmitter implements AgentDefinition
   async execute(input: AgentInput): Promise<AgentOutput> {
     console.log('[SensitivityAnalyzer] Performing sensitivity analysis');
 
-    const model = input.data.model as any;
-    const variables = input.data.variables as string[];
+    const model = (input.data.model as any) || {};
+    const variables = (input.data.variables as string[]) || [];
 
     try {
-      const sensitivities = variables.map(variable => 
+      const sensitivities = variables.map(variable =>
         this.analyzeSensitivity(model, variable)
       );
 
@@ -1037,9 +1037,9 @@ export class MonteCarloSimulator extends EventEmitter implements AgentDefinition
   async execute(input: AgentInput): Promise<AgentOutput> {
     console.log('[MonteCarloSimulator] Running Monte Carlo simulation');
 
-    const model = input.data.model as any;
+    const model = (input.data.model as any) || {};
     const iterations = (input.data.iterations as number) || 1000;
-    const variables = input.data.variables as Array<{ name: string; mean: number; stdDev: number }>;
+    const variables = (input.data.variables as Array<{ name: string; mean: number; stdDev: number }>) || [];
 
     try {
       const results = this.runSimulation(model, variables, iterations);
@@ -1218,9 +1218,9 @@ export class ScenarioComparator extends EventEmitter implements AgentDefinition 
   async execute(input: AgentInput): Promise<AgentOutput> {
     console.log('[ScenarioComparator] Comparing scenarios');
     
-    const scenarios = input.data.scenarios as any[];
+    const scenarios = (input.data.scenarios as any[]) || [];
     const criteria = input.data.criteria as string[] || [];
-    
+
     if (scenarios.length === 0) {
       return {
         success: true,
@@ -1342,7 +1342,7 @@ export class RiskModeler extends EventEmitter implements AgentDefinition {
   async execute(input: AgentInput): Promise<AgentOutput> {
     console.log('[RiskModeler] Modeling risk metrics');
     
-    const scenarios = input.data.scenarios as any[];
+    const scenarios = (input.data.scenarios as any[]) || [];
     const confidenceLevel = (input.data.confidenceLevel as number) || 95;
 
     try {
@@ -1468,7 +1468,7 @@ export class OutcomePredictor extends EventEmitter implements AgentDefinition {
   async execute(input: AgentInput): Promise<AgentOutput> {
     console.log('[OutcomePredictor] Predicting outcomes');
     
-    const scenario = input.data.scenario as any;
+    const scenario = (input.data.scenario as any) || {};
     const historicalData = input.data.historicalData as any[] || [];
     const horizon = input.data.horizon as string || '1 year';
 
@@ -1573,7 +1573,7 @@ export class RecommendationSynthesizer extends EventEmitter implements AgentDefi
   async execute(input: AgentInput): Promise<AgentOutput> {
     console.log('[RecommendationSynthesizer] Synthesizing recommendations');
     
-    const analyses = input.data.analyses as any[];
+    const analyses = (input.data.analyses as any[]) || [];
     // Get previous outputs from data or from previousAgentOutputs array
     const previousOutputs = input.data.previousOutputs || 
       (input.previousAgentOutputs?.reduce((acc: any, out: any) => {

@@ -20,9 +20,9 @@ export class NPVCalculator extends EventEmitter implements AgentDefinition {
   async execute(input: AgentInput): Promise<AgentOutput> {
     console.log('[NPVCalculator] Calculating NPV');
 
-    const cashFlows = input.data.cashFlows as number[];
-    const discountRate = input.data.discountRate as number;
-    const initialInvestment = input.data.initialInvestment as number;
+    const cashFlows = (input.data.cashFlows as number[]) || [];
+    const discountRate = (input.data.discountRate as number) || 0;
+    const initialInvestment = (input.data.initialInvestment as number) || 0;
 
     // Calculate NPV
     const npv = this.calculateNPV(cashFlows, discountRate, initialInvestment);
@@ -116,7 +116,7 @@ export class TaxLiabilityCalculator extends EventEmitter implements AgentDefinit
   async execute(input: AgentInput): Promise<AgentOutput> {
     console.log('[TaxLiabilityCalculator] Calculating tax liability');
 
-    const income = input.data.income as number;
+    const income = (input.data.income as number) || 0;
     const jurisdiction = (input.data.jurisdiction as string) || 'India';
     const regime = (input.data.regime as string) || 'old';
     const deductions = (input.data.deductions as number) || 0;
@@ -199,9 +199,9 @@ export class DepreciationScheduler extends EventEmitter implements AgentDefiniti
   async execute(input: AgentInput): Promise<AgentOutput> {
     console.log('[DepreciationScheduler] Calculating depreciation schedule');
 
-    const assetCost = input.data.assetCost as number;
+    const assetCost = (input.data.assetCost as number) || 0;
     const salvageValue = (input.data.salvageValue as number) || 0;
-    const usefulLife = input.data.usefulLife as number;
+    const usefulLife = (input.data.usefulLife as number) || 1;
     const method = (input.data.method as string) || 'straight-line';
 
     const schedule = this.generateSchedule(assetCost, salvageValue, usefulLife, method);
@@ -294,9 +294,9 @@ export class ROICalculator extends EventEmitter implements AgentDefinition {
   async execute(input: AgentInput): Promise<AgentOutput> {
     console.log('[ROICalculator] Calculating ROI');
 
-    const initialInvestment = input.data.initialInvestment as number;
-    const finalValue = input.data.finalValue as number;
-    const period = input.data.period as number; // in years
+    const initialInvestment = (input.data.initialInvestment as number) || 0;
+    const finalValue = (input.data.finalValue as number) || 0;
+    const period = (input.data.period as number) || 1; // in years
 
     const roi = ((finalValue - initialInvestment) / initialInvestment) * 100;
     const annualizedROI = (Math.pow(finalValue / initialInvestment, 1 / period) - 1) * 100;
@@ -335,9 +335,9 @@ export class BreakEvenAnalyzer extends EventEmitter implements AgentDefinition {
   async execute(input: AgentInput): Promise<AgentOutput> {
     console.log('[BreakEvenAnalyzer] Calculating break-even point');
 
-    const fixedCosts = input.data.fixedCosts as number;
-    const variableCostPerUnit = input.data.variableCostPerUnit as number;
-    const pricePerUnit = input.data.pricePerUnit as number;
+    const fixedCosts = (input.data.fixedCosts as number) || 0;
+    const variableCostPerUnit = (input.data.variableCostPerUnit as number) || 0;
+    const pricePerUnit = (input.data.pricePerUnit as number) || 1;
 
     const breakEvenUnits = fixedCosts / (pricePerUnit - variableCostPerUnit);
     const breakEvenRevenue = breakEvenUnits * pricePerUnit;

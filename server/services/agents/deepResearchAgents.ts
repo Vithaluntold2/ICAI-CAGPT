@@ -554,7 +554,7 @@ export class CrossReferenceBuilder extends EventEmitter implements AgentDefiniti
   async execute(input: AgentInput): Promise<AgentOutput> {
     console.log('[CrossReferenceBuilder] Building cross-references');
 
-    const sourceIds = input.data.sourceIds as string[];
+    const sourceIds = (input.data.sourceIds as string[]) || [];
 
     const crossReferences = [];
 

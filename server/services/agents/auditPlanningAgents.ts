@@ -177,7 +177,7 @@ export class ControlEvaluator extends EventEmitter implements AgentDefinition {
   async execute(input: AgentInput): Promise<AgentOutput> {
     console.log('[ControlEvaluator] Evaluating controls');
 
-    const controls = input.data.controls as any[];
+    const controls = (input.data.controls as any[]) || [];
     const evaluations = controls.map(c => this.evaluateControl(c));
 
     return {
@@ -394,8 +394,8 @@ export class EvidenceCollector extends EventEmitter implements AgentDefinition {
   async execute(input: AgentInput): Promise<AgentOutput> {
     console.log('[EvidenceCollector] Collecting evidence');
 
-    const auditArea = input.data.auditArea as string;
-    const evidenceTypes = input.data.evidenceTypes as string[];
+    const auditArea = (input.data.auditArea as string) || '';
+    const evidenceTypes = (input.data.evidenceTypes as string[]) || [];
 
     const evidence = this.collectEvidence(auditArea, evidenceTypes);
 
@@ -476,8 +476,8 @@ export class TestDesigner extends EventEmitter implements AgentDefinition {
   async execute(input: AgentInput): Promise<AgentOutput> {
     console.log('[TestDesigner] Designing audit tests');
 
-    const assertions = input.data.assertions as string[];
-    const riskLevel = input.data.riskLevel as string;
+    const assertions = (input.data.assertions as string[]) || [];
+    const riskLevel = (input.data.riskLevel as string) || 'medium';
 
     const tests = this.designTests(assertions, riskLevel);
 
@@ -585,9 +585,9 @@ export class SamplingAnalyzer extends EventEmitter implements AgentDefinition {
   async execute(input: AgentInput): Promise<AgentOutput> {
     console.log('[SamplingAnalyzer] Analyzing sampling strategy');
 
-    const populationSize = input.data.populationSize as number;
-    const riskLevel = input.data.riskLevel as string;
-    const materialityAmount = input.data.materialityAmount as number;
+    const populationSize = (input.data.populationSize as number) || 0;
+    const riskLevel = (input.data.riskLevel as string) || 'medium';
+    const materialityAmount = (input.data.materialityAmount as number) || 0;
 
     // Adjust sample size based on materiality - higher materiality = larger sample
     let baseSampleSize = this.calculateSampleSize(populationSize, riskLevel);
@@ -654,7 +654,7 @@ export class FindingDocumenter extends EventEmitter implements AgentDefinition {
   version = '1.0.0';
 
   async execute(input: AgentInput): Promise<AgentOutput> {
-    const findings = input.data.findings as any[];
+    const findings = (input.data.findings as any[]) || [];
     return {
       success: true,
       data: { findings, documented: findings.length },
@@ -671,7 +671,7 @@ export class RecommendationGenerator extends EventEmitter implements AgentDefini
   version = '1.0.0';
 
   async execute(input: AgentInput): Promise<AgentOutput> {
-    const findings = input.data.findings as any[];
+    const findings = (input.data.findings as any[]) || [];
     const recommendations = findings.map((f, i) => ({
       id: `rec_${i + 1}`,
       finding: f.id,
@@ -695,8 +695,8 @@ export class MaterialityCalculator extends EventEmitter implements AgentDefiniti
   version = '1.0.0';
 
   async execute(input: AgentInput): Promise<AgentOutput> {
-    const revenue = input.data.revenue as number;
-    const assets = input.data.assets as number;
+    const revenue = (input.data.revenue as number) || 0;
+    const assets = (input.data.assets as number) || 0;
 
     const overallMateriality = Math.min(revenue * 0.05, assets * 0.01);
     const performanceMateriality = overallMateriality * 0.75;
@@ -717,7 +717,7 @@ export class FraudDetector extends EventEmitter implements AgentDefinition {
   version = '1.0.0';
 
   async execute(input: AgentInput): Promise<AgentOutput> {
-    const transactions = input.data.transactions as any[];
+    const transactions = (input.data.transactions as any[]) || [];
     const indicators = ['unusual-timing', 'round-numbers', 'duplicate-entries'];
 
     return {
@@ -736,7 +736,7 @@ export class InternalControlAnalyzer extends EventEmitter implements AgentDefini
   version = '1.0.0';
 
   async execute(input: AgentInput): Promise<AgentOutput> {
-    const controls = input.data.controls as any[];
+    const controls = (input.data.controls as any[]) || [];
     return {
       success: true,
       data: { controls, effectiveCount: Math.floor(controls.length * 0.8) },
@@ -753,7 +753,7 @@ export class SubstantiveTestDesigner extends EventEmitter implements AgentDefini
   version = '1.0.0';
 
   async execute(input: AgentInput): Promise<AgentOutput> {
-    const accounts = input.data.accounts as string[];
+    const accounts = (input.data.accounts as string[]) || [];
     const tests = accounts.map((acc, i) => ({ id: `test_${i}`, account: acc, type: 'substantive' }));
 
     return {
@@ -772,7 +772,7 @@ export class WalkthroughCoordinator extends EventEmitter implements AgentDefinit
   version = '1.0.0';
 
   async execute(input: AgentInput): Promise<AgentOutput> {
-    const processes = input.data.processes as string[];
+    const processes = (input.data.processes as string[]) || [];
     return {
       success: true,
       data: { processes, scheduledWalkthroughs: processes.length },
@@ -789,8 +789,8 @@ export class AuditPlanOptimizer extends EventEmitter implements AgentDefinition 
   version = '1.0.0';
 
   async execute(input: AgentInput): Promise<AgentOutput> {
-    const plan = input.data.plan as any;
-    const optimized = { ...plan, estimatedHours: plan.estimatedHours * 0.85 };
+    const plan = (input.data.plan as any) || {};
+    const optimized = { ...plan, estimatedHours: (plan.estimatedHours ?? 0) * 0.85 };
 
     return {
       success: true,

@@ -130,6 +130,37 @@ export interface ProcessQueryOptions {
   userId?: string;
 }
 
+/**
+ * Strip the "Start: ... Step N: ... End: ..." block from a workflow-mode
+ * response so it isn't duplicated in chat when the whiteboard already shows
+ * the structured workflow artifact.
+ *
+ * The AI writes workflow prose like:
+ *   Start: <initial label>
+ *   Step 1: <title>
+ *   - <substep>
+ *   ...
+ *   Step N: <title>
+ *   End: <final label>
+ *
+ * Everything AFTER "End: <line>" (typically explanatory narrative paragraphs)
+ * is preserved unchanged. If the pattern doesn't match (no Start: or no End:),
+ * the response is returned as-is — we only strip when we can identify a clean
+ * workflow block to remove.
+ */
+function stripWorkflowProse(response: string): string {
+  // Match from the line starting with "Start:" through the line starting with
+  // "End:" (and its own trailing text). Multiline mode so ^ matches after \n.
+  const workflowBlock = /^\s*Start\s*:[\s\S]*?^\s*End\s*:[^\n]*\n?/m;
+  const match = response.match(workflowBlock);
+  if (!match) return response;
+
+  // Replace the matched block with empty string, then trim leading whitespace
+  // so the narrative doesn't start with blank lines.
+  const after = response.replace(workflowBlock, '').replace(/^\s+/, '');
+  return after;
+}
+
 export class AIOrchestrator {
   /**
    * Main orchestration method - routes query through triage, models, and solvers
@@ -1089,14 +1120,42 @@ export class AIOrchestrator {
           };
         }
 
+        console.log('[whiteboard] starting extraction', {
+          chatMode,
+          hasVisualization: !!visualization,
+          visualizationType: visualization ? (visualization as any).type : null,
+          slots: Object.keys(precomputedSlots).filter(k => (precomputedSlots as any)[k]),
+        });
+
+        // When workflow mode produces a proper workflow visualization, the AI's
+        // prose steps are now redundant — the artifact IS the workflow.
+        // Strip the "Start: ... Step N: ... End: ..." block from mainResponse
+        // so chat only shows the explanatory narrative (same pattern as
+        // Deliverable Composer). Keep the AI's reasoning paragraphs intact.
+        let contentForExtraction = mainResponse;
+        if (chatMode === 'workflow' && precomputedSlots.workflow) {
+          const beforeLen = contentForExtraction.length;
+          contentForExtraction = stripWorkflowProse(contentForExtraction);
+          if (contentForExtraction.length !== beforeLen) {
+            console.log('[whiteboard] stripped workflow prose from chat',
+              { before: beforeLen, after: contentForExtraction.length });
+            mainResponse = contentForExtraction;
+          }
+        }
+
         const built = buildArtifactsForMessage({
-          content: mainResponse,
+          content: contentForExtraction,
           conversationId: options.conversationId,
           messageId: options.messageId,
           chatMode,
           precomputed: precomputedSlots,
           layoutState: seed,
           idFactory: () => `art_${randomUUID().replace(/-/g, '').slice(0, 12)}`,
+        });
+
+        console.log('[whiteboard] extraction complete', {
+          artifactsCreated: built.artifacts.length,
+          kinds: built.artifacts.map(a => a.kind),
         });
 
         if (built.artifacts.length > 0) {
@@ -1106,6 +1165,12 @@ export class AIOrchestrator {
       } catch (e) {
         console.error('[whiteboard] extraction failed; skipping:', e);
       }
+    } else {
+      console.log('[whiteboard] extraction SKIPPED', {
+        flagEnabled: isFeatureEnabled('WHITEBOARD_V2'),
+        hasConversationId: !!options?.conversationId,
+        hasMessageId: !!options?.messageId,
+      });
     }
 
     return {

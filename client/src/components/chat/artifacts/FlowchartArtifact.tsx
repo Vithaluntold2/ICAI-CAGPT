@@ -214,13 +214,11 @@ export function FlowchartArtifact({
     </>
   );
 
-  if (embedded) {
-    // Inside ArtifactCard — no own chrome.
-    return <div className="relative w-full h-full overflow-auto">{body}</div>;
-  }
-  // Standalone (chat inline) — own bordered card so it reads as an artifact.
+  // Same container for embedded and standalone — mermaid renders an SVG with
+  // intrinsic size; a wrapping card-with-max-h collapses the SVG inside a
+  // zero-height parent. The mermaid SVG itself carries the visible box.
   return (
-    <div className="relative w-full bg-card border rounded-lg overflow-auto max-h-[720px]">
+    <div className="relative w-full h-full overflow-auto" data-embedded={embedded || undefined}>
       {body}
     </div>
   );

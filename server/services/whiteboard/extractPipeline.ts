@@ -82,15 +82,18 @@ export function buildArtifactsForMessage(input: BuildArtifactsInput): BuildArtif
     const sheets: any[] = payload?.sheets ?? [];
     if (sheets.length === 0) return NATURAL_SIZE.spreadsheet;
 
-    // Per-row pixel budgets — matched to SpreadsheetViewer's rendered cells.
+    // Per-row pixel budgets — calibrated against SpreadsheetViewer's real
+    // rendered cell heights. Earlier constants over-allocated and left
+    // 100-200px of dead space below the last row in the card.
     const COL_PX = 110;
-    const ROW_PX = 34;
-    const HEADER_ROW_PX = 38;
-    const CHROME_PX = 140;              // title + description + toolbar
-    const TAB_PX = sheets.length > 1 ? 36 : 0;
-    const FORMULAS_PX = (payload?.metadata?.calculations?.length ?? 0) > 0 ? 220 : 0;
+    const ROW_PX = 28;                  // was 34; actual rendered rows are ~28px
+    const HEADER_ROW_PX = 32;           // was 38
+    const CHROME_PX = 90;               // title + description + toolbar — was 140
+    const TAB_PX = sheets.length > 1 ? 30 : 0;
+    const FORMULAS_PX = (payload?.metadata?.calculations?.length ?? 0) > 0 ? 180 : 0;
+    const BOTTOM_PAD_PX = 12;
     const MIN_W = 900, MAX_W = 2000;
-    const MIN_H = 500, MAX_H = 1600;
+    const MIN_H = 320, MAX_H = 1600;    // was 500; let short sheets be short
 
     let maxCols = 0;
     let dataRows = 0;
@@ -104,7 +107,7 @@ export function buildArtifactsForMessage(input: BuildArtifactsInput): BuildArtif
 
     const width  = Math.max(MIN_W, Math.min(MAX_W, maxCols * COL_PX + 40));
     const height = Math.max(MIN_H, Math.min(MAX_H,
-      CHROME_PX + TAB_PX + HEADER_ROW_PX + dataRows * ROW_PX + FORMULAS_PX + 40));
+      CHROME_PX + TAB_PX + HEADER_ROW_PX + dataRows * ROW_PX + FORMULAS_PX + BOTTOM_PAD_PX));
     return { width, height };
   }
 

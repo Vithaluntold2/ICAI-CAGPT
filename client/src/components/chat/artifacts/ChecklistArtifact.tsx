@@ -165,11 +165,7 @@ export function ChecklistArtifact({ artifactId, conversationId, payload, state, 
 
   return (
     <div
-      className={
-        embedded
-          ? "w-full h-full overflow-auto"
-          : "w-full bg-card border rounded-lg overflow-auto max-h-[720px]"
-      }
+      className="w-full h-full overflow-auto"
       data-testid={`checklist-artifact-${artifactId}`}
     >
       <div className="flex items-center gap-2 px-3 py-2 border-b text-xs bg-muted/40">

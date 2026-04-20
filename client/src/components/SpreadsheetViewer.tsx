@@ -121,10 +121,12 @@ export default function SpreadsheetViewer({
       fontSize: style?.font?.size ? `${style.font.size}px` : 'inherit',
       backgroundColor: style?.background || 'transparent',
       textAlign: resolvedAlign,
-      borderTop: style?.border?.top ? '1px solid #e2e8f0' : 'none',
-      borderBottom: style?.border?.bottom ? '1px solid #e2e8f0' : 'none',
-      borderLeft: style?.border?.left ? '1px solid #e2e8f0' : 'none',
-      borderRight: style?.border?.right ? '1px solid #e2e8f0' : 'none',
+      // Border colour resolves from the theme token so cells don't keep
+      // their light-mode slate-200 border when the app is in dark mode.
+      borderTop: style?.border?.top ? '1px solid hsl(var(--border))' : 'none',
+      borderBottom: style?.border?.bottom ? '1px solid hsl(var(--border))' : 'none',
+      borderLeft: style?.border?.left ? '1px solid hsl(var(--border))' : 'none',
+      borderRight: style?.border?.right ? '1px solid hsl(var(--border))' : 'none',
     };
   };
 

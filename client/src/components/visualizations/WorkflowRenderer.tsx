@@ -369,7 +369,45 @@ function WorkflowRendererInner({ nodes: nodesInput, edges: edgesInput, title, la
   const nodes = Array.isArray(nodesInput) ? nodesInput : [];
   const edges = Array.isArray(edgesInput) ? edgesInput : [];
 
-  const [selectedTheme, setSelectedTheme] = useState<ColorTheme>(colorThemes[0]);
+  // Pick the default theme based on the current light/dark mode so dark-mode
+  // users don't land on the bright "CA GPT Classic" palette (near-white step
+  // cells that clash with the dark canvas). Still user-overridable via the
+  // theme dropdown afterwards.
+  const [selectedTheme, setSelectedTheme] = useState<ColorTheme>(() => {
+    if (typeof document !== "undefined" && document.documentElement.classList.contains("dark")) {
+      return colorThemes.find(t => t.name === "Midnight Professional") ?? colorThemes[0];
+    }
+    return colorThemes[0];
+  });
+
+  // Follow live theme toggles + catch the initial state. The useState
+  // initializer above reads `.dark` at render time — too early if the app
+  // applies dark mode from a parent useEffect (which fires AFTER our render
+  // but before our own effects). So we also run a check once on mount here,
+  // and subscribe a MutationObserver for subsequent toggles. Only auto-flips
+  // between the two "paired" themes (CA GPT Classic ↔ Midnight Professional);
+  // any other manual theme choice is preserved.
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const syncTheme = () => {
+      const isDark = document.documentElement.classList.contains("dark");
+      setSelectedTheme(prev => {
+        if (prev.name === "CA GPT Classic" && isDark) {
+          return colorThemes.find(t => t.name === "Midnight Professional") ?? prev;
+        }
+        if (prev.name === "Midnight Professional" && !isDark) {
+          return colorThemes[0];
+        }
+        return prev;
+      });
+    };
+    // Catch the initial state — parent effects may have added .dark after our
+    // useState initializer already ran.
+    syncTheme();
+    const obs = new MutationObserver(syncTheme);
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+    return () => obs.disconnect();
+  }, []);
   const [animateEdges, setAnimateEdges] = useState(true);
   const [customTheme, setCustomTheme] = useState<ColorTheme | null>(null);
   const [currentLayout, setCurrentLayout] = useState(layout);

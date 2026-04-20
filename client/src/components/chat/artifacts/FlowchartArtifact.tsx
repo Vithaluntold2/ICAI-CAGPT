@@ -69,9 +69,28 @@ function normalizeMermaidSource(src: string): string {
   return out.trim();
 }
 
+/**
+ * Prepend a mermaid `%%{init}%%` directive so each rendered diagram picks up
+ * the current light/dark mode — Mermaid's global initialize() locks a theme,
+ * but per-diagram directives override it. Without this, dark-mode users see
+ * a bright white flowchart "stuck to a chalkboard" on the dark canvas.
+ */
+function withThemeDirective(src: string): string {
+  if (typeof document === "undefined") return src;
+  const isDark = document.documentElement.classList.contains("dark");
+  // If the source already carries its own init directive, respect it.
+  if (/^\s*%%\s*\{\s*init\s*:/.test(src)) return src;
+  const theme = isDark ? "dark" : "default";
+  return `%%{init: {'theme':'${theme}'}}%%\n${src}`;
+}
+
 export function FlowchartArtifact({ payload }: { payload: { source: string } }) {
   const ref = useRef<HTMLDivElement>(null);
   const [status, setStatus] = useState<"idle" | "rendering" | "ok" | "error">("idle");
+  // Bump on theme toggles so the useEffect below re-renders the SVG with the
+  // right mermaid theme. Reading the `.dark` class at render time alone
+  // wouldn't re-fire, since source hasn't changed.
+  const [themeTick, setThemeTick] = useState(0);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const handleExport = useCallback(async (format: "png" | "svg") => {
@@ -130,7 +149,7 @@ export function FlowchartArtifact({ payload }: { payload: { source: string } }) 
       try {
         const m = await ensureMermaid();
         const id = `mm-${Math.random().toString(36).slice(2, 10)}`;
-        const normalized = normalizeMermaidSource(source);
+        const normalized = withThemeDirective(normalizeMermaidSource(source));
         // eslint-disable-next-line no-console
         console.debug("[FlowchartArtifact] rendering mermaid", { id, sourceLength: normalized.length });
 
@@ -153,7 +172,16 @@ export function FlowchartArtifact({ payload }: { payload: { source: string } }) 
     return () => {
       cancelled = true;
     };
-  }, [payload?.source]);
+  }, [payload?.source, themeTick]);
+
+  // Watch for theme toggles (class changes on <html>) and bump themeTick so
+  // the mermaid re-render picks up the new dark/light directive.
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const obs = new MutationObserver(() => setThemeTick(t => t + 1));
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+    return () => obs.disconnect();
+  }, []);
 
   if (status === "error") {
     return (

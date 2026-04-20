@@ -5061,13 +5061,28 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
         // Evaluate any Excel formulas the AI emitted INLINE in prose and inline
         // their results next to each formula. Non-destructive: fails silently on
         // any formula error, preserving the original text.
+        //
+        // Runs on BOTH strings that downstream code uses:
+        //   - fullResponse            — what gets streamed in chunks to the client
+        //   - whiteboardUpdatedContent — what gets persisted to the DB (assistantContent)
+        //
+        // Previously only fullResponse was inlined, so the moment the client's
+        // post-stream refetch pulled the DB copy, the chat swapped back to the
+        // raw `=400000*0.05` formulas with no `→ **20000**` annotation.
         try {
           const { inlineFormulaResults } = await import('./services/excel/formulaInliner');
           const before = fullResponse.length;
           const { content: rewritten, stats } = inlineFormulaResults(fullResponse);
           if (stats.succeeded > 0) {
             fullResponse = rewritten;
-            console.log(`[SSE] Inlined ${stats.succeeded}/${stats.attempted} formula results (added ${fullResponse.length - before} chars)`);
+            console.log(`[SSE] Inlined ${stats.succeeded}/${stats.attempted} formula results in fullResponse (added ${fullResponse.length - before} chars)`);
+          }
+          if (result.whiteboardUpdatedContent) {
+            const { content: rewrittenWb, stats: wbStats } = inlineFormulaResults(result.whiteboardUpdatedContent);
+            if (wbStats.succeeded > 0) {
+              result.whiteboardUpdatedContent = rewrittenWb;
+              console.log(`[SSE] Inlined ${wbStats.succeeded}/${wbStats.attempted} formula results in whiteboardUpdatedContent`);
+            }
           }
         } catch (err) {
           console.warn('[SSE] Formula inlining skipped:', (err as Error).message);

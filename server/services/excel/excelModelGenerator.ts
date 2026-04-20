@@ -280,10 +280,22 @@ export class ExcelModelGenerator {
     temperature: number,
     preferredProvider?: AIProviderName
   ): Promise<AIStageResult> {
-    // Try providers in order of preference
-    const providers = preferredProvider 
-      ? [preferredProvider, AIProviderName.CLAUDE, AIProviderName.OPENAI, AIProviderName.GEMINI]
-      : [AIProviderName.CLAUDE, AIProviderName.OPENAI, AIProviderName.GEMINI];
+    // Try providers in order of preference. AZURE_OPENAI added to the
+    // fallback list because in most deployments it IS the only available
+    // provider (Claude/OpenAI/Gemini creds aren't set). Without it, this
+    // entire path hard-fails with "All AI providers failed" even though a
+    // perfectly healthy azure-openai provider is registered — and the
+    // user then sees a broken / empty spreadsheet (legacy fallback kicks
+    // in but produces lower-quality output).
+    const fallbackChain = [
+      AIProviderName.AZURE_OPENAI,
+      AIProviderName.CLAUDE,
+      AIProviderName.OPENAI,
+      AIProviderName.GEMINI,
+    ];
+    const providers = preferredProvider
+      ? [preferredProvider, ...fallbackChain.filter(p => p !== preferredProvider)]
+      : fallbackChain;
 
     for (const providerName of providers) {
       try {

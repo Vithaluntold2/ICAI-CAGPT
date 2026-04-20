@@ -666,6 +666,32 @@ export default function Chat() {
           if (resolvedConvId) {
             (async () => {
               try {
+                // CANCEL any in-flight fetch on the whiteboard / messages keys
+                // BEFORE we start our own. Scenario this fixes:
+                //
+                // Initial message in a brand-new conversation →
+                //   onStart fires setActiveConversation(convId)
+                //   → useConversationArtifacts(convId) mounts, subscribes, and
+                //     kicks off queryFn /api/conversations/:id/whiteboard
+                //     (at this point the artifact is NOT yet persisted — the
+                //      orchestrator hasn't even finished running)
+                //   → streaming completes
+                //   → our onEnd fetches /whiteboard again, gets the populated
+                //     list, and setQueryData(...) caches it.
+                //
+                // If the FIRST (empty) fetch resolves AFTER our setQueryData,
+                // React Query's default behaviour is to overwrite the cache
+                // with whatever that late fetch returned — wiping out our
+                // good data. The result: the artifact resolves for a frame
+                // or two then the placeholder flips back to "loading…" and
+                // stays there until the component remounts (navigate away +
+                // back).
+                //
+                // cancelQueries tears down the in-flight subscriber's fetch
+                // so the late empty response is discarded.
+                await queryClient.cancelQueries({ queryKey: ['whiteboard', resolvedConvId] });
+                await queryClient.cancelQueries({ queryKey: ['/api/conversations', resolvedConvId, 'messages'] });
+
                 // Run both in parallel — they're independent.
                 const [fresh, wbRes] = await Promise.all([
                   conversationApi.getMessages(resolvedConvId),

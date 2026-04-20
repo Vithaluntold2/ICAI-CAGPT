@@ -40,12 +40,17 @@ interface MindMapRendererProps {
 /**
  * Custom node component with clean styling
  */
-function MindMapNode({ data }: { data: MindMapNode }) {
+function MindMapNode({ data }: { data: any }) {
   const [isHovered, setIsHovered] = useState(false);
 
+  // Layout algorithms pass the original node.type as `data.nodeType` (because
+  // ReactFlow reserves `type` on the outer node record). Read `nodeType` here
+  // with `type` as a fallback — without this, every node falls through to the
+  // "leaf" style which is `bg-background text-foreground`, i.e. identical to
+  // the canvas background → invisible in both light and dark modes.
   const getNodeStyles = () => {
     const baseStyles = 'transition-all duration-200 rounded-lg border shadow-sm';
-    const nodeType = data.type || 'leaf';
+    const nodeType = data.nodeType || data.type || 'leaf';
     
     // Clean monochromatic styling that works in both modes
     const styleMap: Record<string, string> = {
@@ -61,8 +66,11 @@ function MindMapNode({ data }: { data: MindMapNode }) {
     }`;
   };
 
+  // Same nodeType-vs-type mismatch as getNodeStyles above.
+  const resolvedType = data.nodeType || data.type;
+
   const getSizeClass = () => {
-    switch (data.type) {
+    switch (resolvedType) {
       case 'root': return 'px-6 py-4 min-w-[200px]';
       case 'primary': return 'px-5 py-3 min-w-[160px]';
       case 'secondary': return 'px-4 py-2.5 min-w-[140px]';
@@ -72,7 +80,7 @@ function MindMapNode({ data }: { data: MindMapNode }) {
   };
 
   const getFontSize = () => {
-    switch (data.type) {
+    switch (resolvedType) {
       case 'root': return 'text-base font-semibold';
       case 'primary': return 'text-sm font-medium';
       case 'secondary': return 'text-sm';
@@ -85,6 +93,9 @@ function MindMapNode({ data }: { data: MindMapNode }) {
       className={`${getNodeStyles()} ${getSizeClass()} relative`}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
+      data-mindmap-node-type={resolvedType ?? "UNSET"}
+      data-mindmap-raw-type={data.type ?? "NONE"}
+      data-mindmap-raw-nodetype={data.nodeType ?? "NONE"}
     >
       {/* @xyflow/react requires custom nodes to declare their connection points.
           Without <Handle> elements, edges are silently dropped. We expose both

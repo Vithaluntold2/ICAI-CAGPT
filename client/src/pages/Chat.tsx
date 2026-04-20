@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -181,6 +181,72 @@ function extractCodeText(node: React.ReactNode): string {
   }
   return "";
 }
+
+/**
+ * Stable-reference mindmap code block. Memoises the JSON.parse result keyed
+ * by the raw source so every parent re-render doesn't hand MindmapArtifact a
+ * fresh payload object — which was causing the ReactFlow layout underneath
+ * to re-run (`setNodes`/`setEdges`) on every keystroke in the composer,
+ * visually flashing the mindmap.
+ */
+const MindmapCodeBlock = React.memo(function MindmapCodeBlock({
+  raw,
+  isStreaming,
+}: {
+  raw: string;
+  isStreaming: boolean;
+}) {
+  const parseResult = useMemo(() => {
+    try {
+      return { ok: true as const, payload: JSON.parse(raw) };
+    } catch (err: any) {
+      return { ok: false as const, error: err?.message ?? "parse error" };
+    }
+  }, [raw]);
+
+  if (parseResult.ok) {
+    return (
+      <div className="my-4 not-prose">
+        <MindmapArtifact payload={parseResult.payload} />
+      </div>
+    );
+  }
+  if (isStreaming) {
+    return (
+      <div className="my-4 not-prose text-xs text-muted-foreground italic flex items-center gap-2">
+        <span className="inline-block h-2 w-2 rounded-full bg-muted-foreground/50 animate-pulse" />
+        Generating mindmap…
+      </div>
+    );
+  }
+  return (
+    <details className="my-4 not-prose text-xs border border-amber-300 bg-amber-50 dark:bg-amber-950/20 rounded p-2">
+      <summary className="font-medium text-amber-700 dark:text-amber-400 cursor-pointer">
+        Mindmap couldn't be parsed — {parseResult.error}
+      </summary>
+      <pre className="mt-2 p-2 bg-muted rounded whitespace-pre-wrap break-all">{raw}</pre>
+    </details>
+  );
+});
+
+/**
+ * Stable-reference flowchart (mermaid) code block. Same reasoning as
+ * MindmapCodeBlock — the FlowchartArtifact ref-compares its `payload.source`
+ * prop; without stabilising here, every parent render reinitialises the
+ * Mermaid instance and redraws the SVG.
+ */
+const FlowchartCodeBlock = React.memo(function FlowchartCodeBlock({
+  source,
+}: {
+  source: string;
+}) {
+  const payload = useMemo(() => ({ source }), [source]);
+  return (
+    <div className="my-4 not-prose">
+      <FlowchartArtifact payload={payload} />
+    </div>
+  );
+});
 
 export default function Chat() {
   const [leftPaneCollapsed, setLeftPaneCollapsed] = useState(false);
@@ -1477,54 +1543,15 @@ export default function Chat() {
                                         return <code className={className} {...props}>{children}</code>;
                                       }
                                       if (/language-mermaid/.test(className)) {
-                                        const source = extractCodeText(children);
-                                        return (
-                                          <div className="my-4 not-prose">
-                                            <FlowchartArtifact payload={{ source }} />
-                                          </div>
-                                        );
+                                        return <FlowchartCodeBlock source={extractCodeText(children)} />;
                                       }
                                       if (/language-mindmap/.test(className)) {
-                                        const raw = extractCodeText(children);
-                                        try {
-                                          const payload = JSON.parse(raw);
-                                          return (
-                                            <div className="my-4 not-prose">
-                                              <MindmapArtifact payload={payload} />
-                                            </div>
-                                          );
-                                        } catch (err: any) {
-                                          // Mid-stream: the JSON is still arriving and won't parse
-                                          // cleanly until the closing brace lands. Show a subtle
-                                          // "generating" hint instead of a red error banner so
-                                          // users don't see a flashing failure card for the
-                                          // 5-30 seconds it takes the mindmap to stream in.
-                                          //
-                                          // After streaming ends, the server's extractMindmaps
-                                          // replaces the fence with an <artifact /> placeholder
-                                          // in the stored message, so this branch only runs
-                                          // either (a) mid-stream, or (b) for a genuinely
-                                          // malformed mindmap that even the server extractor
-                                          // rejected. Only case (b) warrants the hard error —
-                                          // and we still let the user see the raw source
-                                          // inside a collapsible details block.
-                                          if (isStreaming) {
-                                            return (
-                                              <div className="my-4 not-prose text-xs text-muted-foreground italic flex items-center gap-2">
-                                                <span className="inline-block h-2 w-2 rounded-full bg-muted-foreground/50 animate-pulse" />
-                                                Generating mindmap…
-                                              </div>
-                                            );
-                                          }
-                                          return (
-                                            <details className="my-4 not-prose text-xs border border-amber-300 bg-amber-50 dark:bg-amber-950/20 rounded p-2">
-                                              <summary className="font-medium text-amber-700 dark:text-amber-400 cursor-pointer">
-                                                Mindmap couldn't be parsed — {err?.message ?? "invalid JSON"}
-                                              </summary>
-                                              <pre className="mt-2 p-2 bg-muted rounded whitespace-pre-wrap break-all">{raw}</pre>
-                                            </details>
-                                          );
-                                        }
+                                        return (
+                                          <MindmapCodeBlock
+                                            raw={extractCodeText(children)}
+                                            isStreaming={isStreaming}
+                                          />
+                                        );
                                       }
                                       // Fenced block with a recognised language → copy button + hljs styling
                                       return <CodeBlockWithCopy className={className}>{children}</CodeBlockWithCopy>;

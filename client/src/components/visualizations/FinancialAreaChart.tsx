@@ -33,7 +33,9 @@ export default function FinancialAreaChart({
       {title && (
         <h3 className="text-lg font-semibold mb-4 text-center">{title}</h3>
       )}
-      <ResponsiveContainer width="100%" height={400}>
+      {/* Explicit pixel height — see FinancialLineChart for the rationale. */}
+      <div style={{ width: '100%', height: 400 }}>
+      <ResponsiveContainer width="100%" height="100%">
         <AreaChart data={data} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
           <defs>
             {areas.map((area, index) => (
@@ -77,6 +79,7 @@ export default function FinancialAreaChart({
           ))}
         </AreaChart>
       </ResponsiveContainer>
+      </div>
     </div>
   );
 }

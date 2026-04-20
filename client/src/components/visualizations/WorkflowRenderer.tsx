@@ -808,12 +808,24 @@ function WorkflowRendererInner({ nodes: nodesInput, edges: edgesInput, title, la
     };
   }, [isFullscreen, reactFlowInstance]);
 
+  // Three modes:
+  //   fullscreen → full-viewport portal overlay
+  //   embedded   → fills the parent ArtifactCard (no own border/overflow;
+  //                the card owns those). Explicit `height: containerHeight`
+  //                here breaks ReactFlow's viewport measurement when nested
+  //                inside a transformed whiteboard canvas — leaving the
+  //                renderer invisible until the user clicks fullscreen.
+  //   standalone → chat inline, own bordered card + fixed pixel height.
   const containerClass = isFullscreen
     ? "fixed inset-0 z-50 w-screen h-screen rounded-none border-0 shadow-none flex flex-col"
-    : "w-full border rounded-xl overflow-hidden shadow-2xl";
+    : embedded
+      ? "w-full h-full flex flex-col"
+      : "w-full border rounded-xl overflow-hidden shadow-2xl";
   const containerStyle: React.CSSProperties = isFullscreen
     ? { background: activeTheme.background }
-    : { background: activeTheme.background, height: containerHeight };
+    : embedded
+      ? { background: activeTheme.background }
+      : { background: activeTheme.background, height: containerHeight };
 
   // Fullscreen has to escape the whiteboard's transformed container. A
   // transform on any ancestor turns that ancestor into the containing block
@@ -1101,9 +1113,11 @@ function WorkflowRendererInner({ nodes: nodesInput, edges: edgesInput, title, la
         </div>
       )}
 
-      {/* React Flow Canvas. In fullscreen the container is flex-col with an
-          unbounded height, so we use flex-1 instead of a % calc. */}
-      <div className={isFullscreen ? "flex-1 min-h-0" : title ? "h-[calc(100%-72px)]" : "h-full"}>
+      {/* React Flow Canvas. Fullscreen + embedded both use flex-1 inside the
+          flex-col container (parent's height drives the canvas). Standalone
+          uses % calc so it subtracts the header height from its fixed
+          containerHeight. */}
+      <div className={(isFullscreen || embedded) ? "flex-1 min-h-0" : title ? "h-[calc(100%-72px)]" : "h-full"}>
         <ReactFlow
           nodes={flowNodes}
           edges={flowEdges}

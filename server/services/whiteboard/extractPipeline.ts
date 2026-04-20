@@ -1,5 +1,6 @@
 import { extractFlowcharts } from "./extractors/flowchart";
 import { extractMindmaps } from "./extractors/mindmap";
+import { extractCharts } from "./extractors/chart";
 import { extractChecklist } from "./extractors/checklist";
 import { placeNext, NATURAL_SIZE, type LayoutState } from "./autoLayout";
 import type { CreateArtifactInput } from "./repository";
@@ -192,6 +193,17 @@ export function buildArtifactsForMessage(input: BuildArtifactsInput): BuildArtif
   // valid fence, this strip is a no-op on its raw text (already replaced with
   // <artifact />). If it was junk, we silently drop it.
   updatedContent = updatedContent.replace(/```mindmap\s*[\s\S]*?```/g, "");
+
+  // Inline chart JSON: ```chart / ```json fenced blocks OR bare chart-shaped
+  // JSON objects in prose get promoted to chart artifacts. Before this
+  // extractor existed, audit-plan / deep-research queries that asked the AI
+  // to "generate a chart for that" got a pretty-printed JSON blob in chat
+  // instead of a rendered chart — no server-side code recognised the format.
+  const chartSpecs = extractCharts(updatedContent);
+  for (const c of chartSpecs) {
+    const id = place("chart", c.title, c.summary, c.payload);
+    updatedContent = updatedContent.replace(c.rawMatch, `<artifact id="${id}" />`);
+  }
 
   // Mode-gated: checklist artifacts are only extracted in checklist mode.
   // Other modes that happen to contain "- [ ]" lines just keep them as text.

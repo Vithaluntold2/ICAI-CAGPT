@@ -36,7 +36,10 @@ export class WorkflowParser extends EventEmitter implements AgentDefinition {
   async execute(input: AgentInput): Promise<AgentOutput> {
     console.log('[WorkflowParser] Parsing workflow description');
 
-    const description = input.data.description as string;
+    // Orchestrator fires all agents in the pipeline; if the upstream hasn't
+    // supplied a description yet, degrade gracefully to an empty workflow
+    // instead of crashing on `undefined.split(...)`.
+    const description = (input.data.description as string) || '';
     const workflow = this.parseWorkflow(description);
 
     return {
@@ -141,7 +144,7 @@ export class NodeGenerator extends EventEmitter implements AgentDefinition {
   async execute(input: AgentInput): Promise<AgentOutput> {
     console.log('[NodeGenerator] Generating workflow nodes');
 
-    const steps = input.data.steps as string[];
+    const steps = (input.data.steps as string[]) || [];
     const nodes = steps.map((step, index) => this.generateNode(step, index));
 
     return {
@@ -215,7 +218,7 @@ export class EdgeGenerator extends EventEmitter implements AgentDefinition {
   async execute(input: AgentInput): Promise<AgentOutput> {
     console.log('[EdgeGenerator] Generating workflow edges');
 
-    const nodes = input.data.nodes as WorkflowNode[];
+    const nodes = (input.data.nodes as WorkflowNode[]) || [];
     const edges = this.generateEdges(nodes);
 
     return {
@@ -281,8 +284,8 @@ export class LayoutOptimizer extends EventEmitter implements AgentDefinition {
   async execute(input: AgentInput): Promise<AgentOutput> {
     console.log('[LayoutOptimizer] Optimizing workflow layout');
 
-    const nodes = input.data.nodes as WorkflowNode[];
-    const edges = input.data.edges as WorkflowEdge[];
+    const nodes = (input.data.nodes as WorkflowNode[]) || [];
+    const edges = (input.data.edges as WorkflowEdge[]) || [];
     const layout = (input.data.layout as string) || 'hierarchical';
 
     const optimizedNodes = this.optimizeLayout(nodes, edges, layout);
@@ -405,8 +408,8 @@ export class WorkflowValidator extends EventEmitter implements AgentDefinition {
   async execute(input: AgentInput): Promise<AgentOutput> {
     console.log('[WorkflowValidator] Validating workflow');
 
-    const nodes = input.data.nodes as WorkflowNode[];
-    const edges = input.data.edges as WorkflowEdge[];
+    const nodes = (input.data.nodes as WorkflowNode[]) || [];
+    const edges = (input.data.edges as WorkflowEdge[]) || [];
 
     const validation = this.validateWorkflow(nodes, edges);
 

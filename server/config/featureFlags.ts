@@ -69,8 +69,9 @@ export function getFeatureFlags(): FeatureFlags {
     EXPERIMENTAL_AGENTS: process.env.ENABLE_EXPERIMENTAL_AGENTS === 'true',
     DEBUG_MODE: process.env.NODE_ENV !== 'production' || process.env.DEBUG === 'true',
 
-    // Dynamic chat + whiteboard UX (Phase 9+)
-    WHITEBOARD_V2: process.env.ENABLE_WHITEBOARD_V2 === 'true',
+    // Dynamic chat + whiteboard UX. Default ON — set ENABLE_WHITEBOARD_V2=false
+    // as an emergency kill-switch to revert to the legacy OutputPane layout.
+    WHITEBOARD_V2: process.env.ENABLE_WHITEBOARD_V2 !== 'false',
   };
 }
 

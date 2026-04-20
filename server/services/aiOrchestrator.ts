@@ -215,11 +215,30 @@ export class AIOrchestrator {
       (typeof options.selection.highlightedText === 'string' && options.selection.highlightedText.trim().length > 0)
     );
 
+    // Pronoun-only queries ("what does this mean?", "which are remaining?")
+    // are ambiguous on their own but perfectly answerable when the whiteboard
+    // has artifacts — the agent can resolve from the manifest. Skip the
+    // clarifier in that case so it doesn't demand the user re-state what
+    // they're clearly pointing at.
+    const queryLooksLikeReference = /\b(this|that|these|those|it|them|here|above|below)\b/i.test(query || '');
+    let hasArtifactsInConversation = false;
+    if (!hasSelection && queryLooksLikeReference && options?.conversationId) {
+      try {
+        const prior = await listArtifactsByConversation(options.conversationId);
+        hasArtifactsInConversation = prior.length > 0;
+      } catch {
+        // Best-effort — if we can't check, err toward bypass (user-friendlier)
+        hasArtifactsInConversation = true;
+      }
+    }
+
     if (isCasualMessage) {
       // Skip all complex processing for casual messages
       console.log('[AIOrchestrator] Casual message detected - skipping clarification and research');
     } else if (hasSelection) {
       console.log('[AIOrchestrator] Selection context present — skipping clarification analyzer, proceeding direct to answer');
+    } else if (queryLooksLikeReference && hasArtifactsInConversation) {
+      console.log('[AIOrchestrator] Ambiguous pronoun query with artifacts present — skipping clarifier, letting agent resolve from manifest');
     } else if (!options?.attachment) {
       // INTERVIEW-FIRST PATTERN: Use AI-driven async analysis for accurate context detection
       // Check if the user has already answered interview questions in this conversation

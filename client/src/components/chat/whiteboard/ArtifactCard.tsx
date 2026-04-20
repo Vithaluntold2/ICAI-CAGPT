@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import { cn } from "@/lib/utils";
 import { MoreVertical } from "lucide-react";
 import {
@@ -9,6 +10,7 @@ import {
 import type { WhiteboardArtifact } from "../../../../../shared/schema";
 import { ArtifactRenderer } from "../artifacts/ArtifactRenderer";
 import { useSelectionContext } from "./useSelectionContext";
+import { useReportArtifactVisibility } from "./useVisibleArtifacts";
 
 /**
  * Whiteboard artifact card.
@@ -27,9 +29,12 @@ export function ArtifactCard({
   conversationId?: string;
 }) {
   const setArtifacts = useSelectionContext(s => s.setArtifacts);
+  const rootRef = useRef<HTMLDivElement>(null);
+  useReportArtifactVisibility(artifact.id, rootRef);
 
   return (
     <div
+      ref={rootRef}
       className={cn(
         "absolute border rounded-lg bg-card shadow-sm cursor-pointer flex flex-col",
         selected ? "ring-2 ring-blue-500" : "hover:border-blue-400",

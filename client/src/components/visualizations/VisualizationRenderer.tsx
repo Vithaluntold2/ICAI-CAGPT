@@ -38,6 +38,26 @@ function isLegacyVisualization(viz: VisualizationData): viz is LegacyVisualizati
   return legacyTypes.includes(viz.type as LegacyVisualizationType);
 }
 
+// Scan viz data for unevaluated formula strings. The visualization path doesn't
+// run HyperFormula, so cells like "=B6-B7" would render verbatim and mislead
+// the user. Detect the mistake and surface it instead of silently showing raw
+// formula text. The AI is supposed to put formulas in ```sheet blocks; if one
+// leaks here, it's a prompt regression and we want loud feedback.
+function findFormulaLeaks(data: unknown): string[] {
+  const leaks: string[] = [];
+  const visit = (v: unknown) => {
+    if (typeof v === 'string' && /^\s*=[A-Za-z]/.test(v)) {
+      leaks.push(v.trim());
+    } else if (Array.isArray(v)) {
+      v.forEach(visit);
+    } else if (v && typeof v === 'object') {
+      for (const val of Object.values(v)) visit(val);
+    }
+  };
+  visit(data);
+  return leaks;
+}
+
 // Type guard for advanced visualizations
 function isAdvancedVisualization(viz: VisualizationData): viz is AdvancedVisualizationData {
   const advancedTypes: AdvancedVisualizationType[] = ['combo', 'waterfall', 'gauge', 'table', 'kpi-card'];
@@ -59,6 +79,28 @@ export default function VisualizationRenderer({ chartData }: VisualizationRender
 
   // For legacy and advanced charts, data is always present
   const data = 'data' in chartData ? chartData.data : [];
+
+  // Refuse to render when the payload contains unevaluated formulas. The
+  // visualization pipeline has no formula engine — showing "=B6-B7" to the
+  // user is worse than showing nothing. This is a prompt-discipline failure:
+  // the AI should have used a ```sheet``` block. Make it visible instead of
+  // papering over it.
+  const formulaLeaks = findFormulaLeaks(data);
+  if (formulaLeaks.length > 0) {
+    const preview = formulaLeaks.slice(0, 5).join(', ');
+    return (
+      <div className="p-4 border border-amber-400 bg-amber-50 text-amber-900 rounded-md space-y-2 text-sm">
+        <div className="font-semibold">Visualization contains unevaluated formulas</div>
+        <div>
+          {formulaLeaks.length} cell{formulaLeaks.length === 1 ? '' : 's'} start with <code>=</code>{' '}
+          (e.g. <code>{preview}</code>
+          {formulaLeaks.length > 5 ? ', …' : ''}). Formulas must be emitted inside a{' '}
+          <code>```sheet```</code> block so the engine can compute them. Ask the assistant to
+          re-emit this as a sheet block.
+        </div>
+      </div>
+    );
+  }
 
   // Handle legacy Recharts-based visualizations
   if (isLegacyVisualization(chartData)) {

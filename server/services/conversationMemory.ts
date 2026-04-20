@@ -35,6 +35,8 @@ interface Glossary {
   amounts: Set<string>;
   dates: Set<string>;
   orgs: Set<string>;
+  jurisdictions: Set<string>;
+  ids: Set<string>;
 }
 
 interface ConversationStore {
@@ -59,7 +61,14 @@ const SUMMARY_REGEN_EVERY_N = 10;
 const RAW_TAIL_TURNS = 10;
 
 function emptyGlossary(): Glossary {
-  return { names: new Set(), amounts: new Set(), dates: new Set(), orgs: new Set() };
+  return {
+    names: new Set(),
+    amounts: new Set(),
+    dates: new Set(),
+    orgs: new Set(),
+    jurisdictions: new Set(),
+    ids: new Set(),
+  };
 }
 
 // Domain keywords for topic extraction
@@ -241,10 +250,12 @@ export class ConversationMemoryService {
         store.persistedSummaryCoveredTo = persisted.coveredUpToTurn;
         if (persisted.glossary && typeof persisted.glossary === 'object') {
           const g = persisted.glossary as Partial<Record<keyof Glossary, string[]>>;
-          store.glossary.names = new Set([...store.glossary.names, ...(g.names ?? [])]);
-          store.glossary.amounts = new Set([...store.glossary.amounts, ...(g.amounts ?? [])]);
-          store.glossary.dates = new Set([...store.glossary.dates, ...(g.dates ?? [])]);
-          store.glossary.orgs = new Set([...store.glossary.orgs, ...(g.orgs ?? [])]);
+          store.glossary.names         = new Set([...store.glossary.names,         ...(g.names ?? [])]);
+          store.glossary.amounts       = new Set([...store.glossary.amounts,       ...(g.amounts ?? [])]);
+          store.glossary.dates         = new Set([...store.glossary.dates,         ...(g.dates ?? [])]);
+          store.glossary.orgs          = new Set([...store.glossary.orgs,          ...(g.orgs ?? [])]);
+          store.glossary.jurisdictions = new Set([...store.glossary.jurisdictions, ...(g.jurisdictions ?? [])]);
+          store.glossary.ids           = new Set([...store.glossary.ids,           ...(g.ids ?? [])]);
         }
       }
 
@@ -380,10 +391,12 @@ export class ConversationMemoryService {
     if (!store) return '';
     const g = store.glossary;
     const parts: string[] = [];
-    if (g.names.size)   parts.push(`Names / People: ${Array.from(g.names).slice(0, 30).join(', ')}`);
-    if (g.orgs.size)    parts.push(`Organisations: ${Array.from(g.orgs).slice(0, 30).join(', ')}`);
-    if (g.amounts.size) parts.push(`Amounts: ${Array.from(g.amounts).slice(0, 30).join(', ')}`);
-    if (g.dates.size)   parts.push(`Dates: ${Array.from(g.dates).slice(0, 30).join(', ')}`);
+    if (g.jurisdictions.size) parts.push(`Jurisdiction / Country: ${Array.from(g.jurisdictions).slice(0, 10).join(', ')}`);
+    if (g.ids.size)           parts.push(`Tax / Legal IDs: ${Array.from(g.ids).slice(0, 20).join(', ')}`);
+    if (g.names.size)         parts.push(`Names / People: ${Array.from(g.names).slice(0, 30).join(', ')}`);
+    if (g.orgs.size)          parts.push(`Organisations: ${Array.from(g.orgs).slice(0, 30).join(', ')}`);
+    if (g.amounts.size)       parts.push(`Amounts: ${Array.from(g.amounts).slice(0, 30).join(', ')}`);
+    if (g.dates.size)         parts.push(`Dates: ${Array.from(g.dates).slice(0, 30).join(', ')}`);
     if (parts.length === 0) return '';
     return `[Known Facts From This Conversation — cite exactly if referenced]\n${parts.join('\n')}`;
   }
@@ -455,10 +468,12 @@ Write the updated summary:`;
       store.persistedSummaryCoveredTo = coverageTarget - 1;
 
       const glossaryJson = {
-        names:   Array.from(store.glossary.names),
-        amounts: Array.from(store.glossary.amounts),
-        dates:   Array.from(store.glossary.dates),
-        orgs:    Array.from(store.glossary.orgs),
+        names:         Array.from(store.glossary.names),
+        amounts:       Array.from(store.glossary.amounts),
+        dates:         Array.from(store.glossary.dates),
+        orgs:          Array.from(store.glossary.orgs),
+        jurisdictions: Array.from(store.glossary.jurisdictions),
+        ids:           Array.from(store.glossary.ids),
       };
 
       // Upsert into conversation_summaries
@@ -521,6 +536,42 @@ Write the updated summary:`;
       glossary.names.add(t);
     }
 
+    // Jurisdictions: canonical country / framework tokens. Matched with
+    // word-boundary-ish anchors to avoid "us" inside "business" etc.
+    const jurisdictionMap: Array<[string, RegExp]> = [
+      ['India',          /(?:^|\W)(?:india|indian)(?:\W|$)/i],
+      ['United States',  /(?:^|\W)(?:united\s+states|u\.?s\.?a\.?|usa|american)(?:\W|$)/i],
+      ['United Kingdom', /(?:^|\W)(?:united\s+kingdom|u\.?k\.?|britain|british)(?:\W|$)/i],
+      ['Canada',         /(?:^|\W)(?:canada|canadian)(?:\W|$)/i],
+      ['Australia',      /(?:^|\W)(?:australia|australian)(?:\W|$)/i],
+      ['Singapore',      /(?:^|\W)singapore(?:\W|$)/i],
+      ['Hong Kong',      /(?:^|\W)hong\s*kong(?:\W|$)/i],
+      ['UAE',            /(?:^|\W)(?:u\.?a\.?e\.?|united\s+arab\s+emirates|dubai|abu\s*dhabi)(?:\W|$)/i],
+      ['Germany',        /(?:^|\W)(?:germany|german)(?:\W|$)/i],
+      ['France',         /(?:^|\W)(?:france|french)(?:\W|$)/i],
+      ['IFRS',           /(?:^|\W)ifrs(?:\W|$)/i],
+      ['US GAAP',        /(?:^|\W)us\s*gaap(?:\W|$)/i],
+    ];
+    for (const [canon, re] of jurisdictionMap) {
+      if (re.test(text)) glossary.jurisdictions.add(canon);
+    }
+
+    // Tax / legal identifiers: GSTIN, PAN, EIN, ITIN, TIN, etc.
+    // Keep the raw token so the LLM can echo it back verbatim.
+    const idPatterns: RegExp[] = [
+      /\b\d{2}[A-Z]{5}\d{4}[A-Z][A-Z\d]Z[A-Z\d]\b/gi,      // GSTIN (India)
+      /\b[A-Z]{5}\d{4}[A-Z]\b/g,                             // PAN (India)
+      /\b(?:TAN|tan)\s*[:\-]?\s*[A-Z]{4}\d{5}[A-Z]\b/g,      // TAN (India)
+      /\b\d{2}-\d{7}\b/g,                                    // EIN (US)
+      /\b9\d{2}-\d{2}-\d{4}\b/g,                             // ITIN (US)
+      /\b(?:EIN|TIN|ITIN|VAT|CIN|DIN)\s*[:\-]?\s*[A-Z0-9\-]{6,}/gi,
+    ];
+    for (const re of idPatterns) {
+      for (const m of text.match(re) ?? []) {
+        glossary.ids.add(m.trim());
+      }
+    }
+
     // Cap set sizes to avoid unbounded growth on extreme conversations
     const cap = (s: Set<string>, n: number) => {
       if (s.size > n) {
@@ -533,6 +584,8 @@ Write the updated summary:`;
     cap(glossary.amounts, 60);
     cap(glossary.dates, 60);
     cap(glossary.orgs, 60);
+    cap(glossary.jurisdictions, 10);
+    cap(glossary.ids, 30);
   }
 
   /**

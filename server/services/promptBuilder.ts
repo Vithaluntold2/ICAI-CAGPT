@@ -123,6 +123,16 @@ export class PromptBuilder {
       `The engine evaluates every formula in the block and renders the computed sheet in the ` +
       `right-side Output Panel with proper column headers, formulas column, and download. ` +
       `Don't repeat the sheet's contents in prose — the panel IS the presentation.\n\n` +
+      `HARD RULE — FORMULAS ONLY GO IN \`\`\`sheet\`\`\` BLOCKS:\n` +
+      `• If ANY cell of a tabular output contains a value beginning with "=" (a formula), that table ` +
+      `MUST be emitted as a \`\`\`sheet\`\`\` fenced block. NEVER place formula strings (e.g. "=B6-B7", ` +
+      `"=B9*B10", "=SUM(C2:C10)") inside a \`visualization\` JSON object, a mermaid block, a markdown ` +
+      `table, or prose. Those renderers do NOT run the formula engine — the user will see the raw ` +
+      `formula text ("=B6-B7") instead of the computed number.\n` +
+      `• The \`visualization\` payload is for ALREADY-COMPUTED numeric data only (chart-ready rows ` +
+      `of {label, value} where value is a plain number). If you need formulas, use \`\`\`sheet\`\`\`. ` +
+      `If you only have plain numbers and want a chart, use visualization. Never mix the two.\n` +
+      `• Markdown tables are allowed ONLY when every cell is a plain number or a short label — no "=" cells.\n\n` +
       `CRITICAL CELL-REFERENCE RULES inside sheet blocks:\n` +
       `• Row 1 is ALWAYS the header row. The FIRST data row is therefore row 2.\n` +
       `• If your first data row represents "Year 0" (initial investment / t=0), then Year 1 is row 3, ` +

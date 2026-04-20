@@ -268,13 +268,45 @@ export class AIOrchestrator {
         }
       }
       
+      // Don't re-ask for facts the user already provided earlier in the thread.
+      // gpt-4o-mini sometimes misses jurisdiction/entity/id mentions that live
+      // deep in a long raw history, so we apply a deterministic pass here using
+      // triage output + regex scans across the full conversation text.
+      if (clarificationAnalysis.missingContext.length > 0) {
+        const fullHistoryText = conversationHistory.map(h => h.content).join('\n');
+        const hasJurisdiction = (classification.jurisdiction && classification.jurisdiction.length > 0)
+          || /(?:^|\W)(india|indian|united\s*states|u\.?s\.?a?|american|uk|united\s*kingdom|british|canada|canadian|australia|australian|singapore|hong\s*kong|germany|france|netherlands|u\.?a\.?e\.?|dubai|ifrs|us\s*gaap)(?:\W|$)/i.test(fullHistoryText);
+        const hasGstin = /\b\d{2}[A-Z]{5}\d{4}[A-Z][A-Z\d]Z[A-Z\d]\b/i.test(fullHistoryText);
+        const hasPan   = /\b[A-Z]{5}\d{4}[A-Z]\b/.test(fullHistoryText);
+        const hasTin   = /\b(?:ein|tin|itin|tax\s*id(?:entification)?\s*(?:number|no)?)\s*[:\-]?\s*[A-Z0-9\-]{6,}/i.test(fullHistoryText);
+        const hasEntityType = /\b(pvt\.?\s*ltd\.?|private\s+limited|public\s+limited|llp|llc|sole\s*proprietor(?:ship)?|partnership|s-?corp|c-?corp|corporation|sole\s*trader|hindu\s*undivided\s*family|huf)\b/i.test(fullHistoryText);
+
+        const before = clarificationAnalysis.missingContext.length;
+        clarificationAnalysis.missingContext = clarificationAnalysis.missingContext.filter(m => {
+          const q = (m.suggestedQuestion || '').toLowerCase();
+          const cat = (m.category || '').toLowerCase();
+          if (hasJurisdiction && (cat === 'jurisdiction' || /jurisdiction|which\s+country|which\s+(state|nation)|country.*apply|applicable\s+country/.test(q))) return false;
+          if ((hasGstin || hasPan || hasTin) && /\b(gst(?:in)?|pan(?:\s*card)?|tin|ein|tax\s*id)\b/.test(q)) return false;
+          if (hasEntityType && (cat === 'entity_type' || /entity\s*type|type\s+of\s+(entity|company|business)|business\s+structure|legal\s+structure/.test(q))) return false;
+          return true;
+        });
+        const dropped = before - clarificationAnalysis.missingContext.length;
+        if (dropped > 0) {
+          console.log(`[AIOrchestrator] Dropped ${dropped} missingContext item(s) already answered in history (jurisdiction=${hasJurisdiction}, gstin=${hasGstin}, pan=${hasPan}, entity=${hasEntityType})`);
+        }
+        if (clarificationAnalysis.missingContext.length === 0 && clarificationAnalysis.needsClarification) {
+          clarificationAnalysis.needsClarification = false;
+          clarificationAnalysis.recommendedApproach = 'answer';
+        }
+      }
+
       // INQUIRY-FIRST: Always clarify when critical/high context is missing
       // This applies to ALL modes including Deep Research
       // We don't make assumptions about jurisdiction, entity type, etc.
       const shouldClarify = (
         clarificationAnalysis.needsClarification &&
         clarificationAnalysis.recommendedApproach === 'clarify' &&
-        clarificationAnalysis.missingContext.some(m => 
+        clarificationAnalysis.missingContext.some(m =>
           m.importance === 'critical' || m.importance === 'high'
         )
       );
@@ -986,13 +1018,36 @@ export class AIOrchestrator {
       });
     }
 
+    // Extract any ```sheet``` blocks the AI authored directly in its response.
+    // We do this BEFORE building whiteboard artifacts so that the resulting
+    // SpreadsheetData can feed `precomputed.spreadsheet` and get a whiteboard
+    // artifact (which also drives inline chat rendering via <artifact /> tags).
+    // Failing silently is fine — the SSE route runs the same extraction as a
+    // fallback, so a regression here doesn't break the OutputPane path.
+    let aiAuthoredSpreadsheet: any = null;
+    try {
+      const { extractAndEvaluateSheetBlocks } = await import('./excel/sheetBlockParser');
+      const extracted = extractAndEvaluateSheetBlocks(mainResponse);
+      if (extracted.blockCount > 0 && extracted.spreadsheetData) {
+        mainResponse = extracted.text;
+        aiAuthoredSpreadsheet = extracted.spreadsheetData;
+        console.log(`[Orchestrator] Extracted ${extracted.blockCount} AI-authored sheet block(s)`);
+      }
+    } catch (err) {
+      console.warn('[Orchestrator] Sheet-block extraction skipped:', (err as Error).message);
+    }
+
+    // Prefer AI-authored sheet data over the generator's output for downstream
+    // consumers (OutputPane, whiteboard artifact, xlsx download fallback).
+    const effectiveSpreadsheetData = aiAuthoredSpreadsheet ?? spreadsheetPreviewData;
+
     // Add Excel/spreadsheet data to metadata for SSE streaming
     const enrichedMetadata = {
       ...metadata,
       hasExcel: !!excelWorkbook,
       excelBuffer: excelWorkbook?.buffer ? Buffer.from(excelWorkbook.buffer).toString('base64') : undefined,
       excelFilename: excelWorkbook ? `ICAI CAGPT_Calculations_${Date.now()}.xlsx` : undefined,
-      spreadsheetData: spreadsheetPreviewData,
+      spreadsheetData: effectiveSpreadsheetData,
       contentType: chatMode === 'checklist' ? 'checklist'
         : chatMode === 'workflow' ? 'workflow'
         : chatMode === 'calculation' ? 'calculation'
@@ -1016,15 +1071,47 @@ export class AIOrchestrator {
           seed = state;
         }
 
+        // Route the generated visualization into the correct precomputed slot
+        // based on its payload type. Stuffing everything into `.visualization`
+        // made workflows and mindmaps render correctly (the renderer switches
+        // on payload.type) but the persisted artifact kind was always "chart"
+        // — so the manifest lied to the agent about what it was looking at.
+        const precomputedSlots: {
+          visualization?: any;
+          workflow?: any;
+          mindmap?: any;
+          spreadsheet?: any;
+          document?: any;
+        } = {
+          spreadsheet: effectiveSpreadsheetData as any,
+        };
+        if (visualization) {
+          const vizType = (visualization as any).type;
+          if (vizType === 'workflow') {
+            precomputedSlots.workflow = visualization as any;
+          } else if (vizType === 'mindmap') {
+            precomputedSlots.mindmap = visualization as any;
+          } else {
+            precomputedSlots.visualization = visualization as any;
+          }
+        }
+        // Deliverable Composer emits a long-form markdown document via the
+        // `deliverableContent` field. Promote it to a persisted artifact so it
+        // can be selected, referenced, and exported like any other artifact.
+        if (chatMode === 'deliverable-composer' && deliverableContent) {
+          precomputedSlots.document = {
+            title: 'Deliverable',
+            content: deliverableContent,
+            mode: chatMode,
+          };
+        }
+
         const built = buildArtifactsForMessage({
           content: mainResponse,
           conversationId: options.conversationId,
           messageId: options.messageId,
           chatMode,
-          precomputed: {
-            visualization: visualization as any,
-            spreadsheet: spreadsheetPreviewData as any,
-          },
+          precomputed: precomputedSlots,
           layoutState: seed,
           idFactory: () => `art_${randomUUID().replace(/-/g, '').slice(0, 12)}`,
         });
@@ -1056,8 +1143,9 @@ export class AIOrchestrator {
         filename: `ICAI CAGPT_Calculations_${Date.now()}.xlsx`,
         summary: excelWorkbook.summary
       } : undefined,
-      // Include spreadsheet preview data for UI display (with formulas shown as text)
-      spreadsheetData: spreadsheetPreviewData,
+      // Include spreadsheet preview data for UI display (with formulas shown as text).
+      // Prefer AI-authored sheet data when the AI emitted a ```sheet``` fenced block.
+      spreadsheetData: effectiveSpreadsheetData,
       // Whiteboard integration (Phase 2.4)
       whiteboardArtifacts: whiteboardArtifactsOut,
       whiteboardUpdatedContent,

@@ -199,13 +199,27 @@ export class AIOrchestrator {
     // This applies to ALL modes including Deep Research - no assumptions allowed
     // Exception: Skip clarification if document is attached (answer is IN the document)
     let clarificationAnalysis: ClarificationAnalysis | undefined;
-    
+
     // Check if this is a casual message (greeting, thanks, etc.)
     const isCasualMessage = classification.isCasualMessage === true;
-    
+
+    // If the user has explicitly attached a whiteboard selection (a pinned
+    // artifact or a highlighted excerpt), ambiguity in the raw query text
+    // ("what does this mean?", "which ones are left?") is already resolved
+    // by the selection context that gets prepended as a preamble to the user
+    // turn. Running the clarification analyzer in that case just looks at the
+    // bare query and — not seeing the preamble — wrongly demands more input,
+    // blocking the real answer.
+    const hasSelection = !!options?.selection && (
+      (Array.isArray(options.selection.artifactIds) && options.selection.artifactIds.length > 0) ||
+      (typeof options.selection.highlightedText === 'string' && options.selection.highlightedText.trim().length > 0)
+    );
+
     if (isCasualMessage) {
       // Skip all complex processing for casual messages
       console.log('[AIOrchestrator] Casual message detected - skipping clarification and research');
+    } else if (hasSelection) {
+      console.log('[AIOrchestrator] Selection context present — skipping clarification analyzer, proceeding direct to answer');
     } else if (!options?.attachment) {
       // INTERVIEW-FIRST PATTERN: Use AI-driven async analysis for accurate context detection
       // Check if the user has already answered interview questions in this conversation

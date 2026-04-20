@@ -108,6 +108,7 @@ import { ChatMessageRich } from "@/components/chat/ChatMessageRich";
 import { Whiteboard } from "@/components/chat/whiteboard/Whiteboard";
 import { ChatPIP } from "@/components/chat/pip/ChatPIP";
 import { Composer } from "@/components/chat/Composer";
+import { ChatInputBox } from "@/components/chat/ChatInputBox";
 import { useConversationArtifacts } from "@/hooks/useConversationArtifacts";
 import type { ComposerSelection } from "@/components/chat/Composer";
 
@@ -254,7 +255,11 @@ export default function Chat() {
   const [isOutputFullscreen, setIsOutputFullscreen] = useState(false);
   const [activeConversation, setActiveConversation] = useState<string | undefined>();
   const [messages, setMessages] = useState<Message[]>([]);
-  const [inputMessage, setInputMessage] = useState("");
+  // `inputMessage` state was previously here. It has been pushed down into
+  // the ChatInputBox component so typing doesn't re-render the whole Chat
+  // page (which caused mindmaps/flowcharts to visibly re-layout on each
+  // keystroke). The parent now only learns about the text when the user
+  // submits, via ChatInputBox's onSend callback.
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedProfileFilter, setSelectedProfileFilter] = useState<string>("all");
   const [renameDialogOpen, setRenameDialogOpen] = useState(false);
@@ -269,10 +274,8 @@ export default function Chat() {
   const justFinishedStreamingRef = useRef(false);
   // Ref for auto-scroll to bottom
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  // Ref for textarea auto-height reset
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // textareaRef + showToolsRow moved into ChatInputBox (they're input-local).
   const [showChatOverlay, setShowChatOverlay] = useState(false);
-  const [showToolsRow, setShowToolsRow] = useState(false);
   const [isDark, setIsDark] = useState(false);
   const [themeMode, setThemeMode] = useState<'light' | 'dark' | 'system'>('system');
   const [speakControls, setSpeakControls] = useState<SpeakControls | null>(null);
@@ -772,34 +775,30 @@ export default function Chat() {
     .filter(m => m.role === 'assistant')
     .slice(-1)[0]?.content;
 
-  const handleSendMessage = () => {
+  const handleSendMessage = (inputText: string = '') => {
     if (!user) return;
-    if (!inputMessage.trim() && !selectedFile) return;
-    
+    const trimmed = inputText.trim();
+    if (!trimmed && !selectedFile) return;
+
     // Build message content - include both text and filename if both are present
-    const messageContent = inputMessage.trim() 
-      ? (selectedFile ? `${inputMessage} [Attached: ${selectedFile.name}]` : inputMessage)
+    const messageContent = trimmed
+      ? (selectedFile ? `${inputText} [Attached: ${selectedFile.name}]` : inputText)
       : (selectedFile ? `[Attached: ${selectedFile.name}]` : '');
-    
+
     const userMessage: Message = {
       id: Date.now().toString(),
       role: 'user',
       content: messageContent,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     };
-    
+
     setMessages(prev => [...prev, userMessage]);
     // CRITICAL: Pass file to mutation as parameter, not from state
     // State will be cleared immediately, but mutation needs the file
     const fileToSend = selectedFile;
     sendMessageMutation.mutate({ content: messageContent, file: fileToSend });
-    // Clear UI state immediately
-    setInputMessage("");
+    // Clear file; textarea state is cleared inside ChatInputBox itself.
     setSelectedFile(null);
-    // Reset textarea height
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto';
-    }
   };
 
   // Unified send used by the whiteboard v2 Composer / ChatPIP.
@@ -1711,158 +1710,20 @@ export default function Chat() {
             </ScrollArea>
 
             <div className="border-t p-3">
-              <div className="max-w-4xl mx-auto space-y-2">
-                {/* File Preview - only when file selected */}
-                {selectedFile && (
-                  <div className="flex items-center gap-2 p-2 bg-muted rounded-lg text-sm">
-                    <FileText className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                    <span className="truncate flex-1">{selectedFile.name}</span>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-6 w-6"
-                      onClick={handleRemoveFile}
-                      data-testid="button-remove-file"
-                    >
-                      <X className="h-3 w-3" />
-                    </Button>
-                  </div>
-                )}
-                
-                {/* ChatGPT-style Input Container */}
-                <div className="rounded-2xl border bg-background shadow-sm overflow-hidden">
-                  {/* Hidden file input */}
-                  <input
-                    type="file"
-                    id="file-upload"
-                    className="hidden"
-                    onChange={handleFileSelect}
-                    accept=".pdf,.jpg,.jpeg,.png,.tiff,.tif,.xlsx,.xls,.csv,.txt"
-                    aria-label="Upload document file"
-                    data-testid="input-file-upload"
-                  />
-                  
-                  {/* Textarea - full width, no border */}
-                  <Textarea
-                    ref={textareaRef}
-                    placeholder="Ask anything..."
-                    value={inputMessage}
-                    onChange={(e) => {
-                      setInputMessage(e.target.value);
-                      e.target.style.height = 'auto';
-                      e.target.style.height = Math.min(e.target.scrollHeight, 200) + 'px';
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault();
-                        handleSendMessage();
-                      }
-                    }}
-                    rows={1}
-                    className="w-full border-0 shadow-none focus-visible:ring-0 resize-none min-h-[44px] max-h-[200px] overflow-y-auto px-4 pt-3 pb-1 text-base"
-                    data-testid="input-message"
-                  />
-                  
-                  {/* Bottom toolbar inside container */}
-                  <div className="flex items-center justify-between px-2 pb-2 pt-0">
-                    {/* Left: expandable tools */}
-                    <div className="flex items-center gap-0.5">
-                      {/* Expand/collapse tools toggle */}
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 rounded-full hover:bg-muted transition-transform"
-                        onClick={() => setShowToolsRow(!showToolsRow)}
-                        title="More tools"
-                      >
-                        <Plus id="tools-toggle-icon" className={`h-4 w-4 transition-transform duration-200 ${showToolsRow ? 'rotate-45' : ''}`} />
-                      </Button>
-                      
-                      {/* Expandable tool buttons - hidden by default */}
-                      {showToolsRow && (
-                      <div className="flex items-center gap-0.5 animate-in slide-in-from-left-2 duration-200">
-                        {/* Attachment */}
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 rounded-full"
-                          onClick={() => document.getElementById('file-upload')?.click()}
-                          title="Attach file"
-                          data-testid="button-attach-file"
-                        >
-                          <Paperclip className="h-4 w-4" />
-                        </Button>
-                        
-                        {/* Chat Mode selector */}
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8 rounded-full"
-                              title="Chat mode"
-                              data-testid="button-chat-mode"
-                            >
-                              {(() => {
-                                const mode = chatModes.find(m => m.id === chatMode);
-                                const Icon = mode?.icon || MessageSquare;
-                                return <Icon className="h-4 w-4" />;
-                              })()}
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="start" className="w-64">
-                            {chatModes.map((mode) => {
-                              const Icon = mode.icon;
-                              const isSelected = chatMode === mode.id;
-                              return (
-                                <DropdownMenuItem
-                                  key={mode.id}
-                                  onClick={() => setChatMode(mode.id)}
-                                  className={isSelected ? 'bg-accent' : ''}
-                                  data-testid={`chat-mode-${mode.id}`}
-                                >
-                                  <Icon className="h-4 w-4 mr-2" />
-                                  <div className="flex-1">
-                                    <span className="font-medium">{mode.label}</span>
-                                    {isSelected && <Check className="h-3 w-3 ml-2 inline" />}
-                                  </div>
-                                </DropdownMenuItem>
-                              );
-                            })}
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </div>
-                      )}
-                      
-                      {/* Voice mic - ChatGPT style: just the mic */}
-                      <VoiceModeEnhanced 
-                        onTranscription={(text) => setInputMessage(prev => prev ? `${prev} ${text}` : text)}
-                        onSendMessage={handleSendMessage}
-                        onSpeakReady={setSpeakControls}
-                        lastAssistantMessage={lastAssistantMessage}
-                        conversationId={activeConversation}
-                        inputMessage={inputMessage}
-                      />
-                    </div>
-                    
-                    {/* Right: Send button */}
-                    <Button
-                      variant="default"
-                      size="icon"
-                      className="h-8 w-8 rounded-full flex-shrink-0"
-                      onClick={handleSendMessage}
-                      disabled={(inputMessage.trim() === '' && !selectedFile) || sendMessageMutation.isPending || uploadingFile}
-                      data-testid="button-send"
-                    >
-                      {uploadingFile ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Send className="h-4 w-4" />
-                      )}
-                    </Button>
-                  </div>
-                </div>
-              </div>
+              <ChatInputBox
+                selectedFile={selectedFile}
+                onRemoveFile={handleRemoveFile}
+                onFileSelect={handleFileSelect}
+                chatMode={chatMode}
+                onChatModeChange={setChatMode}
+                chatModes={chatModes}
+                onSend={handleSendMessage}
+                busy={sendMessageMutation.isPending}
+                uploadingFile={uploadingFile}
+                conversationId={activeConversation}
+                lastAssistantMessage={lastAssistantMessage}
+                onSpeakReady={setSpeakControls}
+              />
             </div>
           </div>
           )}

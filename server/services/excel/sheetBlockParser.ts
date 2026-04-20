@@ -179,6 +179,10 @@ function parseSheetBlock(body: string): ParsedBlock | null {
           const leftAddr = cellAddress(r, c - 1);
           const leftVal = grid[r][c - 1];
           if (leftVal !== '' && leftVal !== null) {
+            // Heuristic A: the "Tax = Portion × Rate" pattern. Formula is in
+            // the Tax column (C or D), left-adjacent cell in the same row
+            // holds the portion / amount. Rewrite the self-ref to the
+            // left-adjacent address.
             const fixed = formula.replace(selfRef, leftAddr);
             console.warn(
               `[sheetBlockParser] Self-referential formula at ${addr}: "${formula}" — rewriting to "${fixed}" (reference the INPUT cell in column ${String.fromCharCode(64 + c)}, not the formula's own cell)`,
@@ -187,9 +191,55 @@ function parseSheetBlock(body: string): ParsedBlock | null {
             formulaList.push(fixed);
             continue;
           } else {
-            console.warn(
-              `[sheetBlockParser] Self-referential formula at ${addr}: "${formula}" — left-adjacent cell is empty, leaving as-is (will produce #ERR)`,
-            );
+            // Heuristic B: the aggregate pattern. Left-adjacent cell is empty
+            // — the row is a summary row like "Cess @ 4%" or "Total Tax
+            // Liability" where columns 1 and 2 are labels/blank. The AI
+            // wrote something like `=D10*0.04` in D10 meaning "4% of total
+            // tax above" or `=D10+D11` in D11 meaning "tax + cess". The
+            // right fix is to SUM the same column above, BUT exclude rows
+            // already referenced by OTHER cell refs in the formula (so
+            // `=D10+D11` → `=D10+SUM(D5:D9)`, not `=D10+SUM(D5:D10)`
+            // which would double-count D10).
+            const selfColLetter = String.fromCharCode(65 + c);
+            const selfRow1Based = r + 1;
+            // Extract every cell ref from the formula (col letters + row number)
+            const allRefsRe = /(?<![A-Z])([A-Z]+)(\d+)(?![0-9])/gi;
+            const sameColOtherRefRows: number[] = [];
+            for (const m of formula.matchAll(allRefsRe)) {
+              const refCol = m[1].toUpperCase();
+              const refRow = parseInt(m[2], 10);
+              if (refCol === selfColLetter && refRow !== selfRow1Based) {
+                sameColOtherRefRows.push(refRow);
+              }
+            }
+            // SUM end: just before self row, or just before the nearest
+            // already-referenced row in the same column (whichever is lower).
+            let sumEnd1Based = selfRow1Based - 1;
+            if (sameColOtherRefRows.length > 0) {
+              sumEnd1Based = Math.min(sumEnd1Based, Math.min(...sameColOtherRefRows) - 1);
+            }
+            // SUM start: top-most non-empty row in this column above sumEnd.
+            let sumStart1Based = -1;
+            for (let rr1 = 2; rr1 <= sumEnd1Based; rr1++) { // 1-based, skip header row 1
+              const cellVal = grid[rr1 - 1]?.[c];
+              if (cellVal !== '' && cellVal !== null && cellVal !== undefined) {
+                if (sumStart1Based === -1) sumStart1Based = rr1;
+              }
+            }
+            if (sumStart1Based !== -1 && sumStart1Based <= sumEnd1Based) {
+              const sumExpr = `SUM(${selfColLetter}${sumStart1Based}:${selfColLetter}${sumEnd1Based})`;
+              const fixed = formula.replace(selfRef, sumExpr);
+              console.warn(
+                `[sheetBlockParser] Self-referential formula at ${addr}: "${formula}" — left-adjacent cell is empty; rewriting to "${fixed}" using column-${selfColLetter} aggregate.`,
+              );
+              cellFormulas[addr] = fixed;
+              formulaList.push(fixed);
+              continue;
+            } else {
+              console.warn(
+                `[sheetBlockParser] Self-referential formula at ${addr}: "${formula}" — no recoverable reference found, leaving as-is (will produce #ERR)`,
+              );
+            }
           }
         }
         cellFormulas[addr] = formula;

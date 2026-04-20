@@ -4,6 +4,7 @@ import { WorkflowArtifact } from "./WorkflowArtifact";
 import { MindmapArtifact } from "./MindmapArtifact";
 import { SpreadsheetArtifact } from "./SpreadsheetArtifact";
 import { FlowchartArtifact } from "./FlowchartArtifact";
+import { ChecklistArtifact } from "./ChecklistArtifact";
 
 export function ArtifactRenderer({
   artifact,
@@ -29,6 +30,15 @@ export function ArtifactRenderer({
       );
     case "flowchart":
       return <FlowchartArtifact payload={artifact.payload as any} />;
+    case "checklist":
+      return (
+        <ChecklistArtifact
+          artifactId={artifact.id}
+          conversationId={conversationId}
+          payload={artifact.payload as any}
+          state={(artifact.state ?? {}) as any}
+        />
+      );
     default:
       return <div className="text-muted-foreground text-sm">Unsupported artifact kind: {artifact.kind}</div>;
   }

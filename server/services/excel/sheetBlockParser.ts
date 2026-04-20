@@ -162,8 +162,38 @@ function parseSheetBlock(body: string): ParsedBlock | null {
       if (v === '' || v === null) continue;
       const addr = cellAddress(r, c);
       if (typeof v === 'string' && v.trim().startsWith('=')) {
-        cellFormulas[addr] = v.trim();
-        formulaList.push(v.trim());
+        const formula = v.trim();
+        // Detect self-referential formulas — a cell whose formula references
+        // its own address (e.g. C5 holding `=C5*0.05`). HyperFormula returns
+        // #CYCLE! which renders as #ERR and propagates through every
+        // downstream SUM / dependent formula. Common LLM mistake: writing
+        // tax-per-slab formulas in column C that reference C instead of the
+        // portion in column B. We log loudly so we can see AI regressions,
+        // and we REWRITE the formula to reference the IMMEDIATELY-LEFT cell
+        // (column - 1). That's the almost-always-correct intended target
+        // for this pattern and stops the #ERR cascade. If the column-left
+        // cell is empty, we fall through to the original formula and let HF
+        // surface the cycle.
+        const selfRef = new RegExp(`(?<![A-Z])${addr}(?![0-9])`, 'i');
+        if (selfRef.test(formula) && c > 0) {
+          const leftAddr = cellAddress(r, c - 1);
+          const leftVal = grid[r][c - 1];
+          if (leftVal !== '' && leftVal !== null) {
+            const fixed = formula.replace(selfRef, leftAddr);
+            console.warn(
+              `[sheetBlockParser] Self-referential formula at ${addr}: "${formula}" — rewriting to "${fixed}" (reference the INPUT cell in column ${String.fromCharCode(64 + c)}, not the formula's own cell)`,
+            );
+            cellFormulas[addr] = fixed;
+            formulaList.push(fixed);
+            continue;
+          } else {
+            console.warn(
+              `[sheetBlockParser] Self-referential formula at ${addr}: "${formula}" — left-adjacent cell is empty, leaving as-is (will produce #ERR)`,
+            );
+          }
+        }
+        cellFormulas[addr] = formula;
+        formulaList.push(formula);
       } else {
         cellLiterals[addr] = v;
       }

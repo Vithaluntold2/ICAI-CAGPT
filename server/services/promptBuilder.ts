@@ -145,6 +145,24 @@ export class PromptBuilder {
       `VLOOKUP, XLOOKUP, NPV, IRR, PMT, FV, PV, SUMIFS, COUNTIFS all work.\n` +
       `• For payback period with a cumulative column J: \`=MATCH(TRUE, J2:J7>=0, 0)\` (plus adjustment ` +
       `for the offset) works and is portable.\n\n` +
+      `NO SELF-REFERENCING FORMULAS:\n` +
+      `• A formula placed in cell X MUST NEVER reference cell X itself. That is a circular reference — ` +
+      `HyperFormula returns #CYCLE! which renders as #ERR and propagates through every SUM / dependent ` +
+      `formula downstream.\n` +
+      `• The classic mistake: computing "Tax" in column C from "Portion" in column B. The Portion sits ` +
+      `in B{row}. The Tax formula sits in C{row}. The formula MUST read from B{row}, not C{row}:\n` +
+      `    RIGHT (in cell C5):   \`=B5*0.05\`  ← reads portion from B5, writes tax into C5\n` +
+      `    WRONG (in cell C5):   \`=C5*0.05\`  ← circular, yields #ERR everywhere\n` +
+      `• The engine does NOT "display the formula text" in a cell. A cell beginning with "=" is ALWAYS ` +
+      `evaluated. If you want the cell to show the COMPUTED VALUE, the formula must read from other cells.\n` +
+      `• When emitting slab-wise tax / cashflow / amortisation tables, use the layout:\n` +
+      `    Column A: Label (prose)\n` +
+      `    Column B: Input value (portion / year / cashflow)\n` +
+      `    Column C: Computed value as a formula referencing column B of the SAME row\n` +
+      `  Concrete example — row 5 is Slab 1:\n` +
+      `    A5 = "Slab 1: 0 to 3,00,000 @ 0%"\n` +
+      `    B5 = \`=MIN(B4,300000)\`       ← portion, reads taxable income from B4\n` +
+      `    C5 = \`=B5*0\`                  ← tax for this slab, reads portion from B5 (NEVER C5)\n\n` +
       `NO SECTION-HEADER ROWS inside \`\`\`sheet\`\`\` blocks:\n` +
       `• Every row you emit inside a \`\`\`sheet\`\`\` block MUST contain cell data comparable to other ` +
       `rows (i.e. populate every column, even if the value is 0 or empty-string). Do NOT emit ` +

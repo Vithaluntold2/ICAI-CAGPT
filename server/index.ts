@@ -28,6 +28,18 @@ function safeRegister(tool: { name: string }, register: () => void) {
 safeRegister(readWhiteboardTool, () => toolRegistry.register(readWhiteboardTool));
 safeRegister(updateChecklistTool, () => toolRegistry.register(updateChecklistTool));
 
+// One-shot: purge the AI response cache on boot when PURGE_AI_CACHE_ON_BOOT=true.
+// We had stale 67-char stubs cached from an earlier interrupted stream that
+// kept being served to every user with the same query. Setting this env var
+// and restarting wipes them. Safe to leave off after the first clean boot.
+if (process.env.PURGE_AI_CACHE_ON_BOOT === "true") {
+  import('./services/hybridCache').then(({ AIResponseCache }) => {
+    AIResponseCache.purgeAll()
+      .then(n => console.log(`[Startup] Purged ${n} stale AI cache entries`))
+      .catch(err => console.error('[Startup] Cache purge failed:', err));
+  });
+}
+
 // =============================================================================
 // GLOBAL ERROR HANDLERS - Catch unhandled errors to prevent crashes
 // =============================================================================

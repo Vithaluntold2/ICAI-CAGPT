@@ -364,37 +364,118 @@ export interface CachedAIResponse {
   cachedAt: number;
 }
 
+/**
+ * Decide whether a response is worth caching. A too-short response, an empty
+ * response, or a response that looks like a placeholder/status-line almost
+ * always means the upstream call was interrupted; caching those would poison
+ * the cache and every later user with the same query would see the stub.
+ */
+function isResponseCacheWorthy(r: CachedAIResponse | null | undefined): boolean {
+  if (!r || !r.response) return false;
+  const text = r.response.trim();
+  // A real substantive response is at least a few hundred chars. Set a
+  // conservative floor to catch the obvious garbage (we saw 67-char stubs).
+  if (text.length < 200) return false;
+  // Well-known placeholder fragments we've seen cached when streaming broke.
+  // These are never legitimate complete responses on their own.
+  const BAD_STUBS = [
+    /^detailed explanation of framework, priorities, and regulatory logic\s*$/i,
+    /^generating response[.…\s]*$/i,
+    /^analy(s|z)ing[.…\s]*$/i,
+    /^\s*$/,
+  ];
+  if (BAD_STUBS.some(re => re.test(text))) return false;
+  return true;
+}
+
+// Bumping this prefix invalidates every existing cached response — the keys
+// change and stale entries are effectively dead until TTL expiry. Use when
+// the response-shape contract changes or when the cache has been poisoned.
+const CACHE_KEY_PREFIX = 'ai-v2';
+
 export const AIResponseCache = {
   getCacheKey(query: string, chatMode: string, userTier: string): string {
     const normalized = query.toLowerCase().trim().replace(/\s+/g, ' ');
     const hash = Buffer.from(normalized).toString('base64').substring(0, 50);
-    return `ai:${chatMode}:${userTier}:${hash}`;
+    return `${CACHE_KEY_PREFIX}:${chatMode}:${userTier}:${hash}`;
   },
 
-  // Get full cached response including visualization
+  // Get full cached response including visualization.
+  // Self-healing: if the stored entry fails the cache-worthy check (left over
+  // from a prior buggy cache-set), evict it and pretend we had a miss so the
+  // orchestrator makes a fresh call.
   async getFullResponse(query: string, chatMode: string, userTier: string): Promise<CachedAIResponse | null> {
     const key = this.getCacheKey(query, chatMode, userTier);
     const cached = await CacheService.get<CachedAIResponse>(key);
-    if (cached) {
-      console.log(`[AICache] HIT for query: "${query.substring(0, 50)}..." (mode: ${chatMode})`);
+    if (!cached) return null;
+    if (!isResponseCacheWorthy(cached)) {
+      console.warn(`[AICache] EVICT corrupted entry for "${query.substring(0, 50)}..." (mode: ${chatMode}, len=${cached?.response?.length ?? 0})`);
+      await CacheService.del(key);
+      return null;
     }
+    console.log(`[AICache] HIT for query: "${query.substring(0, 50)}..." (mode: ${chatMode})`);
     return cached;
   },
 
-  // Set full response with visualization
+  // Set full response with visualization — only if cache-worthy.
   async setFullResponse(
-    query: string, 
-    chatMode: string, 
-    userTier: string, 
+    query: string,
+    chatMode: string,
+    userTier: string,
     fullResponse: CachedAIResponse
   ): Promise<void> {
+    if (!isResponseCacheWorthy(fullResponse)) {
+      console.warn(`[AICache] REFUSE to cache short/placeholder response for "${query.substring(0, 50)}..." (mode: ${chatMode}, len=${fullResponse?.response?.length ?? 0})`);
+      return;
+    }
     const key = this.getCacheKey(query, chatMode, userTier);
     const toCache: CachedAIResponse = {
       ...fullResponse,
       cachedAt: Date.now()
     };
     await CacheService.set(key, toCache, 1800); // 30 min TTL
-    console.log(`[AICache] STORED response for query: "${query.substring(0, 50)}..." (mode: ${chatMode})`);
+    console.log(`[AICache] STORED response for query: "${query.substring(0, 50)}..." (mode: ${chatMode}, len=${fullResponse.response.length})`);
+  },
+
+  /**
+   * Nuke the entire response cache. Call when the cache is known to be
+   * corrupted by stale entries from before a fix landed. Best-effort — works
+   * against Redis (SCAN+DEL on the prefix) and against the Postgres fallback
+   * table when Redis is down.
+   */
+  async purgeAll(): Promise<number> {
+    let removed = 0;
+    if (redisAvailable && redisClient) {
+      try {
+        const stream = redisClient.scanStream({ match: `luca:cache:${CACHE_KEY_PREFIX}:*`, count: 200 });
+        const toDelete: string[] = [];
+        await new Promise<void>((resolve, reject) => {
+          stream.on('data', (keys: string[]) => {
+            for (const k of keys) {
+              // Redis client has keyPrefix 'luca:cache:' — scanStream returns full keys;
+              // del expects keys WITHOUT the prefix, so strip it.
+              toDelete.push(k.replace(/^luca:cache:/, ''));
+            }
+          });
+          stream.on('end', () => resolve());
+          stream.on('error', (err) => reject(err));
+        });
+        if (toDelete.length > 0) {
+          await redisClient.del(...toDelete);
+          removed += toDelete.length;
+        }
+      } catch (err) {
+        console.warn('[AICache] Redis purge failed:', err);
+      }
+    }
+    try {
+      const res = await db.execute(sql`DELETE FROM cache_entries WHERE cache_key LIKE ${`${CACHE_KEY_PREFIX}:%`}`);
+      removed += (res.rowCount ?? 0);
+    } catch {
+      // cache_entries table may not exist yet — ignore
+    }
+    console.log(`[AICache] purgeAll removed ~${removed} entries`);
+    return removed;
   },
 
   // Legacy methods for backward compatibility

@@ -286,12 +286,25 @@ You MUST establish: deliverable type (engagement letter / management representat
         ? `\n${MODE_SCOPE_HINTS[ctx.chatMode]}\n`
         : '';
 
-      // Attachment handling differs by mode. In standard chat, an attached
-      // doc usually IS the answer source, so skip interrogation. In
-      // professional modes the file is supplementary data — keep scoping.
+      // Attachment handling differs by mode + intent.
+      //
+      // Standard chat:   attached doc IS the answer source — skip interrogation.
+      //
+      // Professional mode + "read/describe this doc" intent  ("what does
+      // this say?", "summarise this", "translate", "show me the totals",
+      // "extract the account numbers", "explain this entry") → the user
+      // wants EXPOSITION, not a deliverable. Treat like standard chat:
+      // answer from the doc, don't interrogate about scope.
+      //
+      // Professional mode + "produce a deliverable" intent ("audit this",
+      // "draft an opinion", "calculate tax", "build the workflow",
+      // "investigate these transactions") → scope is mandatory even with
+      // the doc attached. Run the full mode-specific scoping interrogation.
       const attachmentNote = ctx?.hasAttachment
         ? (ctx.chatMode && MODE_SCOPE_HINTS[ctx.chatMode]
-            ? `\nThe user has attached a document. In ${ctx.chatMode} mode, an attachment provides INPUT DATA but does NOT answer the scoping questions above. Continue to clarify scope.\n`
+            ? `\nThe user has attached a document. IMPORTANT — decide intent first:
+• If the query is purely descriptive of the document (examples: "what does this say?", "summarise this", "translate", "explain this entry", "what are the totals?", "OCR this", "read / describe / extract / show me ..."), treat this exactly like standard chat — set needsClarification=false and approach="answer". Do NOT ask scoping questions.
+• If the query asks you to PRODUCE a mode-specific deliverable based on the document (examples in ${ctx.chatMode} mode: "audit this", "calculate the tax", "draft a workflow", "investigate these transactions", "compose the engagement letter"), an attachment provides DATA but NOT scope — continue to clarify per the mode hint above.\n`
             : `\nThe user has attached a document — most of the answer likely lives in the document itself. Only ask for clarification if the USER'S QUESTION is itself ambiguous beyond what the document can resolve.\n`)
         : '';
 

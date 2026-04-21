@@ -22,7 +22,7 @@ export interface MindMapRendererHandle {
    *  isn't mounted yet. Used by the artifact wrapper's download menu. */
   exportPng: () => Promise<Blob | null>;
   /** Capture the current mindmap as an SVG blob. */
-  exportSvg: () => Blob | null;
+  exportSvg: () => Promise<Blob | null>;
 }
 
 interface MindMapRendererProps {
@@ -245,21 +245,53 @@ const MindMapRenderer = forwardRef<MindMapRendererHandle, MindMapRendererProps>(
     useImperativeHandle(
       ref,
       () => ({
+        // Mind Elixir ships its own `exportPng` / `exportSvg`, but both
+        // route through `modern-screenshot` with font.ready/CORS logic
+        // that silently returns `null` when anything is off (the user
+        // then sees no download and no error). Capture the container
+        // ourselves with html-to-image — same technique the workflow
+        // artifact uses — so the export is reliable and the failure
+        // mode is an actual thrown error we can surface to the caller.
         exportPng: async () => {
-          const i = instanceRef.current;
-          if (!i) return null;
+          const el = containerRef.current;
+          if (!el) return null;
           try {
-            return await i.exportPng();
+            const htmlToImage = await import("html-to-image");
+            const isDark =
+              typeof document !== "undefined" &&
+              document.documentElement.classList.contains("dark");
+            const rect = el.getBoundingClientRect();
+            return await htmlToImage.toBlob(el, {
+              pixelRatio: 2,
+              cacheBust: true,
+              skipFonts: true,
+              width: Math.max(1, Math.round(rect.width)),
+              height: Math.max(1, Math.round(rect.height)),
+              backgroundColor: isDark ? "#0b1220" : "#ffffff",
+            });
           } catch (err) {
             console.error("[MindMapRenderer] exportPng failed:", err);
             return null;
           }
         },
-        exportSvg: () => {
-          const i = instanceRef.current;
-          if (!i) return null;
+        exportSvg: async () => {
+          const el = containerRef.current;
+          if (!el) return null;
           try {
-            return i.exportSvg();
+            const htmlToImage = await import("html-to-image");
+            const isDark =
+              typeof document !== "undefined" &&
+              document.documentElement.classList.contains("dark");
+            const rect = el.getBoundingClientRect();
+            const dataUrl = await htmlToImage.toSvg(el, {
+              cacheBust: true,
+              skipFonts: true,
+              width: Math.max(1, Math.round(rect.width)),
+              height: Math.max(1, Math.round(rect.height)),
+              backgroundColor: isDark ? "#0b1220" : "#ffffff",
+            });
+            const resp = await fetch(dataUrl);
+            return await resp.blob();
           } catch (err) {
             console.error("[MindMapRenderer] exportSvg failed:", err);
             return null;

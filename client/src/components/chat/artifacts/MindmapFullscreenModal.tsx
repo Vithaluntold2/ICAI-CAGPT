@@ -51,29 +51,48 @@ export function MindmapFullscreenModal({
         /[^a-z0-9_-]+/gi,
         "_",
       );
-      if (format === "json") {
-        const blob = new Blob([JSON.stringify(payload, null, 2)], {
-          type: "application/json",
-        });
+
+      const triggerDownload = (blob: Blob, ext: string) => {
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = `${baseName}.json`;
+        a.download = `${baseName}.${ext}`;
+        // Anchor must be in the document for Chromium to honour the
+        // programmatic click on a blob: URL — earlier detached click()
+        // was the reason downloads were dropping silently.
+        document.body.appendChild(a);
         a.click();
-        URL.revokeObjectURL(url);
-        return;
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 2000);
+      };
+
+      try {
+        if (format === "json") {
+          triggerDownload(
+            new Blob([JSON.stringify(payload, null, 2)], {
+              type: "application/json",
+            }),
+            "json",
+          );
+          return;
+        }
+
+        const blob =
+          format === "png"
+            ? await rendererRef.current?.exportPng()
+            : await rendererRef.current?.exportSvg();
+
+        if (!blob) {
+          throw new Error("Capture returned no image data.");
+        }
+        triggerDownload(blob, format);
+      } catch (err) {
+        console.error("[MindmapFullscreenModal] export failed", err);
+        // Surface failure so the user knows the click was received.
+        window.alert(
+          `Mindmap export failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
       }
-      const blob =
-        format === "png"
-          ? await rendererRef.current?.exportPng()
-          : rendererRef.current?.exportSvg();
-      if (!blob) return;
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${baseName}.${format}`;
-      a.click();
-      URL.revokeObjectURL(url);
     },
     [payload],
   );

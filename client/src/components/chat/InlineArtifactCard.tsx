@@ -62,13 +62,20 @@ export function InlineArtifactCard({
   const handleDownload = async () => {
     try {
       const blob = await captureBlob();
-      if (!blob) return;
+      if (!blob) throw new Error('Capture returned no image data.');
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
       a.download = `${slug}-${artifact.id}.png`;
+      // Chromium drops `a.click()` on a blob-URL anchor that isn't in
+      // the DOM — the download never fires. Attach/detach around the
+      // click so the browser actually honours it.
+      document.body.appendChild(a);
       a.click();
-      URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      // Delay revocation so the browser has time to latch onto the URL
+      // before we tear it down.
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
     } catch (err: any) {
       toast({
         title: 'Download failed',

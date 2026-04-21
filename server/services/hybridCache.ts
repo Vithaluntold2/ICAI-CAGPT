@@ -400,11 +400,21 @@ export const AIResponseCache = {
     return `${CACHE_KEY_PREFIX}:${chatMode}:${userTier}:${hash}`;
   },
 
+  // Killswitch — when `DISABLE_AI_CACHE=1` in env, every get returns
+  // miss and every set is a no-op. Flipped on while we chase down the
+  // stale-hit / clarification bugs where cached content from earlier
+  // buggy runs would surface on new turns. Remove the env var to
+  // re-enable caching; no code change required.
+  isDisabled(): boolean {
+    return process.env.DISABLE_AI_CACHE === '1' || process.env.DISABLE_AI_CACHE === 'true';
+  },
+
   // Get full cached response including visualization.
   // Self-healing: if the stored entry fails the cache-worthy check (left over
   // from a prior buggy cache-set), evict it and pretend we had a miss so the
   // orchestrator makes a fresh call.
   async getFullResponse(query: string, chatMode: string, userTier: string): Promise<CachedAIResponse | null> {
+    if (this.isDisabled()) return null;
     const key = this.getCacheKey(query, chatMode, userTier);
     const cached = await CacheService.get<CachedAIResponse>(key);
     if (!cached) return null;
@@ -424,6 +434,7 @@ export const AIResponseCache = {
     userTier: string,
     fullResponse: CachedAIResponse
   ): Promise<void> {
+    if (this.isDisabled()) return;
     if (!isResponseCacheWorthy(fullResponse)) {
       console.warn(`[AICache] REFUSE to cache short/placeholder response for "${query.substring(0, 50)}..." (mode: ${chatMode}, len=${fullResponse?.response?.length ?? 0})`);
       return;

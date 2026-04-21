@@ -4847,7 +4847,28 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
           const cachedResponse = await AIResponseCache.getFullResponse(query, chatMode, userTier);
           if (cachedResponse) {
             console.log(`[SSE] Cache HIT - returning cached response with visualization`);
-            sendThinking('cache', 'Found relevant previous analysis...');
+
+            // A cached response CAN be a previously-emitted clarifying
+            // question — the cache key is just (mode,tier,hash(query)),
+            // not anything about the response shape. Detect that from
+            // the stored content so the UI shows the right label and the
+            // client can latch `isClarifying` the same way it does for
+            // fresh turns. Heuristic mirrors the client-side one in
+            // Chat.tsx so both paths stay consistent.
+            const cachedHead = (cachedResponse.response || '').slice(0, 240).trim();
+            const cachedLooksLikeClarification =
+              /^(could you|can you|would you|what |which |when |where |who |how |do you |to help|to better (help|assist)|before (i|we)|please (clarify|share|confirm|provide)|just to (confirm|clarify)|i(['’])?d (like|need) to (confirm|clarify|check)|i need (a bit|some) more|to (answer|help) accurately)/i.test(cachedHead)
+              || (cachedHead.length < 220 && cachedHead.includes('?') && !/\n##|\n\*\s|\n-\s|\n\d+\./.test(cachedResponse.response || ''));
+
+            if (cachedLooksLikeClarification) {
+              sendThinking('cache', 'Found a previous clarifying question…');
+              await new Promise(resolve => setTimeout(resolve, 80));
+              // Emit the same `clarify` phase the fresh path uses so the
+              // client-side latch kicks in and pins the status label.
+              sendThinking('clarify', 'Preparing a clarifying question…');
+            } else {
+              sendThinking('cache', 'Found a relevant previous response…');
+            }
             await new Promise(resolve => setTimeout(resolve, 100));
             fromCache = true;
             fullResponse = cachedResponse.response;
@@ -5017,12 +5038,24 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
             ]
           };
           
+          // Preamble runs IN PARALLEL with the orchestrator and can be
+          // cancelled the moment the orchestrator returns, so a slow
+          // orchestrator no longer stalls on "Putting it together…" and
+          // a fast one doesn't spam all four scripted lines before the
+          // real clarify/generating phase. The loop yields between each
+          // line in 200 ms increments; checking `preambleCancelled`
+          // every iteration means worst-case drift is ~200 ms.
           const thinkingMessages = modeThinkingMessages[chatMode] || modeThinkingMessages['standard'];
-          for (const message of thinkingMessages) {
-            sendThinking('processing', message);
-            await new Promise(resolve => setTimeout(resolve, 200));
-          }
-          
+          let preambleCancelled = false;
+          const runPreamble = async () => {
+            for (const message of thinkingMessages) {
+              if (preambleCancelled) return;
+              sendThinking('processing', message);
+              await new Promise(resolve => setTimeout(resolve, 200));
+            }
+          };
+          const preamblePromise = runPreamble();
+
           // Execute agent workflow if this mode requires it
           let agentWorkflowResult: any = null;
           if (isAgentWorkflowMode(chatMode)) {
@@ -5051,7 +5084,7 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
               // Continue to regular processing as fallback
             }
           }
-          
+
           result = await aiOrchestrator.processQuery(
             query,
             conversationHistory,
@@ -5072,19 +5105,33 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
             }
           );
           fullResponse = result.response;
+
+          // Orchestrator is done — stop feeding scripted preamble lines.
+          // The real phase (clarify / generating) comes next and should
+          // be the last thing the user sees in the thinking block.
+          preambleCancelled = true;
+          // Make sure the currently-running preamble iteration has a
+          // chance to notice the flag before the next sendThinking —
+          // avoids a race where a late scripted line overwrites the
+          // real phase in the client's status.
+          await preamblePromise.catch(() => {});
           
-          // Check if this is a clarification response (needs context building)
+          // When the orchestrator decided to ask a clarifying question
+          // rather than answer, emit a DEDICATED `clarify` phase. The
+          // client latches on this phase and keeps the status pinned to
+          // "Asking a clarifying question…" through the entire stream,
+          // so it never flips to "Answering…" just because a chunk
+          // heuristic didn't recognise the wording.
           if (result.needsClarification) {
-            sendThinking('context', 'Building context-gathering questions...');
-            await new Promise(resolve => setTimeout(resolve, 150));
+            sendThinking('clarify', 'Preparing a clarifying question…');
+            await new Promise(resolve => setTimeout(resolve, 100));
+          } else {
+            // Regular answer — neutral pre-stream label. The client's
+            // onChunk classifier refines it to "Writing your response…"
+            // / "Answering…" once content starts arriving.
+            sendThinking('generating', 'Almost there…');
+            await new Promise(resolve => setTimeout(resolve, 100));
           }
-          
-          // Thinking complete — first response chunk is imminent. Neutral
-          // phrasing (the client's onChunk classifier will refine this
-          // into "Asking a clarifying question…" / "Writing your
-          // response…" / "Answering…" as soon as content arrives).
-          sendThinking('generating', 'Almost there…');
-          await new Promise(resolve => setTimeout(resolve, 100));
           
           // Cache the response for future use — BUT only when the response is
           // context-independent. Context-dependent responses (per-conversation
@@ -5167,6 +5214,33 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
           }
         } catch (err) {
           console.warn('[SSE] Formula inlining skipped:', (err as Error).message);
+        }
+
+        // Last-chance clarification detection — LLM-based.
+        // The orchestrator's `needsClarification` flag sometimes reports
+        // `false` while the LLM still decides to ask ("I need one
+        // clarification before I summarise it. Which ... are you
+        // referring to?"). We have the full response in hand before any
+        // chunk goes out, so we ask a small classifier model to decide
+        // clarify vs answer. Robust to new phrasings in a way the old
+        // regex never was. Falls back to heuristic on timeout/error so
+        // the stream is never blocked. Skipped when the orchestrator
+        // already flagged clarification so we don't double-emit.
+        if (!result.needsClarification) {
+          try {
+            const { classifyResponseKind } = await import('./services/responseClassifier');
+            const kind = await classifyResponseKind(fullResponse);
+            if (kind === 'clarify') {
+              console.log(`[SSE] LLM classifier detected clarification — emitting clarify phase`);
+              sendThinking('clarify', 'Preparing a clarifying question…');
+              await new Promise(resolve => setTimeout(resolve, 80));
+            }
+          } catch (err) {
+            // Classifier hard-failed (shouldn't — it's already try/catched
+            // internally) — log and move on, the client still has its own
+            // heuristic safety net.
+            console.warn('[SSE] response classifier crashed:', err);
+          }
         }
 
         // Stream response in chunks - use word-based streaming for natural feel

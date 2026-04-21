@@ -286,6 +286,13 @@ export default function Chat() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [cagptStatus, setCagptStatus] = useState<string>('');
   const [thinkingSteps, setThinkingSteps] = useState<Array<{ phase: string; detail: string }>>([]);
+  // Latches true as soon as the server emits a `clarify` thinking event,
+  // signalling that the next assistant turn is a clarification question
+  // rather than an answer. The chunk classifier respects this and keeps
+  // the status pinned to "Asking a clarifying question…" — prevents a
+  // non-matching opener (e.g. "I'd like to confirm a few details…") from
+  // flipping the label to "Answering…".
+  const isClarifyingRef = useRef(false);
   // Ref to prevent message overwrite immediately after streaming ends (race condition fix)
   const justFinishedStreamingRef = useRef(false);
   // Ref for auto-scroll to bottom
@@ -619,6 +626,7 @@ export default function Chat() {
         onStart: (convId) => {
           setIsStreaming(true);
           setThinkingSteps([]); // Reset thinking steps
+          isClarifyingRef.current = false; // Reset clarify latch per turn
           setCagptStatus(getStatusForMode(chatMode));
 
           // Prime the whiteboard cache with an empty placeholder BEFORE
@@ -650,7 +658,14 @@ export default function Chat() {
           resolvedConvId = convId;
         },
         onThinking: (phase, detail) => {
-          setCagptStatus(detail);
+          // Server-authoritative clarify signal — server's own
+          // orchestrator decided this turn is a question, not an answer.
+          if (phase === 'clarify') {
+            isClarifyingRef.current = true;
+            setCagptStatus('Asking a clarifying question…');
+          } else {
+            setCagptStatus(detail);
+          }
           setThinkingSteps(prev => [...prev, { phase, detail }]);
         },
         onChunk: (chunk) => {
@@ -658,28 +673,44 @@ export default function Chat() {
             if (msg.id !== streamingId) return msg;
             const nextContent = msg.content + chunk;
 
-            // Classify based on the cumulative stream so far rather than
-            // the single chunk — the first chunk alone is too short to
-            // distinguish "Could you clarify…" from a real answer.
-            // Priority order: clarifying question → visualization →
-            // structured answer → generic answer. Once we've detected a
-            // clarifying question we stick with it even if later chunks
-            // introduce punctuation that could look structured, because
-            // CA users specifically wanted the "asking you" state to be
-            // distinct from "answering you".
-            const head = nextContent.slice(0, 240).trim();
-            const looksLikeClarification =
-              /^(could you|can you|would you|what |which |when |where |who |how |do you |to help|to better (help|assist)|before (i|we)|please (clarify|share|confirm|provide)|just to (confirm|clarify))/i.test(head)
-              || (head.length < 220 && head.includes('?') && !/\n##|\n\*\s|\n-\s|\n\d+\./.test(nextContent));
-
-            if (looksLikeClarification) {
+            // Server-authoritative clarify latch (set via onThinking) is
+            // the source of truth — if the orchestrator decided this turn
+            // is a clarifying question, pin the label and skip all
+            // heuristics. Otherwise classify heuristically: visualization
+            // → clarifying wording → structured answer → plain answer.
+            if (isClarifyingRef.current) {
               setCagptStatus('Asking a clarifying question…');
             } else if (nextContent.includes('```') || nextContent.includes('mermaid')) {
               setCagptStatus('Generating visualization…');
-            } else if (/^|\n(##|###)\s|\n-\s|\n\*\s|\n\d+\.\s/.test(nextContent)) {
-              setCagptStatus('Writing your response…');
-            } else if (nextContent.length > 40) {
-              setCagptStatus('Answering…');
+            } else {
+              const head = nextContent.slice(0, 300).trim();
+              const headLower = head.toLowerCase();
+              const looksLikeClarification =
+                // Common question/clarification openers.
+                /^(could you|can you|would you|what |which |when |where |who |how |do you |to help|to better (help|assist)|before (i|we)|please (clarify|share|confirm|provide)|just to (confirm|clarify)|i(['’])?d (like|need) to (confirm|clarify|check)|i need (a bit|some|one|more|some more|a little more|to) |to (answer|help) accurately)/i.test(head)
+                // Any explicit "clarify/clarification/clarifying" word in the
+                // first 300 chars — catches "I need one clarification before
+                // I summarise it." type openers that the opener list missed.
+                || /\bclarif(y|ication|ying)\b/i.test(headLower)
+                // A question mark in the first 300 chars, first sentence is
+                // short, and no structured-answer markers appear ahead of
+                // the `?` (so a rhetorical `?` inside a full answer doesn't
+                // mislabel).
+                || (() => {
+                  const q = head.indexOf('?');
+                  if (q < 0) return false;
+                  const firstSentence = head.split(/[.\n]/, 1)[0] || '';
+                  const preQ = head.slice(0, q);
+                  return firstSentence.length < 180 && !/\n(##|###|\*\s|-\s|\d+\.\s)/.test(preQ);
+                })();
+
+              if (looksLikeClarification) {
+                setCagptStatus('Asking a clarifying question…');
+              } else if (/\n(##|###)\s|\n-\s|\n\*\s|\n\d+\.\s/.test(nextContent)) {
+                setCagptStatus('Writing your response…');
+              } else if (nextContent.length > 40) {
+                setCagptStatus('Answering…');
+              }
             }
 
             return { ...msg, content: nextContent };

@@ -202,12 +202,15 @@ const getNodeDimensions = (compact: boolean, nodeCount: number) => {
 const nodeWidth = 280;
 const nodeHeight = 100;
 
+// Rank/node separation values tuned for the variant-B card heights
+// (~60-80px). The old values assumed 130px cards and left huge whitespace
+// gaps between ranks.
 const layoutAlgorithms = {
-  'dagre-tb': { rankdir: 'TB', ranksep: 180, nodesep: 140 },
-  'dagre-lr': { rankdir: 'LR', ranksep: 200, nodesep: 120 },
-  'swimlane': { rankdir: 'TB', ranksep: 180, nodesep: 140 },
-  'hierarchical': { rankdir: 'TB', ranksep: 220, nodesep: 160 },
-  'radial': { rankdir: 'TB', ranksep: 200, nodesep: 150 },
+  'dagre-tb': { rankdir: 'TB', ranksep: 90, nodesep: 80 },
+  'dagre-lr': { rankdir: 'LR', ranksep: 140, nodesep: 70 },
+  'swimlane': { rankdir: 'TB', ranksep: 90, nodesep: 80 },
+  'hierarchical': { rankdir: 'TB', ranksep: 110, nodesep: 90 },
+  'radial': { rankdir: 'TB', ranksep: 100, nodesep: 90 },
 };
 
 // Compact layout for large workflows
@@ -293,16 +296,17 @@ function resolveTheme(theme: ColorTheme, isDark: boolean): ResolvedTheme {
   const stepFirstHex = theme.step.match(/#[0-9a-fA-F]{6}/)?.[0] ?? '#e0e7ff';
   const stepIsLight = hexLuminance(stepFirstHex) > 0.55;
 
-  // Canvas + dot colour ALWAYS follow the app's Aurora surface stack, not the
-  // theme dropdown's legacy per-palette `background` hex. Previously the light
-  // branch used theme.background (e.g. #f8fafc from CA GPT Classic) which
-  // made the workflow pane render as a bright-white island inside a dark app
-  // shell, AND made near-white step cards disappear against a near-white
-  // canvas. App tokens fix both in one swap.
-  const canvasBackground = 'hsl(var(--background))';
+  // Canvas + dot colour. In light mode, the app's --background is pure white
+  // and --card is only ~2% off, so cards on canvas have near-zero visible
+  // separation. Fix: light-mode canvas uses --muted (slate-100-ish) so white
+  // cards pop against it. Dark mode keeps --background (near-black) since
+  // --card is already a step lighter.
+  const canvasBackground = isDark
+    ? 'hsl(var(--background))'
+    : 'hsl(var(--muted))';
   const dotColor = isDark
     ? 'rgba(255,255,255,0.06)'
-    : 'rgba(15,23,42,0.07)';
+    : 'rgba(15,23,42,0.08)';
 
   if (!isDark) {
     return {
@@ -980,11 +984,10 @@ function WorkflowRendererInner({ nodes: nodesInput, edges: edgesInput, title, la
     }, 100);
   }, [nodes, edges, resolved, animateEdges, currentLayout, isAnimating, animationProgress, searchTerm, compactMode]);
 
-  // Dynamic height based on workflow size. Scale linearly with node count so
-  // tall vertical flows aren't compressed to ~18% zoom (nodes become specks).
-  // Clamped between a minimum (small horizontal flows stay at 700) and a
-  // maximum (a 50-node flow doesn't produce a 10,000px card).
-  const containerHeight = Math.max(700, Math.min(2400, nodes.length * 180 + 100));
+  // Dynamic height based on workflow size. Tuned for the variant-B card
+  // heights (~60-80px) + the tightened ranksep. 110px per node gives enough
+  // room without leaving huge vertical gaps that forced fitView to zoom out.
+  const containerHeight = Math.max(480, Math.min(1800, nodes.length * 110 + 80));
 
   // Early return when no workflow data is available — shows a clear message
   // instead of an empty canvas, so a failed generation is obvious to the user

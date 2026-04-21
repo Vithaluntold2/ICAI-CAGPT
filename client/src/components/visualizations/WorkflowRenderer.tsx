@@ -61,7 +61,6 @@ import {
   Share2,
   Play,
   RotateCcw,
-  Info,
   MousePointerClick,
   Expand,
   Shrink,
@@ -71,6 +70,28 @@ import {
 import ColorPicker from '@/components/ui/color-picker';
 import { useToast } from '@/hooks/use-toast';
 import '@xyflow/react/dist/style.css';
+import {
+  StartNode,
+  EndNode,
+  StepNode,
+  DecisionNode,
+  type WorkflowNodeData,
+} from './workflow-nodes';
+
+/**
+ * React Flow `nodeTypes` registration. Lifting each node type out of the
+ * inline-style path and into a real React component gives us JSX control —
+ * the previous `type: 'default'` + per-node `style={{...}}` approach was
+ * what kept us from matching the variant-B mockup (default nodes add a
+ * wrapper + baseline CSS we were fighting). Defined at module scope so
+ * React Flow doesn't re-create the type map on every render.
+ */
+const nodeTypes = {
+  start: StartNode,
+  end: EndNode,
+  step: StepNode,
+  decision: DecisionNode,
+};
 
 interface WorkflowNode {
   id: string;
@@ -252,15 +273,14 @@ const getLayoutedElements = (nodes: Node[], edges: Edge[], layout: string = 'dag
 
   const layoutedNodes = nodes.map((node) => {
     const nodeWithPosition = dagreGraph.node(node.id);
+    // Position only — no style.width/height override. Custom node components
+    // (StartNode / EndNode / StepNode / DecisionNode) own their rendered size,
+    // which React Flow measures post-render for edge routing.
     return {
       ...node,
       position: {
         x: Math.round(nodeWithPosition.x - nWidth / 2),
         y: Math.round(nodeWithPosition.y - nHeight / 2),
-      },
-      style: {
-        width: nWidth,
-        height: nHeight,
       },
     };
   });
@@ -342,92 +362,10 @@ function resolveTheme(theme: ColorTheme, isDark: boolean): ResolvedTheme {
   };
 }
 
-// Variant B — "Shaped nodes". Each node type gets a crisply distinct visual:
-//   start = navy→cyan gradient capsule, end = emerald capsule, step = quiet
-//   surface card with hairline border, decision = amber rotated-square diamond
-//   (rendered via two child divs since we can't inject ::before from inline
-//   style). Aurora tokens handle light/dark automatically for step nodes; the
-//   saturated gradient nodes use fixed hexes so they always pop on any canvas.
-const getNodeStyle = (type: string, _resolved: ResolvedTheme): React.CSSProperties => {
-  const base: React.CSSProperties = {
-    fontFamily: 'Satoshi, sans-serif',
-    boxSizing: 'border-box',
-    transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
-    cursor: 'pointer',
-    position: 'relative',
-    zIndex: 10,
-  };
-
-  switch (type) {
-    case 'start':
-      return {
-        ...base,
-        background: 'linear-gradient(135deg, hsl(var(--aurora-navy)), hsl(var(--aurora-cyan)))',
-        color: '#ffffff',
-        borderRadius: '24px',
-        padding: '9px 20px',
-        border: 'none',
-        fontWeight: 600,
-        fontSize: '13px',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        textAlign: 'center',
-        boxShadow: '0 0 20px rgba(8,145,178,0.25)',
-      };
-    case 'end':
-      return {
-        ...base,
-        background: 'linear-gradient(135deg, #047857, #10b981)',
-        color: '#ffffff',
-        borderRadius: '24px',
-        padding: '9px 20px',
-        border: 'none',
-        fontWeight: 600,
-        fontSize: '13px',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        textAlign: 'center',
-        boxShadow: '0 0 20px rgba(16,185,129,0.25)',
-      };
-    case 'decision':
-      // The RF node container stays rectangular; the diamond shape is drawn
-      // by a rotated child div rendered inside `data.label` (see
-      // createThemedNodes). Keep the outer panel fully transparent so nothing
-      // boxes the diamond.
-      return {
-        ...base,
-        width: 140,
-        height: 140,
-        background: 'transparent',
-        border: 'none',
-        padding: 0,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-      };
-    default:
-      // Step card. `--card` is only ~2% off `--background` in light mode,
-      // so a bare border-only card disappears against a white canvas. We
-      // lean on a soft drop-shadow + `--border-strong` to give the card
-      // explicit elevation. Works in both modes (shadow is alpha-black,
-      // border-strong adjusts per theme).
-      return {
-        ...base,
-        background: 'hsl(var(--card))',
-        border: '1px solid hsl(var(--border-strong))',
-        borderRadius: '10px',
-        padding: '10px 14px',
-        color: 'hsl(var(--foreground))',
-        fontSize: '13px',
-        fontWeight: 600,
-        lineHeight: 1.3,
-        boxShadow:
-          '0 1px 2px rgba(15,23,42,0.04), 0 4px 12px rgba(15,23,42,0.06)',
-      };
-  }
-};
+// NOTE: getNodeStyle was removed when we moved to proper React Flow
+// `nodeTypes`. Each node type is now a dedicated component under
+// ./workflow-nodes/ that owns its DOM + styling. Look there to change how a
+// specific node type renders.
 
 // Relative luminance (WCAG) of a #RRGGBB hex; 0 = black, 1 = white.
 function hexLuminance(hex: string): number {
@@ -672,16 +610,20 @@ function WorkflowRendererInner({ nodes: nodesInput, edges: edgesInput, title, la
       );
     }
   }, [reactFlowInstance]);
-  const createThemedNodes = (resolved: ResolvedTheme): Node[] => {
-    const dims = getNodeDimensions(compactMode, nodes.length);
-    
+  const createThemedNodes = (_resolved: ResolvedTheme): Node[] => {
+    // With proper React Flow nodeTypes, each node type is a real component
+    // that owns its own DOM + styling. We just hand the components their
+    // data + a few presentation flags. No inline `style` prop, no wrapper
+    // div CSS fighting, no getNodeStyle dispatch.
     return nodes.map((node, idx) => {
-      const isHighlighted = isAnimating && animationProgress >= (idx / nodes.length) && animationProgress < ((idx + 1) / nodes.length + 0.1);
-      const matchesSearch = searchTerm && node.label.toLowerCase().includes(searchTerm.toLowerCase());
-      
-      // Build a native tooltip with full label + description so nothing is ever
-      // unreachable, even when CSS line-clamp hides overflow.
-      const fullTooltip = [
+      const isHighlighted =
+        isAnimating &&
+        animationProgress >= idx / nodes.length &&
+        animationProgress < (idx + 1) / nodes.length + 0.1;
+      const matchesSearch =
+        !!searchTerm && node.label.toLowerCase().includes(searchTerm.toLowerCase());
+
+      const tooltip = [
         node.label,
         node.description ? `\n\n${node.description}` : '',
         node.substeps && node.substeps.length > 0
@@ -689,217 +631,30 @@ function WorkflowRendererInner({ nodes: nodesInput, edges: edgesInput, title, la
           : '',
       ].join('');
 
-      // True when rendered content will likely be clipped — used to decide
-      // whether to surface a "more" hint at the bottom of the node body.
       const isLabelLong = (node.label?.length ?? 0) > (compactMode ? 40 : 90);
       const isDescLong = (node.description?.length ?? 0) > 80;
       const hasHiddenSubsteps = (node.substeps?.length ?? 0) > 3;
-      const hasLongSubstep = (node.substeps ?? []).some(s => (s?.length ?? 0) > 60);
+      const hasLongSubstep = (node.substeps ?? []).some((s) => (s?.length ?? 0) > 60);
       const contentClipped = isLabelLong || isDescLong || hasHiddenSubsteps || hasLongSubstep;
 
-      // Decision nodes render as a rotated-square diamond. The RF container is
-      // transparent (see getNodeStyle), and we draw the shape with two child
-      // divs: a rotated gradient background, and an upright label on top.
-      if (node.type === 'decision') {
-        return {
-          id: node.id,
-          type: 'default',
-          data: {
-            label: (
-              <div className="relative w-full h-full flex items-center justify-center">
-                <div
-                  aria-hidden
-                  style={{
-                    position: 'absolute',
-                    inset: 20,
-                    background: 'linear-gradient(135deg, #f59e0b, #d97706)',
-                    transform: 'rotate(45deg)',
-                    borderRadius: 12,
-                    boxShadow: '0 0 20px rgba(245,158,11,0.3)',
-                  }}
-                />
-                <div
-                  className="absolute top-1.5 right-1.5 pointer-events-none z-20"
-                  aria-hidden
-                >
-                  {contentClipped ? (
-                    <div className="flex items-center gap-1 rounded-full bg-black/35 backdrop-blur-sm px-1.5 py-0.5 text-[10px] font-semibold text-white shadow-sm">
-                      <Info className="h-2.5 w-2.5" />
-                      <span className="leading-none">More</span>
-                    </div>
-                  ) : (
-                    <Info className="h-3 w-3 text-white/80" />
-                  )}
-                </div>
-                <div
-                  title={fullTooltip}
-                  className={`${matchesSearch ? 'underline' : ''} ${isHighlighted ? 'animate-pulse' : ''}`}
-                  style={{
-                    position: 'relative',
-                    color: '#ffffff',
-                    fontFamily: 'Satoshi, sans-serif',
-                    fontWeight: 700,
-                    fontSize: 12,
-                    textAlign: 'center',
-                    padding: '0 20px',
-                    zIndex: 1,
-                    lineHeight: 1.2,
-                    overflow: 'hidden',
-                    display: '-webkit-box',
-                    WebkitBoxOrient: 'vertical',
-                    WebkitLineClamp: 4,
-                    overflowWrap: 'anywhere',
-                    wordBreak: 'break-word',
-                  }}
-                >
-                  {node.label}
-                </div>
-              </div>
-            ),
-          },
-          position: { x: 0, y: idx * 150 },
-          style: {
-            ...getNodeStyle(node.type, resolved),
-            ...(isHighlighted ? { zIndex: 30 } : {}),
-            ...(matchesSearch ? { outline: `3px solid #5eead4`, outlineOffset: '4px', borderRadius: '12px' } : {}),
-          },
-          zIndex: isHighlighted ? 30 : (matchesSearch ? 20 : 10),
-        };
-      }
+      const data: WorkflowNodeData = {
+        label: node.label,
+        description: node.description,
+        substeps: node.substeps,
+        highlighted: isHighlighted,
+        matchesSearch,
+        contentClipped,
+        tooltip,
+        compact: compactMode,
+      };
 
       return {
         id: node.id,
-        type: 'default',
-        data: {
-          label: (
-            <>
-              {/* Always-present affordance: a small info chip at the top-right
-                  of the node communicates "click for full details". We show a
-                  stronger pill ("More") when content is actually clipped, and a
-                  subtle icon otherwise. */}
-              <div
-                className="absolute top-1.5 right-1.5 pointer-events-none flex items-center gap-1 z-20"
-                aria-hidden
-              >
-                {contentClipped ? (
-                  <div
-                    className="flex items-center gap-1 rounded-full bg-black/35 backdrop-blur-sm px-1.5 py-0.5 text-[10px] font-semibold text-white shadow-sm"
-                    title="Content is truncated — click to expand"
-                  >
-                    <Info className="h-2.5 w-2.5" />
-                    <span className="leading-none">More</span>
-                  </div>
-                ) : (
-                  <Info className="h-3 w-3 text-white/60" />
-                )}
-              </div>
-
-              {compactMode ? (
-                // Compact mode: wrap to max 2 lines, then ellipsis. Full text on hover and on click.
-                <div
-                  className="flex items-center justify-center h-full w-full"
-                  style={{ zIndex: 10 }}
-                  title={fullTooltip}
-                >
-                  <div
-                    className={`font-semibold text-xs leading-snug text-center px-1 ${isHighlighted ? 'animate-pulse' : ''} ${matchesSearch ? 'underline' : ''}`}
-                    style={{
-                      display: '-webkit-box',
-                      WebkitBoxOrient: 'vertical',
-                      WebkitLineClamp: 2,
-                      overflow: 'hidden',
-                      overflowWrap: 'anywhere',
-                      wordBreak: 'break-word',
-                      maxWidth: dims.width - 12,
-                    }}
-                  >
-                    {node.label}
-                  </div>
-                </div>
-              ) : (
-                // Detailed mode: wrap freely; let text span multiple lines. Clamp the
-                // label at 3 lines, description at 2, so the node stays predictable
-                // but no text is hard-truncated — full content is always reachable
-                // via the click-to-expand dialog.
-                <div
-                  className="flex flex-col gap-1.5 w-full"
-                  style={{ lineHeight: '1.35', zIndex: 10 }}
-                  title={fullTooltip}
-                >
-                  <div
-                    className={`font-bold text-sm pr-14 ${isHighlighted ? 'animate-pulse' : ''} ${matchesSearch ? 'underline' : ''}`}
-                    style={{
-                      display: '-webkit-box',
-                      WebkitBoxOrient: 'vertical',
-                      WebkitLineClamp: 3,
-                      overflow: 'hidden',
-                      overflowWrap: 'anywhere',
-                      wordBreak: 'break-word',
-                    }}
-                  >
-                    {node.label}
-                  </div>
-                  {node.description && (
-                    <div
-                      className="text-xs opacity-90 leading-snug"
-                      style={{
-                        display: '-webkit-box',
-                        WebkitBoxOrient: 'vertical',
-                        WebkitLineClamp: 2,
-                        overflow: 'hidden',
-                        overflowWrap: 'anywhere',
-                      }}
-                    >
-                      {node.description}
-                    </div>
-                  )}
-                  {node.substeps && node.substeps.length > 0 && (
-                    <div className="text-[11px] text-left space-y-0.5 leading-tight opacity-95">
-                      {node.substeps.slice(0, 3).map((step, i) => (
-                        <div key={i} className="flex items-start gap-1.5">
-                          <span className="mt-0.5">•</span>
-                          <span
-                            style={{
-                              display: '-webkit-box',
-                              WebkitBoxOrient: 'vertical',
-                              WebkitLineClamp: 1,
-                              overflow: 'hidden',
-                              overflowWrap: 'anywhere',
-                            }}
-                          >
-                            {step}
-                          </span>
-                        </div>
-                      ))}
-                      {node.substeps.length > 3 && (
-                        <div className="italic opacity-70">+{node.substeps.length - 3} more… (click to view all)</div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
-            </>
-          )
-        },
+        type: node.type,
+        data: data as unknown as Record<string, unknown>,
         position: { x: 0, y: idx * 150 },
-        style: {
-          ...getNodeStyle(node.type, resolved),
-          // Start/end are fixed-height capsules; step nodes fill the dagre box.
-          ...(node.type === 'start' || node.type === 'end'
-            ? { width: dims.width, height: 48 }
-            : { width: dims.width, height: dims.height }),
-          ...(isHighlighted ? {
-            transform: 'scale(1.05)',
-            boxShadow: `0 0 40px rgba(20,184,166,0.6)`,
-            zIndex: 30,
-          } : {}),
-          ...(matchesSearch ? {
-            outline: `2px solid #5eead4`,
-            outlineOffset: '4px',
-          } : {}),
-        },
-        zIndex: isHighlighted ? 30 : (matchesSearch ? 20 : 10),
-      };
+        zIndex: isHighlighted ? 30 : matchesSearch ? 20 : 10,
+      } as Node;
     });
   };
 
@@ -1296,11 +1051,12 @@ function WorkflowRendererInner({ nodes: nodesInput, edges: edgesInput, title, la
         <ReactFlow
           nodes={flowNodes}
           edges={flowEdges}
+          nodeTypes={nodeTypes}
           fitView
           fitViewOptions={{
             padding: isLargeWorkflow ? 0.1 : 0.25,
-            maxZoom: isLargeWorkflow ? 1 : 1.5,
-            minZoom: isLargeWorkflow ? 0.1 : 0.3
+            maxZoom: isLargeWorkflow ? 1 : 1.4,
+            minZoom: isLargeWorkflow ? 0.2 : 0.5
           }}
           nodesDraggable={true}
           nodesConnectable={false}

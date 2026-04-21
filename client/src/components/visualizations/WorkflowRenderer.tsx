@@ -34,6 +34,9 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
+  DropdownMenuCheckboxItem,
+  DropdownMenuSeparator,
+  DropdownMenuLabel,
 } from '@/components/ui/dropdown-menu';
 import {
   Dialog,
@@ -47,7 +50,6 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Palette,
   Shuffle,
-  Settings,
   Download,
   Search,
   ZoomIn,
@@ -58,12 +60,13 @@ import {
   Layers,
   Share2,
   Play,
-  Pause,
   RotateCcw,
   Info,
   MousePointerClick,
   Expand,
   Shrink,
+  MoreHorizontal,
+  FileJson,
 } from 'lucide-react';
 import ColorPicker from '@/components/ui/color-picker';
 import { useToast } from '@/hooks/use-toast';
@@ -323,78 +326,82 @@ function resolveTheme(theme: ColorTheme, isDark: boolean): ResolvedTheme {
   };
 }
 
-const getNodeStyle = (type: string, resolved: ResolvedTheme) => {
-  const baseStyle = {
-    padding: '20px 24px',
-    borderRadius: '16px',
-    fontSize: '14px',
-    fontWeight: 600,
-    border: 'none',
-    width: '100%',
-    height: '100%',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    textAlign: 'center' as const,
-    wordWrap: 'break-word' as const,
-    boxSizing: 'border-box' as const,
-    overflow: 'visible',
-    color: '#ffffff',
-    textShadow: '0 2px 8px rgba(0,0,0,0.3)',
-    boxShadow: '0 10px 30px rgba(0,0,0,0.15), 0 0 0 1px rgba(255,255,255,0.1) inset',
-    transition: 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
+// Variant B — "Shaped nodes". Each node type gets a crisply distinct visual:
+//   start = navy→cyan gradient capsule, end = emerald capsule, step = quiet
+//   surface card with hairline border, decision = amber rotated-square diamond
+//   (rendered via two child divs since we can't inject ::before from inline
+//   style). Aurora tokens handle light/dark automatically for step nodes; the
+//   saturated gradient nodes use fixed hexes so they always pop on any canvas.
+const getNodeStyle = (type: string, _resolved: ResolvedTheme): React.CSSProperties => {
+  const base: React.CSSProperties = {
+    fontFamily: 'Satoshi, sans-serif',
+    boxSizing: 'border-box',
+    transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
     cursor: 'pointer',
+    position: 'relative',
     zIndex: 10,
-    position: 'relative' as const,
-  };
-
-  const hoverTransform = {
-    ':hover': {
-      transform: 'translateY(-4px) scale(1.02)',
-      boxShadow: '0 20px 40px rgba(0,0,0,0.25), 0 0 0 2px rgba(255,255,255,0.2) inset',
-      zIndex: 20
-    }
   };
 
   switch (type) {
     case 'start':
       return {
-        ...baseStyle,
-        ...hoverTransform,
-        background: resolved.startBg,
-        borderRadius: '50px',
-        minHeight: '80px',
-        boxShadow: `0 10px 30px rgba(0,0,0,0.15), 0 0 0 1px rgba(255,255,255,0.1) inset, 0 0 60px ${resolved.edge}40`,
+        ...base,
+        background: 'linear-gradient(135deg, hsl(var(--aurora-navy)), hsl(var(--aurora-cyan)))',
+        color: '#ffffff',
+        borderRadius: '24px',
+        padding: '9px 20px',
+        border: 'none',
+        fontWeight: 600,
+        fontSize: '13px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        textAlign: 'center',
+        boxShadow: '0 0 20px rgba(8,145,178,0.25)',
       };
     case 'end':
       return {
-        ...baseStyle,
-        ...hoverTransform,
-        background: resolved.endBg,
-        borderRadius: '50px',
-        minHeight: '80px',
-        boxShadow: `0 10px 30px rgba(0,0,0,0.15), 0 0 0 1px rgba(255,255,255,0.1) inset, 0 0 60px ${resolved.edge}40`,
+        ...base,
+        background: 'linear-gradient(135deg, #047857, #10b981)',
+        color: '#ffffff',
+        borderRadius: '24px',
+        padding: '9px 20px',
+        border: 'none',
+        fontWeight: 600,
+        fontSize: '13px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        textAlign: 'center',
+        boxShadow: '0 0 20px rgba(16,185,129,0.25)',
       };
     case 'decision':
+      // The RF node container stays rectangular; the diamond shape is drawn
+      // by a rotated child div rendered inside `data.label` (see
+      // createThemedNodes). Keep the outer panel fully transparent so nothing
+      // boxes the diamond.
       return {
-        ...baseStyle,
-        background: resolved.decisionBg,
-        clipPath: 'polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)',
-        boxShadow: `0 10px 30px rgba(0,0,0,0.15), 0 0 60px ${resolved.edge}30`,
-        ':hover': {
-          transform: 'scale(1.08) rotate(2deg)',
-          boxShadow: `0 20px 40px rgba(0,0,0,0.25), 0 0 80px ${resolved.edge}50`,
-          zIndex: 20
-        }
+        ...base,
+        width: 140,
+        height: 140,
+        background: 'transparent',
+        border: 'none',
+        padding: 0,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
       };
     default:
       return {
-        ...baseStyle,
-        ...hoverTransform,
-        background: resolved.stepBg,
-        color: resolved.stepText,
-        textShadow: resolved.stepShadow,
-        border: resolved.stepBorder,
+        ...base,
+        background: 'hsl(var(--card))',
+        border: '1px solid hsl(var(--border-strong))',
+        borderRadius: '10px',
+        padding: '10px 14px',
+        color: 'hsl(var(--foreground))',
+        fontSize: '13px',
+        fontWeight: 600,
+        lineHeight: 1.3,
       };
   }
 };
@@ -667,6 +674,76 @@ function WorkflowRendererInner({ nodes: nodesInput, edges: edgesInput, title, la
       const hasLongSubstep = (node.substeps ?? []).some(s => (s?.length ?? 0) > 60);
       const contentClipped = isLabelLong || isDescLong || hasHiddenSubsteps || hasLongSubstep;
 
+      // Decision nodes render as a rotated-square diamond. The RF container is
+      // transparent (see getNodeStyle), and we draw the shape with two child
+      // divs: a rotated gradient background, and an upright label on top.
+      if (node.type === 'decision') {
+        return {
+          id: node.id,
+          type: 'default',
+          data: {
+            label: (
+              <div className="relative w-full h-full flex items-center justify-center">
+                <div
+                  aria-hidden
+                  style={{
+                    position: 'absolute',
+                    inset: 20,
+                    background: 'linear-gradient(135deg, #f59e0b, #d97706)',
+                    transform: 'rotate(45deg)',
+                    borderRadius: 12,
+                    boxShadow: '0 0 20px rgba(245,158,11,0.3)',
+                  }}
+                />
+                <div
+                  className="absolute top-1.5 right-1.5 pointer-events-none z-20"
+                  aria-hidden
+                >
+                  {contentClipped ? (
+                    <div className="flex items-center gap-1 rounded-full bg-black/35 backdrop-blur-sm px-1.5 py-0.5 text-[10px] font-semibold text-white shadow-sm">
+                      <Info className="h-2.5 w-2.5" />
+                      <span className="leading-none">More</span>
+                    </div>
+                  ) : (
+                    <Info className="h-3 w-3 text-white/80" />
+                  )}
+                </div>
+                <div
+                  title={fullTooltip}
+                  className={`${matchesSearch ? 'underline' : ''} ${isHighlighted ? 'animate-pulse' : ''}`}
+                  style={{
+                    position: 'relative',
+                    color: '#ffffff',
+                    fontFamily: 'Satoshi, sans-serif',
+                    fontWeight: 700,
+                    fontSize: 12,
+                    textAlign: 'center',
+                    padding: '0 20px',
+                    zIndex: 1,
+                    lineHeight: 1.2,
+                    overflow: 'hidden',
+                    display: '-webkit-box',
+                    WebkitBoxOrient: 'vertical',
+                    WebkitLineClamp: 4,
+                    overflowWrap: 'anywhere',
+                    wordBreak: 'break-word',
+                  }}
+                >
+                  {node.label}
+                </div>
+              </div>
+            ),
+          },
+          position: { x: 0, y: idx * 150 },
+          style: {
+            ...getNodeStyle(node.type, resolved),
+            ...(isHighlighted ? { zIndex: 30 } : {}),
+            ...(matchesSearch ? { outline: `3px solid #5eead4`, outlineOffset: '4px', borderRadius: '12px' } : {}),
+          },
+          zIndex: isHighlighted ? 30 : (matchesSearch ? 20 : 10),
+        };
+      }
+
       return {
         id: node.id,
         type: 'default',
@@ -784,33 +861,33 @@ function WorkflowRendererInner({ nodes: nodesInput, edges: edgesInput, title, la
         position: { x: 0, y: idx * 150 },
         style: {
           ...getNodeStyle(node.type, resolved),
-          width: dims.width,
-          height: dims.height,
-          padding: compactMode ? '8px 12px' : '20px 24px',
-          fontSize: compactMode ? '11px' : '14px',
+          // Start/end are fixed-height capsules; step nodes fill the dagre box.
+          ...(node.type === 'start' || node.type === 'end'
+            ? { width: dims.width, height: 48 }
+            : { width: dims.width, height: dims.height }),
           ...(isHighlighted ? {
-            transform: 'scale(1.1)',
-            boxShadow: `0 0 60px ${resolved.edge}, 0 20px 40px rgba(0,0,0,0.3)`,
-            zIndex: 30
+            transform: 'scale(1.05)',
+            boxShadow: `0 0 40px rgba(20,184,166,0.6)`,
+            zIndex: 30,
           } : {}),
           ...(matchesSearch ? {
-            outline: `3px solid ${resolved.edge}`,
-            outlineOffset: '4px'
-          } : {})
+            outline: `2px solid #5eead4`,
+            outlineOffset: '4px',
+          } : {}),
         },
-        zIndex: isHighlighted ? 30 : (matchesSearch ? 20 : 10)
+        zIndex: isHighlighted ? 30 : (matchesSearch ? 20 : 10),
       };
     });
   };
 
-  const createThemedEdges = (resolved: ResolvedTheme): Edge[] => {
-    // Edge labels use a white pill against the canvas in light mode, but on a
-    // dark canvas that pill becomes a glaring white chip — swap it for a
-    // darker card surface so the label blends with the rest of the UI.
-    const labelBgFill = isDark ? '#1a1b1f' : '#ffffff';
-    const labelTextFill = isDark ? '#ffffff' : resolved.edge;
+  const createThemedEdges = (_resolved: ResolvedTheme): Edge[] => {
+    // Variant B: hairline edges. 1.5px stroke, translucent white dim / teal
+    // active, no pill behind the label — just colored teal text inline.
+    const dimStroke = 'rgba(255,255,255,0.25)';
+    const activeStroke = 'rgba(20,184,166,0.75)';
     return edges.map((edge, idx) => {
       const isActive = isAnimating && animationProgress >= (idx / edges.length);
+      const stroke = isActive ? activeStroke : dimStroke;
 
       return {
         id: edge.id,
@@ -821,33 +898,27 @@ function WorkflowRendererInner({ nodes: nodesInput, edges: edgesInput, title, la
         animated: animateEdges || isActive,
         markerEnd: {
           type: MarkerType.ArrowClosed,
-          width: 30,
-          height: 30,
-          color: isActive ? resolved.edge : resolved.edge + '80'
+          width: 18,
+          height: 18,
+          color: isActive ? activeStroke : 'rgba(255,255,255,0.45)',
         },
         style: {
-          strokeWidth: isActive ? 5 : 3,
-          stroke: isActive ? resolved.edge : resolved.edge + '80',
-          strokeDasharray: animateEdges ? '8,8' : '0',
-          filter: isActive ? `drop-shadow(0 0 8px ${resolved.edge})` : 'none',
-          transition: 'all 0.3s ease'
+          strokeWidth: 1.5,
+          stroke,
+          strokeDasharray: animateEdges ? '6,4' : '0',
+          transition: 'all 0.3s ease',
         },
         labelStyle: {
-          fill: labelTextFill,
-          fontSize: 13,
-          fontWeight: 700,
-          zIndex: 100
+          fill: '#5eead4',
+          fontSize: 11,
+          fontFamily: 'JetBrains Mono',
+          fontWeight: 600,
         },
         labelBgStyle: {
-          fill: labelBgFill,
-          fillOpacity: 0.98,
-          rx: 8,
-          ry: 8,
-          stroke: resolved.edge,
-          strokeWidth: 2
+          fill: 'transparent',
         },
-        labelBgPadding: [10, 14] as [number, number],
-        zIndex: isActive ? 15 : 5
+        labelBgPadding: [0, 0] as [number, number],
+        zIndex: isActive ? 15 : 5,
       };
     });
   };
@@ -973,10 +1044,10 @@ function WorkflowRendererInner({ nodes: nodesInput, edges: edgesInput, title, la
           </div>
           )}
 
-          <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-1.5 flex-wrap">
             {/* Search */}
             <div className="relative">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" strokeWidth={1.75} />
               <Input
                 placeholder="Search nodes..."
                 value={searchTerm}
@@ -985,11 +1056,8 @@ function WorkflowRendererInner({ nodes: nodesInput, edges: edgesInput, title, la
               />
             </div>
 
-            {/* Layout Selector */}
-            <Select
-              value={currentLayout}
-              onValueChange={setCurrentLayout}
-            >
+            {/* Layout */}
+            <Select value={currentLayout} onValueChange={setCurrentLayout}>
               <SelectTrigger className="w-32 h-8">
                 <SelectValue />
               </SelectTrigger>
@@ -1012,155 +1080,52 @@ function WorkflowRendererInner({ nodes: nodesInput, edges: edgesInput, title, la
               </SelectContent>
             </Select>
 
-            {/* Theme Selector */}
-            <Select
-              value={customTheme ? 'Custom' : selectedTheme.name}
-              onValueChange={(value) => {
-                if (value === 'Custom') return;
-                const theme = colorThemes.find(t => t.name === value);
-                if (theme) {
-                  setSelectedTheme(theme);
-                  setCustomTheme(null);
-                }
-              }}
-            >
-              <SelectTrigger className="w-40 h-8">
-                <SelectValue placeholder="Theme" />
-              </SelectTrigger>
-              <SelectContent>
-                {customTheme && (
-                  <SelectItem value="Custom">
-                    <div className="flex items-center gap-2">
-                      <div 
-                        className="w-3 h-3 rounded-full border"
-                        style={{ background: customTheme.start }}
-                      />
-                      Custom
-                    </div>
-                  </SelectItem>
-                )}
-                {colorThemes.map((theme) => (
-                  <SelectItem key={theme.name} value={theme.name}>
-                    <div className="flex items-center gap-2">
-                      <div 
-                        className="w-3 h-3 rounded-full border"
-                        style={{ background: theme.start }}
-                      />
-                      {theme.name}
-                    </div>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            
-            {/* Color Customization */}
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button variant="outline" size="sm" className="h-8">
-                  <Palette className="h-3.5 w-3.5" />
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-80">
-                <div className="space-y-4">
-                  <h4 className="font-medium">Customize Colors</h4>
-                  <div className="space-y-3">
-                    <ColorPicker
-                      label="Start Nodes"
-                      color={activeTheme.start}
-                      onChange={(color) => updateCustomColor('start', color)}
-                    />
-                    <ColorPicker
-                      label="Step Nodes"
-                      color={activeTheme.step}
-                      onChange={(color) => updateCustomColor('step', color)}
-                    />
-                    <ColorPicker
-                      label="Decision Nodes"
-                      color={activeTheme.decision}
-                      onChange={(color) => updateCustomColor('decision', color)}
-                    />
-                    <ColorPicker
-                      label="End Nodes"
-                      color={activeTheme.end}
-                      onChange={(color) => updateCustomColor('end', color)}
-                    />
-                    <ColorPicker
-                      label="Edges"
-                      color={activeTheme.edge}
-                      onChange={(color) => updateCustomColor('edge', color)}
-                    />
-                  </div>
-                </div>
-              </PopoverContent>
-            </Popover>
-            
+            <div className="h-5 w-px bg-border mx-1" aria-hidden />
+
+            {/* Zoom cluster */}
             <Button
-              variant="outline"
+              variant="ghost"
               size="sm"
-              onClick={randomizeColors}
-              className="h-8"
-              title="Random Theme"
+              onClick={() => reactFlowInstance.zoomOut()}
+              className="h-8 w-8 p-0 rounded-md hover:bg-foreground/5 text-muted-foreground"
+              title="Zoom out"
             >
-              <Shuffle className="h-3.5 w-3.5" />
+              <ZoomOut className="h-3.5 w-3.5" strokeWidth={1.75} />
             </Button>
-            
-            {/* Compact Mode Toggle */}
             <Button
-              variant={compactMode ? "default" : "outline"}
+              variant="ghost"
               size="sm"
-              onClick={() => setCompactMode(!compactMode)}
-              className="h-8"
-              title={compactMode ? "Switch to Detailed View" : "Switch to Compact View"}
+              onClick={() => reactFlowInstance.zoomIn()}
+              className="h-8 w-8 p-0 rounded-md hover:bg-foreground/5 text-muted-foreground"
+              title="Zoom in"
             >
-              <Layers className="h-3.5 w-3.5 mr-1" />
-              {compactMode ? "Compact" : "Detailed"}
+              <ZoomIn className="h-3.5 w-3.5" strokeWidth={1.75} />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => reactFlowInstance.fitView({ padding: 0.25 })}
+              className="h-8 w-8 p-0 rounded-md hover:bg-foreground/5 text-muted-foreground"
+              title="Fit to view"
+            >
+              <Maximize2 className="h-3.5 w-3.5" strokeWidth={1.75} />
             </Button>
 
-            {/* Animation Controls */}
-            <Button
-              variant={isAnimating ? "default" : "outline"}
-              size="sm"
-              onClick={playAnimation}
-              disabled={isAnimating}
-              className="h-8"
-              title="Animate Flow"
-            >
-              {isAnimating ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
-            </Button>
+            <div className="h-5 w-px bg-border mx-1" aria-hidden />
 
-            <Button
-              variant={animateEdges ? "default" : "outline"}
-              size="sm"
-              onClick={() => setAnimateEdges(!animateEdges)}
-              className="h-8"
-              title="Toggle Edge Animation"
-            >
-              Animate
-            </Button>
-
-            {/* Fullscreen toggle — SEPARATE from Fit to View. Fullscreen
-                enlarges the entire workflow container to cover the viewport;
-                Fit to View only reframes the graph within the current container. */}
-            <Button
-              variant={isFullscreen ? "default" : "outline"}
-              size="sm"
-              onClick={() => setIsFullscreen(!isFullscreen)}
-              className="h-8"
-              title={isFullscreen ? "Exit fullscreen (Esc)" : "Open fullscreen"}
-              data-testid="workflow-fullscreen-toggle"
-            >
-              {isFullscreen ? <Shrink className="h-3.5 w-3.5" /> : <Expand className="h-3.5 w-3.5" />}
-            </Button>
-
-            {/* Export Menu */}
+            {/* Download (PNG/SVG) */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" className="h-8">
-                  <Download className="h-3.5 w-3.5 mr-1.5" />
-                  Export
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 w-8 p-0 rounded-md hover:bg-foreground/5 text-muted-foreground"
+                  title="Download"
+                >
+                  <Download className="h-3.5 w-3.5" strokeWidth={1.75} />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent>
+              <DropdownMenuContent align="end">
                 <DropdownMenuItem onClick={() => exportAsImage('png')}>
                   Export as PNG
                 </DropdownMenuItem>
@@ -1170,63 +1135,135 @@ function WorkflowRendererInner({ nodes: nodesInput, edges: edgesInput, title, la
               </DropdownMenuContent>
             </DropdownMenu>
 
-            {/* Zoom & View Controls */}
-            <div className="flex items-center gap-1 border-l pl-2 ml-1">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => reactFlowInstance.zoomIn()}
-                className="h-8 w-8 p-0"
-                title="Zoom In"
-              >
-                <ZoomIn className="h-3.5 w-3.5" />
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => reactFlowInstance.zoomOut()}
-                className="h-8 w-8 p-0"
-                title="Zoom Out"
-              >
-                <ZoomOut className="h-3.5 w-3.5" />
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => reactFlowInstance.fitView({ padding: 0.25 })}
-                className="h-8 w-8 p-0"
-                title="Fit to View"
-              >
-                <Maximize2 className="h-3.5 w-3.5" />
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => reactFlowInstance.setViewport({ x: 0, y: 0, zoom: 1 })}
-                className="h-8 w-8 p-0"
-                title="Reset View"
-              >
-                <RotateCcw className="h-3.5 w-3.5" />
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  const flowData = { nodes, edges, theme: activeTheme };
-                  const blob = new Blob([JSON.stringify(flowData, null, 2)], { type: 'application/json' });
-                  const url = URL.createObjectURL(blob);
-                  navigator.clipboard.writeText(url);
-                  toast({
-                    title: "Link copied!",
-                    description: "Workflow share link copied to clipboard",
-                  });
-                }}
-                className="h-8 w-8 p-0"
-                title="Share Workflow"
-              >
-                <Share2 className="h-3.5 w-3.5" />
-              </Button>
-            </div>
+            {/* Fullscreen (mode, not action — stays separate) */}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setIsFullscreen(!isFullscreen)}
+              className="h-8 w-8 p-0 rounded-md hover:bg-foreground/5 text-muted-foreground"
+              title={isFullscreen ? "Exit fullscreen (Esc)" : "Open fullscreen"}
+              data-testid="workflow-fullscreen-toggle"
+            >
+              {isFullscreen
+                ? <Shrink className="h-3.5 w-3.5" strokeWidth={1.75} />
+                : <Expand className="h-3.5 w-3.5" strokeWidth={1.75} />}
+            </Button>
+
+            {/* Overflow menu */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 w-8 p-0 rounded-md hover:bg-foreground/5 text-muted-foreground"
+                  title="More options"
+                >
+                  <MoreHorizontal className="h-3.5 w-3.5" strokeWidth={1.75} />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuItem onClick={() => reactFlowInstance.setViewport({ x: 0, y: 0, zoom: 1 })}>
+                  <RotateCcw className="h-3.5 w-3.5 mr-2" strokeWidth={1.75} />
+                  Reset view
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={randomizeColors}>
+                  <Shuffle className="h-3.5 w-3.5 mr-2" strokeWidth={1.75} />
+                  Randomize theme
+                </DropdownMenuItem>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <DropdownMenuItem onSelect={(e) => e.preventDefault()}>
+                      <Palette className="h-3.5 w-3.5 mr-2" strokeWidth={1.75} />
+                      Custom colors…
+                    </DropdownMenuItem>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-80" side="left" align="start">
+                    <div className="space-y-4">
+                      <h4 className="font-medium">Customize Colors</h4>
+                      <div className="space-y-3">
+                        <ColorPicker label="Start Nodes" color={activeTheme.start} onChange={(color) => updateCustomColor('start', color)} />
+                        <ColorPicker label="Step Nodes" color={activeTheme.step} onChange={(color) => updateCustomColor('step', color)} />
+                        <ColorPicker label="Decision Nodes" color={activeTheme.decision} onChange={(color) => updateCustomColor('decision', color)} />
+                        <ColorPicker label="End Nodes" color={activeTheme.end} onChange={(color) => updateCustomColor('end', color)} />
+                        <ColorPicker label="Edges" color={activeTheme.edge} onChange={(color) => updateCustomColor('edge', color)} />
+                      </div>
+                    </div>
+                  </PopoverContent>
+                </Popover>
+
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel className="text-[11px] uppercase tracking-wide text-muted-foreground font-medium">
+                  Theme
+                </DropdownMenuLabel>
+                {colorThemes.map((theme) => (
+                  <DropdownMenuCheckboxItem
+                    key={theme.name}
+                    checked={!customTheme && selectedTheme.name === theme.name}
+                    onCheckedChange={() => {
+                      setSelectedTheme(theme);
+                      setCustomTheme(null);
+                    }}
+                  >
+                    <div
+                      className="w-3 h-3 rounded-full border mr-2 shrink-0"
+                      style={{ background: theme.start }}
+                    />
+                    {theme.name}
+                  </DropdownMenuCheckboxItem>
+                ))}
+
+                <DropdownMenuSeparator />
+                <DropdownMenuCheckboxItem
+                  checked={compactMode}
+                  onCheckedChange={(v) => setCompactMode(!!v)}
+                >
+                  Compact layout
+                </DropdownMenuCheckboxItem>
+                <DropdownMenuCheckboxItem
+                  checked={animateEdges}
+                  onCheckedChange={(v) => setAnimateEdges(!!v)}
+                >
+                  Animate edges
+                </DropdownMenuCheckboxItem>
+                <DropdownMenuItem
+                  disabled={isAnimating}
+                  onClick={playAnimation}
+                >
+                  <Play className="h-3.5 w-3.5 mr-2" strokeWidth={1.75} />
+                  Play animation
+                </DropdownMenuItem>
+
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onClick={() => {
+                    const flowData = { nodes, edges, theme: activeTheme };
+                    const blob = new Blob([JSON.stringify(flowData, null, 2)], { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    navigator.clipboard.writeText(url);
+                    toast({
+                      title: "Link copied!",
+                      description: "Workflow share link copied to clipboard",
+                    });
+                  }}
+                >
+                  <Share2 className="h-3.5 w-3.5 mr-2" strokeWidth={1.75} />
+                  Share
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => {
+                    const flowData = { nodes, edges, theme: activeTheme };
+                    navigator.clipboard.writeText(JSON.stringify(flowData, null, 2));
+                    toast({
+                      title: "Copied JSON",
+                      description: "Workflow JSON copied to clipboard",
+                    });
+                  }}
+                >
+                  <FileJson className="h-3.5 w-3.5 mr-2" strokeWidth={1.75} />
+                  Copy as JSON
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
       )}

@@ -36,8 +36,10 @@ export function ArtifactCard({
     <div
       ref={rootRef}
       className={cn(
-        "absolute border rounded-lg bg-card shadow-sm cursor-pointer flex flex-col",
-        selected ? "ring-2 ring-blue-500" : "hover:border-blue-400",
+        "absolute bg-card border rounded-md transition-all cursor-pointer flex flex-col",
+        selected
+          ? "border-aurora-teal ring-[3px] ring-aurora-teal/20 shadow-glow-teal"
+          : "border-border hover:border-border-strong",
       )}
       style={{
         left: artifact.canvasX,
@@ -51,6 +53,14 @@ export function ArtifactCard({
       data-testid={`artifact-card-${artifact.id}`}
       onClick={onClick}
     >
+      {selected && (
+        <span
+          className="absolute top-2.5 left-2.5 w-[18px] h-[18px] rounded-full bg-aurora-teal text-white text-[11px] font-bold font-mono flex items-center justify-center shadow-glow-teal z-10"
+          aria-hidden="true"
+        >
+          ✓
+        </span>
+      )}
       <div className="flex items-center justify-between px-3 py-2 border-b text-xs shrink-0">
         <span className="font-medium truncate">{artifact.title}</span>
         <div className="flex items-center gap-2 shrink-0 ml-2">

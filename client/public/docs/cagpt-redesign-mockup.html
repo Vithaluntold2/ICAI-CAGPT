@@ -260,8 +260,9 @@
     }
     .logo-text span { color: hsl(202,70%,70%); }
     .new-chat-btn {
-      margin: 12px 16px 0;
-      height: 36px;
+      margin: 10px 12px 0;
+      width: calc(100% - 24px);
+      min-height: 40px;
       border-radius: var(--radius-sm);
       background: var(--ca-navy);
       color: #fff;
@@ -269,10 +270,15 @@
       font-weight: 600;
       display: flex;
       align-items: center;
-      justify-content: center;
+      justify-content: flex-start;
       gap: 7px;
+      padding: 0 14px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
       transition: background .15s;
     }
+    .new-chat-btn i { flex-shrink: 0; }
     .new-chat-btn:hover { background: var(--ca-navy-light); }
     .sidebar-search {
       margin: 10px 8px 2px;
@@ -644,6 +650,38 @@
     }
 
     /* ══ CHAT DASHBOARD LAYER (SCREEN 2) ══ */
+    #screen-chat .sidebar {
+      background: linear-gradient(180deg, hsl(221, 42%, 13%) 0%, hsl(221, 38%, 10%) 100%);
+      border-right: 1px solid rgba(95, 138, 228, .26);
+    }
+    #screen-chat .sidebar-logo .logo-text { color: hsl(210, 100%, 95%); }
+    #screen-chat .sidebar-logo .logo-text span { color: hsl(202, 82%, 74%); }
+    #screen-chat .new-chat-btn {
+      background: linear-gradient(135deg, rgba(0, 124, 210, .96) 0%, rgba(47, 96, 240, .96) 100%);
+      border: 1px solid rgba(163, 213, 255, .42);
+      box-shadow: 0 8px 20px rgba(0, 85, 170, .36), inset 0 0 0 1px rgba(189, 226, 255, .16);
+    }
+    #screen-chat .new-chat-btn:hover {
+      background: linear-gradient(135deg, rgba(16, 141, 227, 1) 0%, rgba(61, 110, 255, 1) 100%);
+    }
+    #screen-chat .sidebar-search {
+      border-color: rgba(118, 159, 240, .30);
+      background: rgba(10, 23, 45, .72);
+      color: hsl(213, 58%, 84%);
+    }
+    #screen-chat .sidebar-search input { color: hsl(210, 72%, 90%); }
+    #screen-chat .sidebar-search input::placeholder { color: hsl(214, 30%, 62%); }
+    #screen-chat .sidebar-section-label { color: hsl(215, 26%, 62%); }
+    #screen-chat .conv-item { color: hsl(214, 58%, 86%); }
+    #screen-chat .conv-item:hover { background: rgba(97, 149, 255, .14); }
+    #screen-chat .conv-item.active-conv {
+      background: rgba(73, 130, 238, .26);
+      border: 1px solid rgba(149, 189, 255, .28);
+    }
+    #screen-chat .sidebar-footer {
+      border-top-color: rgba(95, 138, 228, .22);
+      color: hsl(216, 44%, 76%);
+    }
     #screen-chat .main-area {
       background:
         radial-gradient(85% 130% at 12% -8%, rgba(0, 156, 255, 0.14) 0%, rgba(0,156,255,0) 52%),
@@ -651,6 +689,49 @@
         linear-gradient(180deg, hsl(222, 34%, 10%) 0%, hsl(220, 38%, 8%) 100%);
       position: relative;
       overflow: hidden;
+    }
+    #screen-chat .chat-body { background: transparent; }
+    #screen-chat .chat-column { background: transparent; }
+    #screen-chat .msg-bubble.ai {
+      background: linear-gradient(160deg, rgba(18, 33, 64, .94) 0%, rgba(12, 25, 50, .88) 100%);
+      border-color: rgba(113, 152, 236, .34);
+      color: hsl(210, 86%, 93%);
+      box-shadow: 0 10px 24px rgba(1, 7, 18, .45);
+    }
+    #screen-chat .msg-bubble.ai code {
+      color: hsl(205, 92%, 79%);
+      background: rgba(123, 175, 255, .16);
+    }
+    #screen-chat .msg-sender { color: hsl(214, 40%, 70%); }
+    #screen-chat .ai-disclaimer { color: hsl(213, 34%, 66%); }
+    #screen-chat .compose-bar-container {
+      border-top-color: rgba(90, 126, 211, .34);
+      background: linear-gradient(180deg, rgba(7, 17, 34, .96) 0%, rgba(7, 15, 30, .96) 100%);
+    }
+    #screen-chat .compose-wrap {
+      border-color: rgba(99, 141, 228, .36);
+      background: rgba(14, 28, 55, .84);
+      box-shadow: inset 0 0 0 1px rgba(140, 182, 255, .10);
+    }
+    #screen-chat .compose-input {
+      color: hsl(210, 78%, 92%);
+    }
+    #screen-chat .compose-input::placeholder {
+      color: hsl(216, 28%, 64%);
+    }
+    #screen-chat .compose-tool-btn {
+      color: hsl(214, 40%, 74%);
+      border-color: rgba(109, 149, 232, .26);
+      background: rgba(78, 120, 206, .10);
+    }
+    #screen-chat .compose-tool-btn:hover {
+      color: hsl(209, 90%, 92%);
+      border-color: rgba(151, 195, 255, .48);
+      background: rgba(110, 157, 255, .18);
+    }
+    #screen-chat .send-btn {
+      border-color: rgba(170, 216, 255, .45);
+      box-shadow: 0 8px 22px rgba(2, 92, 182, .34);
     }
     #screen-chat .chat-header {
       background: linear-gradient(180deg, rgba(10, 20, 40, .96) 0%, rgba(8, 16, 32, .96) 100%);
@@ -931,6 +1012,170 @@
     #screen-chat .input-box textarea { color: hsl(210, 100%, 92%); }
     #screen-chat .input-box textarea::placeholder { color: hsl(215, 32%, 62%); }
     #screen-chat .input-hint { color: hsl(214, 36%, 68%); }
+
+    /* ══ DAY MODE LOCK (ALL SCREENS) ══ */
+    #screen-landing .main-area {
+      background:
+        radial-gradient(100% 140% at 10% -10%, rgba(107, 170, 255, .20) 0%, rgba(107, 170, 255, 0) 62%),
+        radial-gradient(90% 120% at 90% -15%, rgba(255, 207, 128, .18) 0%, rgba(255, 207, 128, 0) 58%),
+        linear-gradient(180deg, hsl(210, 60%, 98%) 0%, hsl(205, 44%, 96%) 100%);
+    }
+    #screen-landing .main-area::before {
+      background:
+        linear-gradient(90deg, rgba(61, 124, 225, .08) 1px, transparent 1px),
+        linear-gradient(180deg, rgba(61, 124, 225, .07) 1px, transparent 1px);
+      opacity: .5;
+    }
+    #screen-landing .landing-kicker { color: hsl(205, 55%, 40%); }
+    #screen-landing .landing-title { color: hsl(214, 44%, 16%); text-shadow: none; }
+    #screen-landing .landing-title span { color: hsl(38, 88%, 42%); }
+    #screen-landing .landing-sub { color: hsl(215, 20%, 35%); }
+    #screen-landing .landing-btn.ghost {
+      color: hsl(212, 45%, 30%);
+      border-color: hsl(210, 42%, 78%);
+      background: hsl(0, 0%, 100%);
+    }
+
+    #screen-chat .sidebar {
+      background: var(--sidebar-bg);
+      border-right-color: var(--border);
+    }
+    #screen-chat .sidebar-logo .logo-text { color: #fff; }
+    #screen-chat .sidebar-logo .logo-text span { color: hsl(202,70%,70%); }
+    #screen-chat .sidebar-search {
+      border-color: rgba(135,168,216,.22);
+      background: rgba(255,255,255,.04);
+      color: hsl(214, 26%, 76%);
+    }
+    #screen-chat .sidebar-search input { color: hsl(214, 30%, 84%); }
+    #screen-chat .sidebar-search input::placeholder { color: hsl(215, 18%, 54%); }
+    #screen-chat .sidebar-section-label { color: hsl(215,15%,45%); }
+    #screen-chat .conv-item { color: var(--text-secondary); }
+    #screen-chat .conv-item:hover { background: rgba(255,255,255,.06); }
+    #screen-chat .conv-item.active-conv { background: rgba(76,155,213,.14); border-color: transparent; }
+    #screen-chat .sidebar-footer { border-top-color: hsl(215,26%,22%); color: hsl(215,20%,74%); }
+    #screen-chat .main-area {
+      background: var(--bg-main);
+      position: relative;
+      overflow: hidden;
+    }
+    #screen-chat .main-area::before,
+    #screen-chat .main-area::after {
+      content: none;
+      animation: none;
+      background: none;
+    }
+    #screen-chat .chat-header {
+      background: #fff;
+      border-bottom-color: var(--border);
+    }
+    #screen-chat .chat-header .font-display { color: var(--text-primary) !important; }
+    #screen-chat .chat-header .mode-badge.gold {
+      background: var(--gold-soft);
+      color: var(--gold-deep);
+      border: none;
+    }
+    #screen-chat .chat-header .icon-btn {
+      color: var(--text-secondary);
+      background: var(--bg-subtle);
+      border-color: var(--border);
+      box-shadow: none;
+    }
+    #screen-chat .chat-header .icon-btn:hover {
+      color: var(--ca-navy);
+      border-color: hsl(202,65%,76%);
+      box-shadow: 0 0 0 3px rgba(0, 98, 176, .10);
+    }
+    #screen-chat .chat-dashboard-shell {
+      background: #fff;
+      border-bottom-color: var(--border);
+      box-shadow: none;
+      backdrop-filter: none;
+    }
+    #screen-chat .ops-chip,
+    #screen-chat .quick-btn,
+    #screen-chat .kpi-card,
+    #screen-chat .evidence-panel {
+      background: #fff;
+      color: var(--text-primary);
+      border-color: var(--border);
+      box-shadow: none;
+      text-shadow: none;
+    }
+    #screen-chat .ops-chip.active,
+    #screen-chat .mode-pill.active {
+      background: var(--ca-navy);
+      color: #fff;
+      border-color: transparent;
+      box-shadow: none;
+    }
+    #screen-chat .kpi-value,
+    #screen-chat .kpi-label,
+    #screen-chat .evidence-title,
+    #screen-chat .evidence-item,
+    #screen-chat .evidence-item i { color: var(--text-primary); }
+    #screen-chat .messages-inner {
+      border: 1px solid var(--border);
+      background: transparent;
+      box-shadow: none;
+    }
+    #screen-chat .msg-bubble.ai {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text-primary);
+      box-shadow: var(--shadow-xs);
+    }
+    #screen-chat .msg-bubble.ai code {
+      color: var(--ca-navy);
+      background: hsl(215,15%,94%);
+    }
+    #screen-chat .msg-sender { color: var(--text-tertiary); }
+    #screen-chat .ai-disclaimer,
+    #screen-chat .input-hint { color: var(--text-tertiary); }
+    #screen-chat .artifact-card {
+      border-color: var(--border);
+      background: var(--bg);
+      box-shadow: var(--shadow-sm);
+    }
+    #screen-chat .artifact-head {
+      background: var(--bg-card);
+      border-bottom-color: var(--border);
+    }
+    #screen-chat .artifact-title { color: var(--text-primary); }
+    #screen-chat .artifact-subtitle,
+    #screen-chat .artifact-body td,
+    #screen-chat .artifact-footer { color: var(--text-secondary); }
+    #screen-chat .artifact-body th { color: var(--text-tertiary); border-bottom-color: var(--border); }
+    #screen-chat .artifact-body tr:hover td { background: var(--bg-subtle); }
+    #screen-chat .compose-bar-container,
+    #screen-chat .input-area {
+      border-top-color: var(--border);
+      background: #fff;
+    }
+    #screen-chat .compose-wrap,
+    #screen-chat .input-box {
+      border-color: var(--border);
+      background: #fff;
+      box-shadow: none;
+    }
+    #screen-chat .compose-input,
+    #screen-chat .input-box textarea { color: var(--text-primary); }
+    #screen-chat .compose-input::placeholder,
+    #screen-chat .input-box textarea::placeholder { color: hsl(214, 10%, 56%); }
+    #screen-chat .compose-tool-btn,
+    #screen-chat .mode-pill {
+      color: var(--text-secondary);
+      border-color: var(--border);
+      background: var(--bg-subtle);
+    }
+    #screen-chat .compose-tool-btn:hover,
+    #screen-chat .mode-pill:hover {
+      color: var(--ca-navy);
+      border-color: hsl(202,65%,76%);
+      background: hsl(202,65%,96%);
+      box-shadow: none;
+    }
+    #screen-chat .send-btn { box-shadow: none; }
 
     @keyframes holoGridDrift {
       0% { transform: translateY(0px); }
@@ -1884,6 +2129,107 @@
       background: var(--emerald);
       animation: dotPulse 1.2s ease-in-out infinite;
     }
+
+    /* ══ BOARDROOM SCREEN ══ */
+    #screen-boardroom { background: hsl(220,28%,10%); font-family: var(--font-body); }
+    .boardroom-layout { display:flex; width:100%; height:100%; }
+
+    /* sidebar */
+    .br-sidebar { width:220px; flex-shrink:0; background:hsl(220,30%,12%); border-right:1px solid rgba(99,140,220,.22); display:flex; flex-direction:column; padding:16px 0; }
+    .br-sidebar-title { font-size:10px; font-weight:700; letter-spacing:.1em; text-transform:uppercase; color:hsl(215,28%,52%); padding:0 16px 10px; }
+    .br-participant { display:flex; align-items:center; gap:10px; padding:8px 16px; transition:background .12s; cursor:default; }
+    .br-participant:hover { background:rgba(255,255,255,.04); }
+    .br-participant.speaking { background:rgba(56,189,132,.10); }
+    .br-participant.queued   { background:rgba(250,189,60,.08); }
+    .br-avatar { width:32px; height:32px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:700; flex-shrink:0; }
+    .br-avatar.av-mod { background:hsl(202,80%,22%); color:hsl(202,90%,80%); }
+    .br-avatar.av-tax { background:hsl(262,60%,26%); color:hsl(262,90%,82%); }
+    .br-avatar.av-aud { background:hsl(38,70%,22%);  color:hsl(38,95%,80%); }
+    .br-avatar.av-for { background:hsl(351,60%,22%); color:hsl(351,90%,80%); }
+    .br-avatar.av-com { background:hsl(160,60%,18%); color:hsl(160,90%,78%); }
+    .br-avatar.av-you { background:var(--ca-navy);   color:#fff; }
+    .br-name { flex:1; font-size:12px; font-weight:500; color:hsl(214,42%,78%); line-height:1.25; }
+    .br-name small { display:block; font-size:10px; font-weight:400; color:hsl(215,22%,50%); margin-top:1px; }
+    .br-status-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+    .br-status-dot.speaking  { background:hsl(160,84%,50%); box-shadow:0 0 6px hsl(160,84%,50%); animation:br-pulse 1.4s infinite; }
+    .br-status-dot.queued    { background:hsl(38,92%,56%); }
+    .br-status-dot.listening { background:hsl(215,20%,38%); }
+    .br-status-dot.user      { background:hsl(202,100%,56%); }
+    @keyframes br-pulse { 0%,100%{opacity:1} 50%{opacity:.45} }
+    .br-sidebar-divider { height:1px; background:rgba(99,140,220,.14); margin:8px 16px; }
+
+    /* phase bar */
+    .br-phase-bar { padding:10px 20px; background:hsl(220,32%,13%); border-bottom:1px solid rgba(99,140,220,.18); display:flex; align-items:center; gap:6px; flex-shrink:0; overflow-x:auto; }
+    .br-phase-step { display:flex; align-items:center; gap:5px; font-size:11px; font-weight:500; color:hsl(215,20%,40%); white-space:nowrap; }
+    .br-phase-step.done   { color:hsl(160,70%,50%); }
+    .br-phase-step.active { color:hsl(210,90%,80%); font-weight:600; }
+    .br-phase-num { width:18px; height:18px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:9px; font-weight:800; border:1px solid currentColor; opacity:.8; }
+    .br-phase-step.done   .br-phase-num { background:hsl(160,70%,50%); border-color:hsl(160,70%,50%); color:#fff; opacity:1; }
+    .br-phase-step.active .br-phase-num { background:rgba(120,180,255,.22); border-color:hsl(210,90%,70%); color:hsl(210,90%,85%); opacity:1; }
+    .br-phase-sep { color:hsl(215,20%,30%); font-size:12px; }
+
+    /* thread */
+    .br-main { flex:1; display:flex; flex-direction:column; overflow:hidden; }
+    .br-thread { flex:1; overflow-y:auto; padding:20px 24px; display:flex; flex-direction:column; gap:4px; }
+    .br-thread::-webkit-scrollbar { width:4px; }
+    .br-thread::-webkit-scrollbar-thumb { background:rgba(120,160,220,.25); border-radius:4px; }
+    .br-turn { display:flex; flex-direction:column; gap:0; margin-bottom:10px; }
+    .br-turn-header { display:flex; align-items:center; gap:8px; margin-bottom:5px; }
+    .br-turn-avatar-sm { width:26px; height:26px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:9px; font-weight:800; flex-shrink:0; }
+    .br-turn-role { font-size:12px; font-weight:700; color:hsl(213,60%,78%); }
+    .br-turn-role.role-mod { color:hsl(202,90%,74%); }
+    .br-turn-role.role-tax { color:hsl(262,80%,80%); }
+    .br-turn-role.role-aud { color:hsl(38,92%,72%); }
+    .br-turn-role.role-for { color:hsl(351,80%,78%); }
+    .br-turn-role.role-com { color:hsl(160,70%,66%); }
+    .br-turn-role.role-you { color:hsl(202,100%,72%); }
+    .br-turn-time { font-size:10px; color:hsl(215,20%,40%); margin-left:auto; }
+    .br-bubble { background:rgba(20,35,65,.72); border:1px solid rgba(90,130,210,.22); border-radius:0 12px 12px 12px; padding:10px 14px; font-size:13px; line-height:1.6; color:hsl(213,40%,86%); max-width:720px; }
+    .br-bubble.you { background:rgba(0,78,152,.45); border-color:rgba(80,155,240,.35); border-radius:12px 0 12px 12px; margin-left:auto; color:hsl(210,80%,92%); }
+    .br-bubble.mod { background:rgba(10,30,60,.60); border-color:rgba(100,160,240,.28); border-left:3px solid hsl(202,90%,56%); }
+    .br-bubble.typing::after { content:'● ● ●'; letter-spacing:4px; color:hsl(213,40%,60%); animation:br-type 1s infinite; }
+    @keyframes br-type { 0%,100%{opacity:.3} 50%{opacity:1} }
+
+    /* question cards */
+    .br-question-card { margin:4px 0 8px 34px; background:rgba(250,189,60,.07); border:1px solid rgba(250,189,60,.32); border-radius:10px; padding:10px 14px; max-width:640px; }
+    .br-question-card.resolved { background:rgba(60,205,138,.06); border-color:rgba(60,205,138,.28); }
+    .br-q-header { display:flex; align-items:center; gap:7px; margin-bottom:7px; }
+    .br-q-icon { color:hsl(38,92%,65%); font-size:14px; }
+    .br-q-icon.resolved { color:hsl(160,70%,55%); }
+    .br-q-asked { font-size:11px; color:hsl(215,20%,52%); }
+    .br-q-text { font-size:13px; color:hsl(38,90%,84%); line-height:1.55; margin-bottom:9px; }
+    .br-question-card.resolved .br-q-text { color:hsl(160,60%,72%); }
+    .br-q-actions { display:flex; gap:6px; flex-wrap:wrap; }
+    .br-q-btn { height:26px; padding:0 10px; border-radius:6px; font-size:11px; font-weight:600; border:1px solid rgba(250,189,60,.32); background:rgba(250,189,60,.10); color:hsl(38,90%,74%); cursor:pointer; transition:all .12s; }
+    .br-q-btn:hover { background:rgba(250,189,60,.20); }
+    .br-q-btn.redirect { background:rgba(99,140,220,.12); border-color:rgba(99,140,220,.30); color:hsl(213,70%,74%); }
+    .br-q-btn.redirect:hover { background:rgba(99,140,220,.22); }
+    .br-q-btn.skip { background:rgba(255,255,255,.04); border-color:rgba(255,255,255,.10); color:hsl(215,15%,52%); }
+    .br-q-answer-row { margin-top:8px; display:flex; gap:6px; align-items:flex-start; }
+    .br-q-answer-input { flex:1; background:rgba(10,25,50,.70); border:1px solid rgba(99,140,220,.30); border-radius:7px; padding:6px 10px; font-size:12px; color:hsl(213,50%,86%); resize:none; font-family:var(--font-body); outline:none; }
+    .br-q-answer-input:focus { border-color:rgba(120,175,255,.55); }
+    .br-q-send-btn { width:28px; height:28px; border-radius:7px; background:var(--ca-navy); border:none; display:flex; align-items:center; justify-content:center; color:#fff; font-size:13px; cursor:pointer; flex-shrink:0; margin-top:1px; }
+    .br-q-resolved-note { display:flex; align-items:center; gap:5px; font-size:11px; color:hsl(160,60%,58%); margin-top:6px; }
+
+    /* resolution */
+    .br-resolution { margin:12px 0; background:rgba(10,28,58,.85); border:1px solid rgba(100,160,240,.35); border-top:3px solid hsl(202,90%,52%); border-radius:12px; padding:18px 20px; max-width:760px; }
+    .br-resolution-title { font-family:var(--font-display); font-size:14px; font-weight:700; color:hsl(210,90%,84%); letter-spacing:.04em; text-transform:uppercase; margin-bottom:14px; display:flex; align-items:center; gap:8px; }
+    .br-resolution-section { margin-bottom:12px; }
+    .br-resolution-label { font-size:10px; font-weight:800; letter-spacing:.1em; text-transform:uppercase; color:hsl(215,25%,50%); margin-bottom:5px; }
+    .br-resolution-body { font-size:13px; color:hsl(213,38%,82%); line-height:1.6; }
+    .br-resolution-body li { list-style:none; padding-left:16px; position:relative; margin-bottom:3px; }
+    .br-resolution-body li::before { content:'→'; position:absolute; left:0; color:hsl(202,90%,60%); }
+    .br-resolution-dissent { font-size:12px; color:hsl(38,80%,72%); font-style:italic; margin-top:4px; }
+    .br-resolution-footer { margin-top:12px; padding-top:10px; border-top:1px solid rgba(99,140,220,.18); font-size:11px; color:hsl(215,20%,45%); }
+
+    /* compose */
+    .br-compose { padding:12px 20px; background:hsl(220,32%,11%); border-top:1px solid rgba(99,140,220,.18); display:flex; gap:8px; align-items:flex-end; flex-shrink:0; }
+    .br-compose-wrap { flex:1; background:rgba(14,28,55,.80); border:1px solid rgba(99,140,220,.30); border-radius:10px; display:flex; align-items:flex-end; padding:6px 10px; gap:6px; }
+    .br-compose-textarea { flex:1; background:none; border:none; outline:none; font-size:13px; color:hsl(213,50%,88%); resize:none; line-height:1.5; max-height:80px; font-family:var(--font-body); }
+    .br-compose-textarea::placeholder { color:hsl(215,20%,46%); }
+    .br-send-btn { width:34px; height:34px; border-radius:9px; background:linear-gradient(135deg,hsl(202,100%,36%) 0%,hsl(222,80%,52%) 100%); border:none; display:flex; align-items:center; justify-content:center; color:#fff; font-size:14px; cursor:pointer; transition:opacity .12s; flex-shrink:0; }
+    .br-send-btn:hover { opacity:.86; }
+    .br-compose-hint { font-size:10px; color:hsl(215,18%,40%); text-align:center; padding:4px 20px 8px; background:hsl(220,32%,11%); flex-shrink:0; }
   </style>
 </head>
 <body>
@@ -1900,6 +2246,7 @@
   <button class="screen-tab" onclick="showScreen('thinking')">④ Thinking</button>
   <button class="screen-tab" onclick="showScreen('error')">⑤ Error State</button>
   <button class="screen-tab" onclick="showScreen('onboarding')">⑥ Onboarding</button>
+  <button class="screen-tab" onclick="showScreen('boardroom')">⑦ Boardroom</button>
   <span class="proto-note">Click tabs to navigate · interactive elements work</span>
 </div>
 
@@ -1918,7 +2265,7 @@
           </div>
           <span class="logo-text">CA <span>GPT</span></span>
         </a>
-        <button class="new-chat-btn" style="margin-top:10px;">
+        <button class="new-chat-btn">
           <i class="ph ph-plus" style="font-size:13px;"></i>
           New Chat
         </button>
@@ -1980,7 +2327,7 @@
           </div>
           <span class="logo-text">CA <span>GPT</span></span>
         </a>
-        <button class="new-chat-btn" style="margin-top:10px;">
+        <button class="new-chat-btn">
           <i class="ph ph-plus" style="font-size:13px;"></i>
           New Chat
         </button>
@@ -2125,7 +2472,7 @@
           </div>
           <span class="logo-text">CA <span>GPT</span></span>
         </a>
-        <button class="new-chat-btn" style="margin-top:10px;">
+        <button class="new-chat-btn">
           <i class="ph ph-plus" style="font-size:13px;"></i>
           New Chat
         </button>
@@ -2438,7 +2785,7 @@
           <div class="logo-mark"><svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M9 1L11.2 6.8L17 9L11.2 11.2L9 17L6.8 11.2L1 9L6.8 6.8Z" fill="white"/></svg></div>
           <span class="logo-text">CA <span>GPT</span></span>
         </a>
-        <button class="new-chat-btn" style="margin-top:10px;">
+        <button class="new-chat-btn">
           <i class="ph ph-plus" style="font-size:13px;"></i>
           New Chat
         </button>
@@ -2578,7 +2925,7 @@
           <div class="logo-mark"><svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M9 1L11.2 6.8L17 9L11.2 11.2L9 17L6.8 11.2L1 9L6.8 6.8Z" fill="white"/></svg></div>
           <span class="logo-text">CA <span>GPT</span></span>
         </a>
-        <button class="new-chat-btn" style="margin-top:10px;">
+        <button class="new-chat-btn">
           <i class="ph ph-plus" style="font-size:13px;"></i>
           New Chat
         </button>
@@ -2720,7 +3067,7 @@
     <aside class="sidebar" style="filter:blur(2px);pointer-events:none;">
       <div class="sidebar-head">
         <a class="sidebar-logo" href="#"><div class="logo-mark"><svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M9 1L11.2 6.8L17 9L11.2 11.2L9 17L6.8 11.2L1 9L6.8 6.8Z" fill="white"/></svg></div><span class="logo-text">CA <span>GPT</span></span></a>
-        <button class="new-chat-btn" style="margin-top:10px;pointer-events:none;">+ New Chat</button>
+        <button class="new-chat-btn" style="pointer-events:none;">+ New Chat</button>
       </div>
     </aside>
     <div class="main-area" style="filter:blur(2px);pointer-events:none;">
@@ -2775,7 +3122,7 @@
           </div>
           <span class="logo-text">CA <span>GPT</span></span>
         </a>
-        <button class="new-chat-btn" style="margin-top:10px;">
+        <button class="new-chat-btn">
           <i class="ph ph-plus" style="font-size:13px;"></i> New Chat
         </button>
       </div>
@@ -3076,7 +3423,7 @@
     const screen = document.getElementById('screen-' + name);
     if (screen) screen.classList.add('active');
     const tabs = document.querySelectorAll('.screen-tab');
-    const tabMap = { landing: 0, welcome: 1, chat: 2, spreadsheet: 3, thinking: 4, error: 5, onboarding: 6 };
+    const tabMap = { landing: 0, welcome: 1, chat: 2, spreadsheet: 3, thinking: 4, error: 5, onboarding: 6, boardroom: 7 };
     if (tabMap[name] !== undefined) tabs[tabMap[name]].classList.add('active');
     if (name === 'onboarding') initOnboarding();
     if (name === 'thinking') startThinkingAnimation();
@@ -3462,6 +3809,216 @@
     renderObStep();
     injectMessageActions();
   });
+  function brAnswerQuestion(cardId) {
+    const card = document.getElementById(cardId);
+    if (!card) return;
+    card.querySelector('.br-q-answer-row').style.display = 'flex';
+    card.querySelector('.br-q-actions').style.display = 'none';
+  }
+  function brSubmitAnswer(cardId) {
+    const card = document.getElementById(cardId);
+    if (!card) return;
+    const ta = card.querySelector('.br-q-answer-input');
+    if (!ta || !ta.value.trim()) return;
+    card.classList.add('resolved');
+    const icon = card.querySelector('.br-q-icon');
+    if (icon) { icon.className = 'br-q-icon resolved ph ph-check-circle'; }
+    const qt = card.querySelector('.br-q-text');
+    if (qt) qt.style.textDecoration = 'line-through';
+    card.querySelector('.br-q-answer-row').style.display = 'none';
+    const note = document.createElement('div');
+    note.className = 'br-q-resolved-note';
+    note.innerHTML = '<i class="ph ph-check-circle"></i> Answered by You';
+    card.appendChild(note);
+  }
 </script>
+
+<!-- ═══════════════════════════════════════════════
+     SCREEN 7 — BOARDROOM ROUNDTABLE
+════════════════════════════════════════════════ -->
+<div id="screen-boardroom" class="screen">
+  <div class="boardroom-layout">
+
+    <!-- Participant sidebar -->
+    <aside class="br-sidebar">
+      <div class="br-sidebar-title">Participants &middot; 5</div>
+
+      <div class="br-participant speaking">
+        <div class="br-avatar av-mod">CH</div>
+        <div class="br-name">Moderator<small>Speaking now</small></div>
+        <div class="br-status-dot speaking"></div>
+      </div>
+      <div class="br-participant">
+        <div class="br-avatar av-tax">TX</div>
+        <div class="br-name">Tax Specialist<small>Listening</small></div>
+        <div class="br-status-dot listening"></div>
+      </div>
+      <div class="br-participant queued">
+        <div class="br-avatar av-aud">AU</div>
+        <div class="br-name">Audit Partner<small>Queued</small></div>
+        <div class="br-status-dot queued"></div>
+      </div>
+      <div class="br-participant">
+        <div class="br-avatar av-for">FA</div>
+        <div class="br-name">Forensic Analyst<small>Listening</small></div>
+        <div class="br-status-dot listening"></div>
+      </div>
+      <div class="br-participant">
+        <div class="br-avatar av-com">CO</div>
+        <div class="br-name">Compliance Officer<small>Listening</small></div>
+        <div class="br-status-dot listening"></div>
+      </div>
+
+      <div class="br-sidebar-divider"></div>
+
+      <div class="br-participant">
+        <div class="br-avatar av-you">YO</div>
+        <div class="br-name">[You]<small>Meeting Chair</small></div>
+        <div class="br-status-dot user"></div>
+      </div>
+    </aside>
+
+    <!-- Main area -->
+    <div class="br-main">
+
+      <!-- Phase bar -->
+      <div class="br-phase-bar">
+        <div class="br-phase-step done"><div class="br-phase-num">1</div> Opening</div>
+        <div class="br-phase-sep">&rsaquo;</div>
+        <div class="br-phase-step done"><div class="br-phase-num">2</div> Independent Views</div>
+        <div class="br-phase-sep">&rsaquo;</div>
+        <div class="br-phase-step active"><div class="br-phase-num">3</div> Cross-Examination</div>
+        <div class="br-phase-sep">&rsaquo;</div>
+        <div class="br-phase-step"><div class="br-phase-num">4</div> User Q&amp;A</div>
+        <div class="br-phase-sep">&rsaquo;</div>
+        <div class="br-phase-step"><div class="br-phase-num">5</div> Synthesis</div>
+        <div class="br-phase-sep">&rsaquo;</div>
+        <div class="br-phase-step"><div class="br-phase-num">6</div> Resolution</div>
+      </div>
+
+      <!-- Thread -->
+      <div class="br-thread">
+
+        <!-- Moderator opens cross-examination -->
+        <div class="br-turn">
+          <div class="br-turn-header">
+            <div class="br-turn-avatar-sm" style="background:hsl(202,80%,22%);color:hsl(202,90%,80%);">CH</div>
+            <span class="br-turn-role role-mod">Moderator</span>
+            <span class="br-turn-time">09:02</span>
+          </div>
+          <div class="br-bubble mod">We are discussing the tax and audit implications of a proposed cross-border restructuring involving a Singapore holdco. We&rsquo;ve heard initial positions from all participants. I&rsquo;ll now open the floor for cross-examination. <strong>Tax Specialist</strong>, please respond to the Audit Partner&rsquo;s concern about transfer pricing documentation.</div>
+        </div>
+
+        <!-- Tax Specialist speaks -->
+        <div class="br-turn">
+          <div class="br-turn-header">
+            <div class="br-turn-avatar-sm" style="background:hsl(262,60%,26%);color:hsl(262,90%,82%);">TX</div>
+            <span class="br-turn-role role-tax">Tax Specialist</span>
+            <span class="br-turn-time">09:03</span>
+          </div>
+          <div class="br-bubble">The Audit Partner is right that contemporaneous documentation is critical under Section 92D. However, the more immediate issue is whether the Singapore entity has genuine economic substance under OECD BEPS Action 5. If it doesn&rsquo;t, Indian tax authorities will look through the structure entirely &mdash; the documentation becomes secondary. My recommendation: resolve the substance question first.</div>
+        </div>
+
+        <!-- Audit Partner responds + raises agent-to-agent question -->
+        <div class="br-turn">
+          <div class="br-turn-header">
+            <div class="br-turn-avatar-sm" style="background:hsl(38,70%,22%);color:hsl(38,95%,80%);">AU</div>
+            <span class="br-turn-role role-aud">Audit Partner</span>
+            <span class="br-turn-time">09:04</span>
+          </div>
+          <div class="br-bubble">I take that point on substance, but from an audit disclosure standpoint, substance is harder to evidence than documentation. Under Ind AS 110, consolidation control isn&rsquo;t merely structural &mdash; it requires assessment of de facto control. I want to flag that gap before we proceed further.</div>
+        </div>
+
+        <!-- Question card: Audit Partner → Compliance Officer -->
+        <div class="br-question-card" id="qcard-1">
+          <div class="br-q-header">
+            <i class="ph ph-question br-q-icon"></i>
+            <span class="br-q-asked"><strong>Audit Partner</strong> &rarr; <strong>Compliance Officer</strong></span>
+          </div>
+          <div class="br-q-text">Under the current group structure, does the Singapore entity meet the Ind AS 110 control criteria? Has a de facto control assessment ever been formally performed?</div>
+          <div class="br-q-actions">
+            <button class="br-q-btn" onclick="brAnswerQuestion('qcard-1')"><i class="ph ph-pencil-simple"></i> Answer</button>
+            <button class="br-q-btn redirect"><i class="ph ph-arrows-left-right"></i> Redirect</button>
+            <button class="br-q-btn skip">Skip</button>
+          </div>
+          <div class="br-q-answer-row" style="display:none;">
+            <textarea class="br-q-answer-input" rows="2" placeholder="Type your answer…"></textarea>
+            <button class="br-q-send-btn" onclick="brSubmitAnswer('qcard-1')"><i class="ph ph-paper-plane-tilt"></i></button>
+          </div>
+        </div>
+
+        <!-- Compliance responds -->
+        <div class="br-turn">
+          <div class="br-turn-header">
+            <div class="br-turn-avatar-sm" style="background:hsl(160,60%,18%);color:hsl(160,90%,78%);">CO</div>
+            <span class="br-turn-role role-com">Compliance Officer</span>
+            <span class="br-turn-time">09:05</span>
+          </div>
+          <div class="br-bubble">To directly answer the Audit Partner &mdash; to my knowledge, a formal de facto control assessment has not been documented. The structure assumes legal majority shareholding equals control. That assumption may hold, but it&rsquo;s not airtight given the shareholders&rsquo; agreement contains veto rights for the minority. This is a gap we need to close before the restructuring proceeds.</div>
+        </div>
+
+        <!-- Question card: Compliance → User -->
+        <div class="br-question-card" id="qcard-2">
+          <div class="br-q-header">
+            <i class="ph ph-question br-q-icon"></i>
+            <span class="br-q-asked"><strong>Compliance Officer</strong> &rarr; <strong>[You]</strong></span>
+          </div>
+          <div class="br-q-text">Are you able to share the shareholders&rsquo; agreement? The veto rights clause is central to both the Ind AS 110 analysis and the FEMA compliance assessment.</div>
+          <div class="br-q-actions">
+            <button class="br-q-btn" onclick="brAnswerQuestion('qcard-2')"><i class="ph ph-pencil-simple"></i> Answer</button>
+            <button class="br-q-btn redirect"><i class="ph ph-arrows-left-right"></i> Redirect</button>
+            <button class="br-q-btn skip">Skip</button>
+          </div>
+          <div class="br-q-answer-row" style="display:none;">
+            <textarea class="br-q-answer-input" rows="2" placeholder="Type your answer…"></textarea>
+            <button class="br-q-send-btn" onclick="brSubmitAnswer('qcard-2')"><i class="ph ph-paper-plane-tilt"></i></button>
+          </div>
+        </div>
+
+        <!-- User interjection -->
+        <div class="br-turn" style="align-items:flex-end;">
+          <div class="br-turn-header" style="justify-content:flex-end;">
+            <span class="br-turn-time">09:06</span>
+            <span class="br-turn-role role-you">[You]</span>
+            <div class="br-turn-avatar-sm" style="background:var(--ca-navy);color:#fff;">YO</div>
+          </div>
+          <div class="br-bubble you">I don&rsquo;t have the shareholders&rsquo; agreement on hand &mdash; can the Forensic Analyst review what&rsquo;s available in the data room and flag the relevant veto clause?</div>
+        </div>
+
+        <!-- Forensic Analyst responds to user redirect -->
+        <div class="br-turn">
+          <div class="br-turn-header">
+            <div class="br-turn-avatar-sm" style="background:hsl(351,60%,22%);color:hsl(351,90%,80%);">FA</div>
+            <span class="br-turn-role role-for">Forensic Analyst</span>
+            <span class="br-turn-time">09:06</span>
+          </div>
+          <div class="br-bubble">Noted. In standard SHA structures for Singapore-based holdcos, protective veto rights typically appear in clauses 8&ndash;12. I&rsquo;ll flag the relevant language once the document is in the data room. For the time being, the board should proceed on the assumption that protective vetoes exist, which has implications for both the Ind AS 110 and FEMA analyses.</div>
+        </div>
+
+        <!-- Moderator typing indicator -->
+        <div class="br-turn">
+          <div class="br-turn-header">
+            <div class="br-turn-avatar-sm" style="background:hsl(202,80%,22%);color:hsl(202,90%,80%);">CH</div>
+            <span class="br-turn-role role-mod">Moderator</span>
+            <span class="br-turn-time">09:07</span>
+          </div>
+          <div class="br-bubble mod typing"></div>
+        </div>
+
+      </div><!-- end .br-thread -->
+
+      <!-- Compose bar -->
+      <div class="br-compose">
+        <div class="br-compose-wrap">
+          <textarea class="br-compose-textarea" rows="1" placeholder="Interject or ask the board a question&hellip;" oninput="this.style.height=&apos;auto&apos;;this.style.height=Math.min(this.scrollHeight,80)+&apos;px&apos;"></textarea>
+        </div>
+        <button class="br-send-btn"><i class="ph ph-paper-plane-tilt"></i></button>
+      </div>
+      <div class="br-compose-hint">Enter to interject &nbsp;&middot;&nbsp; Shift+Enter for new line &nbsp;&middot;&nbsp; Click a question card to answer or redirect</div>
+
+    </div><!-- end .br-main -->
+  </div><!-- end .boardroom-layout -->
+</div><!-- end #screen-boardroom -->
+
 </body>
 </html>

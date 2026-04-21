@@ -44,6 +44,23 @@ interface MindMapRendererProps {
  * Orphans (nodes unreachable from root) are attached under root so nothing
  * silently disappears from a malformed payload.
  */
+
+/**
+ * Normalize a topic / note string for Mind Elixir.
+ *
+ * The LLM occasionally emits HTML-style line breaks (`<br/>`, `<br>`,
+ * `<BR />`) directly inside labels. Mind Elixir treats `topic` as plain text,
+ * so those render literally. `me-tpc` uses `white-space: pre-wrap`, so
+ * replacing the tags with `\n` yields real line breaks. Also collapses
+ * `\r\n` / `\r` for consistency and trims trailing whitespace.
+ */
+function normalizeTopic(s: string): string {
+  return s
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/\r\n?/g, "\n")
+    .trim();
+}
+
 function toMindElixirData(data: MindMapData): MindElixirData {
   const nodes: MindMapNode[] = Array.isArray(data.nodes) ? data.nodes : [];
   const edges: MindMapEdge[] = Array.isArray(data.edges) ? data.edges : [];
@@ -52,7 +69,7 @@ function toMindElixirData(data: MindMapData): MindElixirData {
     return {
       nodeData: {
         id: "empty",
-        topic: data.title || "Empty mindmap",
+        topic: normalizeTopic(data.title || "Empty mindmap"),
       },
     };
   }
@@ -93,8 +110,8 @@ function toMindElixirData(data: MindMapData): MindElixirData {
 
     return {
       id: n.id,
-      topic: n.label,
-      note: n.description,
+      topic: normalizeTopic(n.label),
+      note: n.description ? normalizeTopic(n.description) : undefined,
       icons: n.icon ? [n.icon] : undefined,
       tags,
       children: children.length > 0 ? children : undefined,
@@ -106,7 +123,7 @@ function toMindElixirData(data: MindMapData): MindElixirData {
     // Unreachable in practice — `build` only returns null on cycle revisit,
     // and `rootNode.id` hasn't been visited yet. Kept for type narrowing.
     return {
-      nodeData: { id: rootNode.id, topic: rootNode.label },
+      nodeData: { id: rootNode.id, topic: normalizeTopic(rootNode.label) },
     };
   }
 

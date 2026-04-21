@@ -158,7 +158,30 @@ const MindMapRenderer = forwardRef<MindMapRendererHandle, MindMapRendererProps>(
       instance.init(mindData);
       instanceRef.current = instance;
 
+      // Auto-fit on mount + whenever the container resizes. Mind Elixir
+      // renders at 1.0 scale by default; without this, wide mindmaps bleed
+      // past the card's left/right edges. `scaleFit` picks the largest scale
+      // that keeps every node inside the visible area. The initial call is
+      // deferred one frame so Mind Elixir has time to lay out the tree.
+      const fit = () => {
+        try {
+          instance.scaleFit();
+        } catch {
+          // Mind Elixir throws if called before the layout has painted;
+          // a second rAF retry is almost always enough.
+        }
+      };
+      const raf = requestAnimationFrame(() => {
+        fit();
+        requestAnimationFrame(fit);
+      });
+
+      const resizeObs = new ResizeObserver(() => fit());
+      resizeObs.observe(el);
+
       return () => {
+        cancelAnimationFrame(raf);
+        resizeObs.disconnect();
         try {
           instance.destroy();
         } catch {

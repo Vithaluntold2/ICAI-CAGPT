@@ -1,35 +1,46 @@
 // client/src/components/shell/IconRail.tsx
-import { Grid3x3, Search, Plus, Settings } from 'lucide-react';
+import { PanelLeftClose, PanelLeft, Search, Plus, Settings } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import logoImg from '@assets/icai-ca-india-logo.png';
 
 interface IconRailProps {
-  activeView?: 'modes' | 'search';
-  onOpenModes?: () => void;
+  sidebarOpen?: boolean;
+  onToggleSidebar?: () => void;
   onOpenSearch?: () => void;
   onNewChat?: () => void;
   onOpenSettings?: () => void;
 }
 
 export function IconRail({
-  activeView = 'modes',
-  onOpenModes,
+  sidebarOpen = true,
+  onToggleSidebar,
   onOpenSearch,
   onNewChat,
   onOpenSettings,
 }: IconRailProps) {
+  // No white card wrapper — the ICAI mark carries its own navy disc so it
+  // reads on both light and dark rails; adding a white plate made the rail
+  // look stapled to a different theme in dark mode.
   return (
     <nav className="w-[52px] bg-sidebar border-r border-border flex flex-col items-center py-3.5 gap-1.5 shrink-0">
       <div
-        className="w-9 h-9 rounded-lg bg-white/95 dark:bg-white flex items-center justify-center mb-2.5 shadow-sm overflow-hidden"
+        className="w-9 h-9 rounded-lg flex items-center justify-center mb-2.5 overflow-hidden"
         title="CA-GPT"
       >
-        <img src={logoImg} alt="CA-GPT" className="h-7 w-auto object-contain" />
+        <img src={logoImg} alt="CA-GPT" className="h-8 w-auto object-contain" />
       </div>
-      <RailButton label="Modes" active={activeView === 'modes'} onClick={onOpenModes}>
-        <Grid3x3 className="w-4 h-4" strokeWidth={1.75} />
+      <RailButton
+        label={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
+        active={sidebarOpen}
+        onClick={onToggleSidebar}
+      >
+        {sidebarOpen ? (
+          <PanelLeftClose className="w-4 h-4" strokeWidth={1.75} />
+        ) : (
+          <PanelLeft className="w-4 h-4" strokeWidth={1.75} />
+        )}
       </RailButton>
-      <RailButton label="Search" active={activeView === 'search'} onClick={onOpenSearch}>
+      <RailButton label="Search" onClick={onOpenSearch}>
         <Search className="w-4 h-4" strokeWidth={1.75} />
       </RailButton>
       <RailButton label="New chat" onClick={onNewChat}>

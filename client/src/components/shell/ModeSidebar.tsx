@@ -6,7 +6,6 @@ import { ModeRow } from './ModeRow';
 import { ConvoRow } from './ConvoRow';
 import { Kbd } from '@/components/ui/Kbd';
 import { cn } from '@/lib/utils';
-import logoImg from '@assets/icai-ca-india-logo.png';
 
 export type ThemeMode = 'light' | 'dark' | 'system';
 
@@ -60,15 +59,12 @@ export function ModeSidebar({
 
   return (
     <aside className="w-[280px] bg-sidebar border-r border-border flex flex-col overflow-hidden shrink-0">
-      <div className="px-4 pt-3.5 pb-2.5 border-b border-border flex items-center gap-2.5">
-        <img src={logoImg} alt="" className="h-8 w-auto object-contain shrink-0" />
-        <div className="min-w-0">
-          <div className="font-display font-bold text-[15px] tracking-tight text-foreground truncate">
-            CA-GPT
-          </div>
-          <div className="text-[11px] text-muted-foreground mt-0.5 truncate">
-            Chartered Accountancy · Research &amp; Practice
-          </div>
+      <div className="px-4 pt-3.5 pb-2.5 border-b border-border">
+        <div className="font-display font-bold text-[15px] tracking-tight text-foreground">
+          CA-GPT
+        </div>
+        <div className="text-[11px] text-muted-foreground mt-0.5">
+          Chartered Accountancy · Research &amp; Practice
         </div>
       </div>
 

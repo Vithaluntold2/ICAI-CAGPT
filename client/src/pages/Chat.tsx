@@ -305,6 +305,7 @@ export default function Chat() {
   const [view, setView] = useChatView();
   // Command palette (⌘K) state.
   const [commandOpen, setCommandOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   // Composer text state — moved back into the page because the new
   // primitive is controlled. Typing re-renders the page, but the heavy
   // mindmap/flowchart blocks are memoised inside ChatMessageBody so
@@ -1169,6 +1170,8 @@ export default function Chat() {
         userInitial={userInitial}
         themeMode={themeMode}
         onChangeTheme={applyTheme}
+        sidebarOpen={sidebarOpen}
+        onToggleSidebar={() => setSidebarOpen((v) => !v)}
         onSelectMode={handleSelectMode}
         onSelectConversation={handleSelectConversation}
         onNewChat={handleNewChat}

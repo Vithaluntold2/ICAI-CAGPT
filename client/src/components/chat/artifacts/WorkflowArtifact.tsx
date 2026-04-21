@@ -1,4 +1,4 @@
-import WorkflowRenderer from "../../visualizations/WorkflowRenderer";
+import WorkflowRenderer from "../../visualizations/workflow-x6/WorkflowRendererX6";
 import { cn } from "@/lib/utils";
 
 export function WorkflowArtifact({ payload, embedded = false }: { payload: any; embedded?: boolean }) {

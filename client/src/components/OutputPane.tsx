@@ -14,7 +14,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import VisualizationRenderer, { ChartData } from "./visualizations/VisualizationRenderer";
 import ChecklistRenderer from "./ChecklistRenderer";
-import WorkflowRenderer from "./visualizations/WorkflowRenderer";
+import WorkflowRenderer from "./visualizations/workflow-x6/WorkflowRendererX6";
 import SpreadsheetViewer from "./SpreadsheetViewer";
 import { parseWorkflowContent } from "@/utils/workflowParser";
 

@@ -3,7 +3,7 @@ import FinancialLineChart from './FinancialLineChart';
 import FinancialBarChart from './FinancialBarChart';
 import FinancialPieChart from './FinancialPieChart';
 import FinancialAreaChart from './FinancialAreaChart';
-import WorkflowRenderer from './WorkflowRenderer';
+import WorkflowRenderer from './workflow-x6/WorkflowRendererX6';
 
 // Advanced ECharts-based visualizations
 import ComboChart from './advanced/ComboChart';

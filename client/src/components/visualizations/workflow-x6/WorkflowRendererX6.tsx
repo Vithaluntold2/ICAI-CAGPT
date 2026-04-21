@@ -175,16 +175,30 @@ export default function WorkflowRendererX6({
 
     // ResizeObserver — x6 has autoResize but the resize only fires on window
     // resize. Our embedded case (whiteboard) resizes the container without
-    // a window event, so we drive it manually.
+    // a window event, so we drive it manually. Critically, we also RE-FIT
+    // after the resize: otherwise the graph canvas grows to match the new
+    // container but the content stays pinned at its old position, leaving
+    // the rest of the card empty. Debounced to the next frame so we don't
+    // thrash on transient width/height changes during animation.
+    let rafId = 0;
     const ro = new ResizeObserver(() => {
       const { clientWidth, clientHeight } = container;
       if (clientWidth > 0 && clientHeight > 0) {
         graph.resize(clientWidth, clientHeight);
+        if (rafId) cancelAnimationFrame(rafId);
+        rafId = requestAnimationFrame(() => {
+          try {
+            graph.zoomToFit({ padding: 24, maxScale: 1.2 });
+          } catch {
+            /* graph may be disposed mid-animation */
+          }
+        });
       }
     });
     ro.observe(container);
 
     return () => {
+      if (rafId) cancelAnimationFrame(rafId);
       ro.disconnect();
       graph.dispose();
       graphRef.current = null;

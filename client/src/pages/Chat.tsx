@@ -311,6 +311,7 @@ export default function Chat() {
   // mindmap/flowchart blocks are memoised inside ChatMessageBody so
   // they no longer thrash on each keystroke.
   const [input, setInput] = useState('');
+  const [voiceModeActive, setVoiceModeActive] = useState(false);
   // Artifacts for PIP chip lookup / rich message rendering when flag is ON.
   const { data: artifactsData } = useConversationArtifacts(activeConversation);
 
@@ -1279,11 +1280,31 @@ export default function Chat() {
                   onAttach={openFilePicker}
                   attachedFile={selectedFile ? { name: selectedFile.name, size: selectedFile.size } : null}
                   onRemoveAttachment={handleRemoveFile}
+                  onVoice={() => setVoiceModeActive((v) => !v)}
+                  voiceActive={voiceModeActive}
                   placeholder={`Ask CA-GPT anything in ${
                     getMode(currentMode)?.label ?? 'Standard'
                   } mode…`}
                   disabled={isStreaming || sendMessageMutation.isPending}
                 />
+                {voiceModeActive && (
+                  <div className="absolute bottom-full left-0 right-0 mb-3 flex justify-center">
+                    <VoiceModeEnhanced
+                      onTranscription={(text) =>
+                        setInput((prev) => (prev ? `${prev} ${text}` : text))
+                      }
+                      onSendMessage={() => {
+                        const text = input;
+                        setInput('');
+                        handleSend(text);
+                      }}
+                      onSpeakReady={setSpeakControls}
+                      lastAssistantMessage={lastAssistantMessage}
+                      conversationId={activeConversation}
+                      inputMessage={input}
+                    />
+                  </div>
+                )}
                 <input
                   ref={fileInputRef}
                   type="file"

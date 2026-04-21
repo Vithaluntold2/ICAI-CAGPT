@@ -788,10 +788,22 @@ function WorkflowRendererInner({ nodes: nodesInput, edges: edgesInput, title, la
 
   const containerClass = isFullscreen
     ? "fixed inset-0 z-50 w-screen h-screen rounded-none border-0 shadow-none flex flex-col"
-    : "w-full border rounded-xl overflow-hidden shadow-2xl";
+    : embedded
+      ? "w-full h-full flex flex-col overflow-hidden"
+      : "w-full border rounded-xl overflow-hidden shadow-2xl";
+  // Height behaviour:
+  //   fullscreen → absolute, no explicit height
+  //   embedded   → fill parent (h-full from class). Parent is either
+  //     InlineArtifactCard in chat (no explicit height) or the whiteboard's
+  //     ArtifactCard (flex-1 inside a flex-col with minHeight: artifact.height).
+  //     We set a minHeight floor so chat doesn't collapse to content, and no
+  //     forced height so whiteboard's card geometry wins.
+  //   standalone (old embed paths, never used) → the previous fixed height.
   const containerStyle: React.CSSProperties = isFullscreen
     ? { background: resolved.canvasBackground }
-    : { background: resolved.canvasBackground, height: containerHeight };
+    : embedded
+      ? { background: resolved.canvasBackground, minHeight: 420 }
+      : { background: resolved.canvasBackground, height: containerHeight };
 
   // Fullscreen has to escape the whiteboard's transformed container. A
   // transform on any ancestor turns that ancestor into the containing block

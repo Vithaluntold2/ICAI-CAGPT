@@ -686,6 +686,31 @@
       justify-content: center;
       padding: 32px 24px;
       gap: 28px;
+      position: relative;
+      overflow: hidden;
+    }
+    .welcome-wrap::before,
+    .welcome-wrap::after {
+      content: '';
+      position: absolute;
+      pointer-events: none;
+      filter: blur(22px);
+      z-index: 0;
+      opacity: .45;
+    }
+    .welcome-wrap::before {
+      width: 280px;
+      height: 280px;
+      background: radial-gradient(circle, rgba(0, 112, 188, 0.25) 0%, rgba(0,112,188,0) 68%);
+      top: 8%;
+      left: 16%;
+    }
+    .welcome-wrap::after {
+      width: 220px;
+      height: 220px;
+      background: radial-gradient(circle, rgba(7, 197, 137, 0.20) 0%, rgba(7,197,137,0) 70%);
+      bottom: 14%;
+      right: 22%;
     }
     .welcome-avatar {
       width: 64px; height: 64px;
@@ -693,6 +718,17 @@
       border-radius: 20px;
       display: flex; align-items: center; justify-content: center;
       box-shadow: 0 8px 32px rgba(0,80,150,.28);
+      position: relative;
+      z-index: 1;
+      animation: heroFloat 3.2s ease-in-out infinite;
+    }
+    .welcome-avatar::after {
+      content: '';
+      position: absolute;
+      inset: -9px;
+      border-radius: 26px;
+      border: 1px solid rgba(15, 119, 206, 0.24);
+      box-shadow: 0 0 0 6px rgba(15, 119, 206, 0.07);
     }
     .welcome-heading {
       font-family: var(--font-display);
@@ -700,6 +736,8 @@
       color: var(--text-primary);
       text-align: center;
       letter-spacing: -.02em;
+      position: relative;
+      z-index: 1;
     }
     .welcome-heading span { color: var(--ca-navy); }
     .welcome-sub {
@@ -709,6 +747,39 @@
       max-width: 440px;
       line-height: 1.65;
       margin-top: -18px;
+      position: relative;
+      z-index: 1;
+    }
+    .trust-strip {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 8px;
+      width: 100%;
+      max-width: 620px;
+      position: relative;
+      z-index: 1;
+      margin-top: -8px;
+    }
+    .trust-chip {
+      height: 28px;
+      border-radius: 999px;
+      padding: 0 11px;
+      background: rgba(255, 255, 255, 0.7);
+      border: 1px solid rgba(157, 176, 197, 0.45);
+      color: hsl(214, 30%, 35%);
+      font-size: 11px;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      backdrop-filter: blur(6px);
+      box-shadow: 0 3px 10px rgba(7, 25, 44, 0.05);
+    }
+    .trust-chip i {
+      font-size: 12px;
+      color: var(--ca-navy);
     }
     .prompt-grid {
       display: grid;
@@ -716,6 +787,8 @@
       gap: 10px;
       max-width: 560px;
       width: 100%;
+      position: relative;
+      z-index: 1;
     }
     .prompt-card {
       padding: 14px 16px;
@@ -726,19 +799,84 @@
       transition: all .16s;
       box-shadow: var(--shadow-xs);
       display: flex; flex-direction: column; gap: 5px;
+      position: relative;
+      overflow: hidden;
+      animation: cardIn .34s ease-out both;
+    }
+    .prompt-card::after {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: 2px;
+      background: linear-gradient(90deg, rgba(0, 112, 188, 0.85), rgba(7, 197, 137, 0.85));
+      transform: scaleX(0);
+      transform-origin: left;
+      transition: transform .24s ease;
     }
     .prompt-card:hover {
       border-color: var(--ca-navy);
       box-shadow: 0 4px 16px rgba(0,80,150,.12);
       transform: translateY(-2px);
     }
+    .prompt-card:hover::after { transform: scaleX(1); }
+    .prompt-grid .prompt-card:nth-child(2) { animation-delay: .04s; }
+    .prompt-grid .prompt-card:nth-child(3) { animation-delay: .08s; }
+    .prompt-grid .prompt-card:nth-child(4) { animation-delay: .12s; }
     .prompt-icon { font-size: 18px; }
     .prompt-label { font-size: 13px; font-weight: 600; color: var(--text-primary); }
     .prompt-hint { font-size: 11.5px; color: var(--text-tertiary); }
+    .command-spotlight {
+      width: 100%;
+      max-width: 560px;
+      border-radius: 14px;
+      border: 1px solid hsl(202, 42%, 84%);
+      background: linear-gradient(135deg, rgba(0, 112, 188, 0.09), rgba(0, 112, 188, 0.02) 58%, rgba(7, 197, 137, 0.07));
+      padding: 11px 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      position: relative;
+      z-index: 1;
+      box-shadow: 0 6px 22px rgba(9, 40, 69, 0.07);
+    }
+    .command-spotlight-left {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      min-width: 0;
+    }
+    .command-spotlight-label {
+      font-size: 11.5px;
+      font-weight: 600;
+      color: hsl(214, 36%, 35%);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .command-spotlight-key {
+      height: 24px;
+      border-radius: 7px;
+      border: 1px solid hsl(202, 34%, 80%);
+      background: rgba(255, 255, 255, 0.8);
+      padding: 0 8px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--ca-navy);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .01em;
+      flex-shrink: 0;
+    }
     .welcome-divider {
       display: flex; align-items: center; gap: 12px;
       color: var(--text-tertiary); font-size: 12px;
       width: 100%; max-width: 560px;
+      position: relative;
+      z-index: 1;
     }
     .welcome-divider::before, .welcome-divider::after {
       content: ''; flex: 1; height: 1px; background: var(--border);
@@ -847,6 +985,14 @@
       padding: 1px 5px;
       border-radius: 4px;
       color: var(--text-secondary);
+    }
+    @keyframes heroFloat {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-4px); }
+    }
+    @keyframes cardIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
     }
 
     /* ══ ONBOARDING OVERLAY ══ */
@@ -1293,6 +1439,11 @@
           <h1 class="welcome-heading">Good morning, <span>Rajesh</span></h1>
           <p class="welcome-sub">Your intelligent CA assistant. Ask anything across tax, audit, compliance, financial analysis — and get structured, expert responses.</p>
         </div>
+        <div class="trust-strip">
+          <span class="trust-chip"><i class="ph ph-seal-check"></i>Verified References</span>
+          <span class="trust-chip"><i class="ph ph-file-xls"></i>Instant Spreadsheet Output</span>
+          <span class="trust-chip"><i class="ph ph-shield-check"></i>Audit Trail Ready</span>
+        </div>
         <div class="prompt-grid">
           <div class="prompt-card" onclick="showScreen('chat')">
             <i class="ph ph-calculator" style="font-size:22px;color:var(--ca-navy);"></i>
@@ -1314,6 +1465,13 @@
             <span class="prompt-label">Liquidity ratio analysis</span>
             <span class="prompt-hint">With benchmark comparisons</span>
           </div>
+        </div>
+        <div class="command-spotlight">
+          <div class="command-spotlight-left">
+            <i class="ph ph-command" style="font-size:16px;color:var(--ca-navy);"></i>
+            <span class="command-spotlight-label">Type / for smart commands: ratio-check, section-research, and worksheet-build</span>
+          </div>
+          <span class="command-spotlight-key"><i class="ph ph-command"></i> + K</span>
         </div>
         <div class="welcome-divider">or type anything below</div>
       </div>
@@ -1898,14 +2056,14 @@
       <div class="welcome-wrap" style="justify-content:flex-start;padding-top:60px;">
         <div class="welcome-avatar"><svg width="36" height="36" viewBox="0 0 36 36" fill="none"><path d="M18 3L21.8 12.8L31.5 18L21.8 23.2L18 33L14.2 23.2L4.5 18L14.2 12.8Z" fill="white"/></svg></div>
         <h1 class="welcome-heading">Good morning, <span>Rajesh</span></h1>
-        <div class="prompt-grid"><div class="prompt-card"><span class="prompt-icon">🧮</span><span class="prompt-label">Calculate NPV</span></div><div class="prompt-card"><span class="prompt-icon">📋</span><span class="prompt-label">Audit checklist</span></div></div>
+        <div class="prompt-grid"><div class="prompt-card"><i class="ph ph-calculator" style="font-size:18px;color:var(--ca-navy);"></i><span class="prompt-label">Calculate NPV</span></div><div class="prompt-card"><i class="ph ph-clipboard-text" style="font-size:18px;color:var(--emerald);"></i><span class="prompt-label">Audit checklist</span></div></div>
       </div>
       <div class="input-area">
         <div class="mode-pills">
           <button class="mode-pill active">Standard</button>
-          <button class="mode-pill">🔬 Deep Research</button>
-          <button class="mode-pill">✅ Checklist</button>
-          <button class="mode-pill">🧮 Calculate</button>
+          <button class="mode-pill"><i class="ph ph-magnifying-glass-plus" style="font-size:11px;"></i> Deep Research</button>
+          <button class="mode-pill"><i class="ph ph-check-square" style="font-size:11px;"></i> Checklist</button>
+          <button class="mode-pill"><i class="ph ph-calculator" style="font-size:11px;"></i> Calculate</button>
         </div>
         <div class="input-box"><textarea rows="1" placeholder="Ask me anything…"></textarea></div>
       </div>

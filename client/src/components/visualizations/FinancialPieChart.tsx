@@ -53,7 +53,10 @@ export default function FinancialPieChart({
   // Pie slices are keyed by `name` (the slice label), not a series dataKey.
   // Build a chart config entry per slice so ChartContainer can expose
   // `--color-<safeName>` CSS vars and the legend content can map labels.
-  const toSafeKey = (s: string) => s.replace(/[^a-z0-9]+/gi, "_").toLowerCase();
+  // Defensive: AI-generated pie payloads sometimes have slices where `name`
+  // is missing or null. Coerce so toSafeKey can't throw during render.
+  const toSafeKey = (s: string | null | undefined) =>
+    String(s ?? "").replace(/[^a-z0-9]+/gi, "_").toLowerCase();
   const chartConfig: ChartConfig = data.reduce<ChartConfig>((acc, item, idx) => {
     acc[toSafeKey(item.name)] = {
       label: item.name,

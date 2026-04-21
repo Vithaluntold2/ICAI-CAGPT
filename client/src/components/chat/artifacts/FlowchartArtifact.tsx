@@ -62,7 +62,12 @@ function quoteIfNeeded(content: string): string {
   return `"${content.replace(/"/g, '\\"')}"`;
 }
 
-function normalizeMermaidSource(src: string): string {
+function normalizeMermaidSource(src: string | null | undefined): string {
+  // Malformed flowchart payloads occasionally arrive with source===undefined
+  // (LLM emitted a flowchart block with no body, or our SSE buffering dropped
+  // the delta). Fail soft here instead of crashing the entire chat tree via
+  // the ErrorBoundary — downstream mermaid.init will render a friendly error.
+  if (!src) return "";
   let out = src.replace(/\\n/g, "<br/>");
 
   // Node shape: IDENTIFIER[...]

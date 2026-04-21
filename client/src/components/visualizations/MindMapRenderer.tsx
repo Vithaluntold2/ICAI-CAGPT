@@ -60,8 +60,14 @@ interface MindMapRendererProps {
  * replacing the tags with `\n` yields real line breaks. Also collapses
  * `\r\n` / `\r` for consistency and trims trailing whitespace.
  */
-function normalizeTopic(s: string): string {
-  return s
+function normalizeTopic(s: string | null | undefined): string {
+  // The AI payload is not statically typed — in practice we sometimes get a
+  // node with `label: null`, `label: undefined`, or a numeric id used as the
+  // label. Coerce defensively so we never throw "undefined.replace" during
+  // render and blow up the whole chat tree through the ErrorBoundary.
+  if (s === null || s === undefined) return "";
+  const str = typeof s === "string" ? s : String(s);
+  return str
     .replace(/<br\s*\/?>/gi, "\n")
     .replace(/\r\n?/g, "\n")
     .trim();
@@ -114,9 +120,11 @@ function toMindElixirData(data: MindMapData): MindElixirData {
         ? [...n.metadata.tags]
         : undefined;
 
+    const topic = normalizeTopic(n.label) || `(node ${n.id ?? "?"})`;
+
     return {
       id: n.id,
-      topic: normalizeTopic(n.label),
+      topic,
       note: n.description ? normalizeTopic(n.description) : undefined,
       icons: n.icon ? [n.icon] : undefined,
       tags,
@@ -129,7 +137,10 @@ function toMindElixirData(data: MindMapData): MindElixirData {
     // Unreachable in practice — `build` only returns null on cycle revisit,
     // and `rootNode.id` hasn't been visited yet. Kept for type narrowing.
     return {
-      nodeData: { id: rootNode.id, topic: normalizeTopic(rootNode.label) },
+      nodeData: {
+        id: rootNode.id,
+        topic: normalizeTopic(rootNode.label) || "(root)",
+      },
     };
   }
 

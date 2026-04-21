@@ -162,6 +162,7 @@ interface Conversation {
   title: string;
   metadata?: string | null;
   preview: string | null;
+  chatMode?: string | null;
   createdAt: string;
   updatedAt: string;
   profileId: string | null;
@@ -311,7 +312,6 @@ export default function Chat() {
   // mindmap/flowchart blocks are memoised inside ChatMessageBody so
   // they no longer thrash on each keystroke.
   const [input, setInput] = useState('');
-  const [voiceModeActive, setVoiceModeActive] = useState(false);
   // Artifacts for PIP chip lookup / rich message rendering when flag is ON.
   const { data: artifactsData } = useConversationArtifacts(activeConversation);
 
@@ -1134,12 +1134,18 @@ export default function Chat() {
   // Build sidebar conversation list for AppShell/ModeSidebar in the
   // `{ id, title, mode }` shape it expects. Mode is unknown for most
   // persisted conversations today — default to 'standard'.
-  const sidebarConversations = filteredConversations.map((c) => ({
-    id: c.id,
-    title: c.title,
-    mode: 'standard' as ChatMode,
-    pinned: c.pinned,
-  }));
+  const sidebarConversations = filteredConversations.map((c) => {
+    const m = c.chatMode ?? 'standard';
+    const mode: ChatMode = (MODE_IDS as readonly string[]).includes(m)
+      ? (m as ChatMode)
+      : 'standard';
+    return {
+      id: c.id,
+      title: c.title,
+      mode,
+      pinned: c.pinned,
+    };
+  });
 
   const activeConversationTitle =
     conversations.find((c) => c.id === activeConversation)?.title ?? 'New conversation';
@@ -1156,6 +1162,12 @@ export default function Chat() {
 
   const handleSelectConversation = (id: string) => {
     setActiveConversation(id);
+    // Restore the conversation's original mode so the composer, prompt, and
+    // sidebar highlight stay in sync with what this chat was created in.
+    const conv = conversations.find((c) => c.id === id);
+    if (conv?.chatMode && conv.chatMode !== chatMode) {
+      setChatMode(conv.chatMode);
+    }
   };
 
   const handleStop = () => {
@@ -1280,15 +1292,7 @@ export default function Chat() {
                   onAttach={openFilePicker}
                   attachedFile={selectedFile ? { name: selectedFile.name, size: selectedFile.size } : null}
                   onRemoveAttachment={handleRemoveFile}
-                  onVoice={() => setVoiceModeActive((v) => !v)}
-                  voiceActive={voiceModeActive}
-                  placeholder={`Ask CA-GPT anything in ${
-                    getMode(currentMode)?.label ?? 'Standard'
-                  } mode…`}
-                  disabled={isStreaming || sendMessageMutation.isPending}
-                />
-                {voiceModeActive && (
-                  <div className="absolute bottom-full left-0 right-0 mb-3 flex justify-center">
+                  voiceSlot={
                     <VoiceModeEnhanced
                       onTranscription={(text) =>
                         setInput((prev) => (prev ? `${prev} ${text}` : text))
@@ -1303,8 +1307,12 @@ export default function Chat() {
                       conversationId={activeConversation}
                       inputMessage={input}
                     />
-                  </div>
-                )}
+                  }
+                  placeholder={`Ask CA-GPT anything in ${
+                    getMode(currentMode)?.label ?? 'Standard'
+                  } mode…`}
+                  disabled={isStreaming || sendMessageMutation.isPending}
+                />
                 <input
                   ref={fileInputRef}
                   type="file"

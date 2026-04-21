@@ -1,6 +1,6 @@
 // client/src/components/chat/Composer.tsx
 import { useRef, useEffect, type KeyboardEvent, type ReactNode } from 'react';
-import { Paperclip, Mic, X, FileText } from 'lucide-react';
+import { Paperclip, X, FileText } from 'lucide-react';
 import { Kbd } from '@/components/ui/Kbd';
 import { cn } from '@/lib/utils';
 
@@ -28,7 +28,6 @@ interface ComposerProps {
   onChange: (value: string) => void;
   onSend: () => void;
   onAttach?: () => void;
-  onVoice?: () => void;
   placeholder?: string;
   disabled?: boolean;
   variant?: ComposerVariant;
@@ -38,8 +37,14 @@ interface ComposerProps {
   /** Currently-attached file, shown as a chip above the textarea. */
   attachedFile?: { name: string; size?: number } | null;
   onRemoveAttachment?: () => void;
-  /** Pulsing red dot on the mic button when active. */
-  voiceActive?: boolean;
+  /** Slot for voice controls — rendered after the Attach button in the
+   *  footer. Passing `<VoiceModeEnhanced />` here yields two buttons:
+   *  Mic (voice-input / transcribe-to-composer) and Headphones (advanced
+   *  voice conversation mode). We render the component whole rather than
+   *  individual `onVoice`/`voiceActive` props so the two behaviours stay
+   *  coupled and the parent doesn't have to re-implement VAD/transcription
+   *  plumbing. */
+  voiceSlot?: ReactNode;
 }
 
 export function Composer({
@@ -47,7 +52,6 @@ export function Composer({
   onChange,
   onSend,
   onAttach,
-  onVoice,
   placeholder = 'Ask CA-GPT…',
   disabled = false,
   variant = 'main',
@@ -55,7 +59,7 @@ export function Composer({
   onRemoveSelection,
   attachedFile,
   onRemoveAttachment,
-  voiceActive,
+  voiceSlot,
 }: ComposerProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -145,16 +149,11 @@ export function Composer({
       />
 
       <div className="flex justify-between items-center mt-2.5 text-[11px] text-muted-foreground">
-        <div className="flex gap-0.5">
+        <div className="flex gap-0.5 items-center">
           <ToolButton title="Attach" onClick={onAttach}>
             <Paperclip className="w-[15px] h-[15px]" strokeWidth={1.75} />
           </ToolButton>
-          <ToolButton title="Voice" onClick={onVoice} active={voiceActive}>
-            <Mic className="w-[15px] h-[15px]" strokeWidth={1.75} />
-            {voiceActive && (
-              <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
-            )}
-          </ToolButton>
+          {voiceSlot}
         </div>
         {variant === 'main' ? (
           <div className="flex items-center gap-2">
@@ -176,24 +175,17 @@ function ToolButton({
   title,
   onClick,
   children,
-  active,
 }: {
   title: string;
   onClick?: () => void;
   children: React.ReactNode;
-  active?: boolean;
 }) {
   return (
     <button
       type="button"
       title={title}
       onClick={onClick}
-      className={cn(
-        'relative w-7 h-7 rounded flex items-center justify-center transition-colors',
-        active
-          ? 'bg-aurora-teal/15 text-aurora-teal-soft'
-          : 'text-muted-foreground hover:bg-foreground/5 hover:text-aurora-teal-soft'
-      )}
+      className="relative w-7 h-7 rounded flex items-center justify-center transition-colors text-muted-foreground hover:bg-foreground/5 hover:text-aurora-teal-soft"
     >
       {children}
     </button>

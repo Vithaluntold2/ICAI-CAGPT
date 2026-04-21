@@ -1,8 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Graph } from '@antv/x6';
-import { MiniMap } from '@antv/x6-plugin-minimap';
-import { Export } from '@antv/x6-plugin-export';
+// Plugins removed: @antv/x6-plugin-minimap and -export apply class
+// decorators that read static helpers (e.g. `View.dispose`) at module-load
+// time. Against x6@2.19.x those helpers have moved, so the plugins blow up
+// at import with "View.dispose is not a function" — blank page before any
+// React mounts. We'll roll our own export via graph.toPNG/toSVG (x6 core)
+// and skip the minimap (nice-to-have, not critical for a single-pane view).
 import dagre from 'dagre';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -107,7 +111,6 @@ export default function WorkflowRendererX6({
   const edges = Array.isArray(edgesInput) ? edgesInput : [];
 
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const minimapRef = useRef<HTMLDivElement | null>(null);
   const graphRef = useRef<Graph | null>(null);
 
   const [searchTerm, setSearchTerm] = useState('');
@@ -160,20 +163,7 @@ export default function WorkflowRendererX6({
       autoResize: true,
     });
 
-    // Minimap plugin — a separate container in the bottom-right corner.
-    if (minimapRef.current) {
-      graph.use(
-        new MiniMap({
-          container: minimapRef.current,
-          width: 180,
-          height: 120,
-          padding: 10,
-        }),
-      );
-    }
-
-    // Export plugin — exposes graph.exportPNG / exportSVG.
-    graph.use(new Export());
+    // Plugins (MiniMap, Export) removed — see import-block comment at top.
 
     graph.on('node:click', ({ node }) => {
       const id = node.id;
@@ -383,17 +373,25 @@ export default function WorkflowRendererX6({
   const fitView = () => graphRef.current?.zoomToFit({ padding: 24, maxScale: 1.2 });
 
   const exportAs = useCallback(
-    (format: 'png' | 'svg') => {
-      const graph = graphRef.current;
-      if (!graph) return;
+    async (format: 'png' | 'svg') => {
+      const el = containerRef.current;
+      if (!el) return;
       try {
-        const name = `workflow-${Date.now()}`;
-        if (format === 'png') {
-          graph.exportPNG(name, { padding: 20, quality: 1 });
-        } else {
-          graph.exportSVG(name);
-        }
-        toast({ title: `Exporting ${format.toUpperCase()}`, description: 'Your download will start shortly.' });
+        // x6 Export plugin is incompatible with x6@2.19 (see import-block
+        // comment). Rehang export via html-to-image against the graph's
+        // container div — the same technique the old React Flow renderer
+        // + flowchart + mindmap artifacts use. skipFonts avoids the
+        // html-to-image@1.11 `font.trim()` crash.
+        const htmlToImage = await import('html-to-image');
+        const dataUrl =
+          format === 'png'
+            ? await htmlToImage.toPng(el, { pixelRatio: 2, cacheBust: true, skipFonts: true })
+            : await htmlToImage.toSvg(el, { cacheBust: true, skipFonts: true });
+        const a = document.createElement('a');
+        a.href = dataUrl;
+        a.download = `workflow-${Date.now()}.${format}`;
+        a.click();
+        toast({ title: `Exported ${format.toUpperCase()}`, description: 'Downloaded.' });
       } catch (err: any) {
         toast({
           title: 'Export failed',
@@ -581,15 +579,10 @@ export default function WorkflowRendererX6({
         </div>
       </div>
 
-      {/* Canvas. x6 paints into containerRef; the minimap gets its own pane
-          absolute-positioned over the canvas bottom-right. */}
+      {/* Canvas. x6 paints into containerRef. Minimap dropped — plugin
+          compat issue, see import-block comment. */}
       <div className="relative flex-1 min-h-0">
         <div ref={containerRef} className="absolute inset-0" />
-        <div
-          ref={minimapRef}
-          className="absolute bottom-3 right-3 rounded-md border border-border/60 bg-background/80 backdrop-blur shadow-lg overflow-hidden"
-          style={{ width: 180, height: 120 }}
-        />
       </div>
 
       {/* Detail dialog */}

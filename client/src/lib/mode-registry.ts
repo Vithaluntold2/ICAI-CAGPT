@@ -6,6 +6,7 @@ import {
   Network,
   ShieldCheck,
   Calculator,
+  TrendingUp,
   ScanSearch,
   FileStack,
   Users,
@@ -19,6 +20,7 @@ export type ChatMode =
   | 'workflow'
   | 'audit-plan'
   | 'calculation'
+  | 'scenario-simulator'
   | 'forensic-intelligence'
   | 'deliverable-composer'
   | 'roundtable';
@@ -97,6 +99,17 @@ export const MODES: ModeConfig[] = [
       'Compute NPV for a ₹12cr capex proposal',
       'Depreciation schedule under Sec 32',
       'WACC for a leveraged buyout',
+    ],
+  },
+  {
+    id: 'scenario-simulator',
+    label: 'Scenarios',
+    icon: TrendingUp,
+    description: 'What-if analysis & stress testing — model tax impact, cash-flow shocks, and alternative structures.',
+    starters: [
+      'Model tax outflow if GST rate moves 18% → 12%',
+      'Stress-test DSCR under a 20% revenue drop',
+      'Compare slump sale vs share transfer for ₹50cr deal',
     ],
   },
   {

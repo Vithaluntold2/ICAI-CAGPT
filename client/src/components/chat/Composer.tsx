@@ -6,6 +6,16 @@ import { cn } from '@/lib/utils';
 
 export type ComposerVariant = 'main' | 'pip';
 
+/**
+ * Transitional type — kept alive while the whiteboard v2 wiring migrates
+ * from the old rich Composer to the new primitive. The shape mirrors what
+ * the send path already expects from the server-side selection payload.
+ */
+export interface ComposerSelection {
+  artifactIds?: string[];
+  [key: string]: unknown;
+}
+
 interface ComposerProps {
   value: string;
   onChange: (value: string) => void;

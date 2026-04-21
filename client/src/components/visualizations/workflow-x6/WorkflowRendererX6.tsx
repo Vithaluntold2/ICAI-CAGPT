@@ -188,7 +188,7 @@ export default function WorkflowRendererX6({
         if (rafId) cancelAnimationFrame(rafId);
         rafId = requestAnimationFrame(() => {
           try {
-            graph.zoomToFit({ padding: 24, maxScale: 1.2 });
+            graph.zoomToFit({ padding: 24, maxScale: 1.6 });
           } catch {
             /* graph may be disposed mid-animation */
           }
@@ -325,7 +325,7 @@ export default function WorkflowRendererX6({
 
     // Fit view after layout settles.
     requestAnimationFrame(() => {
-      graph.zoomToFit({ padding: 24, maxScale: 1.2 });
+      graph.zoomToFit({ padding: 24, maxScale: 1.6 });
     });
   }, [nodes, edges, compactMode]);
 
@@ -360,7 +360,7 @@ export default function WorkflowRendererX6({
     const graph = graphRef.current;
     if (!isFullscreen) {
       if (graph) {
-        const t = window.setTimeout(() => graph.zoomToFit({ padding: 24, maxScale: 1.2 }), 120);
+        const t = window.setTimeout(() => graph.zoomToFit({ padding: 24, maxScale: 1.6 }), 120);
         return () => window.clearTimeout(t);
       }
       return;
@@ -372,7 +372,7 @@ export default function WorkflowRendererX6({
     };
     window.addEventListener('keydown', onKey);
     const t = window.setTimeout(() => {
-      if (graph) graph.zoomToFit({ padding: 24, maxScale: 1.2 });
+      if (graph) graph.zoomToFit({ padding: 24, maxScale: 1.6 });
     }, 150);
     return () => {
       document.body.style.overflow = prevOverflow;
@@ -384,7 +384,7 @@ export default function WorkflowRendererX6({
   // Toolbar actions
   const zoomIn = () => graphRef.current?.zoom(0.15);
   const zoomOut = () => graphRef.current?.zoom(-0.15);
-  const fitView = () => graphRef.current?.zoomToFit({ padding: 24, maxScale: 1.2 });
+  const fitView = () => graphRef.current?.zoomToFit({ padding: 24, maxScale: 1.6 });
 
   const exportAs = useCallback(
     async (format: 'png' | 'svg') => {
@@ -454,7 +454,12 @@ export default function WorkflowRendererX6({
   const containerStyle: React.CSSProperties = isFullscreen
     ? { background: canvasBg }
     : embedded
-      ? { background: canvasBg, minHeight: 420 }
+      ? // `h-full` chains through from the class; minHeight: 420 is a floor
+        // for parents that don't set a concrete height (InlineArtifactCard
+        // in chat is p-4 with no height — child h-full there would collapse
+        // to 0). Whiteboard's ArtifactCard does set a concrete height and
+        // it always exceeds 420, so the floor is inert there.
+        { background: canvasBg, minHeight: 420 }
       : { background: canvasBg, height: Math.max(480, Math.min(1800, nodes.length * 110 + 80)) };
 
   const tree = (

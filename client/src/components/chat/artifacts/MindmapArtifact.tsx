@@ -72,7 +72,9 @@ export function MindmapArtifact({ payload, embedded = false }: { payload: any; e
   // would otherwise scope `fixed` to the canvas instead of the viewport).
   const containerClass = isFullscreen
     ? "fixed inset-0 z-50 bg-card p-4 flex flex-col"
-    : "bg-card border rounded-lg p-4 relative";
+    : embedded
+      ? "bg-card border rounded-lg p-4 relative h-full flex flex-col min-h-0"
+      : "bg-card border rounded-lg p-4 relative";
 
   // When fullscreen, the inner MindMapRenderer needs to fill the whole
   // overlay. MindMapRenderer's own root is `h-[600px]` — we override it to
@@ -80,7 +82,11 @@ export function MindmapArtifact({ payload, embedded = false }: { payload: any; e
   // to its parent without touching its source.
   const bodyClass = isFullscreen
     ? "flex-1 min-h-0 [&>div:first-child]:!h-full [&>div:first-child]:!w-full"
-    : "";
+    : embedded
+      ? // Chain `h-full` from the flex-col wrapper down so MindMapRenderer's
+        // `h-full` (new — was `h-[600px]`) resolves against a real height.
+        "flex-1 min-h-0"
+      : "";
 
   const tree = (
     <div className={containerClass}>

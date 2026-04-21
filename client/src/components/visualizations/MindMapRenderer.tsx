@@ -274,7 +274,15 @@ const MindMapRenderer = forwardRef<MindMapRendererHandle, MindMapRendererProps>(
     const showHeader = !embedded && !!data.title;
 
     return (
-      <div className="w-full h-[600px] relative border border-border rounded-lg overflow-hidden bg-background">
+      <div
+        className={
+          // Embedded (InlineArtifactCard / whiteboard ArtifactCard) — fill
+          // the parent's fixed height. Standalone — fall back to a sensible
+          // 600 px default since nothing above sets a height for us.
+          "w-full relative border border-border rounded-lg overflow-hidden bg-background " +
+          (embedded ? "h-full" : "h-[600px]")
+        }
+      >
         {showHeader && (
           <div className="absolute top-0 left-0 right-0 z-10 bg-background/95 backdrop-blur border-b border-border px-4 py-3">
             <h3 className="text-sm font-medium">{data.title}</h3>

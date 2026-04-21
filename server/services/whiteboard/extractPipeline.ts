@@ -134,12 +134,17 @@ export function buildArtifactsForMessage(input: BuildArtifactsInput): BuildArtif
       };
     }
 
-    // Vertical flow: each step node renders at ~130px tall with ~80px gap
-    // (ReactFlow dagre-tb default). Plus ~100px for the toolbar header.
+    // Vertical flow, variant-B cards (x6 + dagre). Step cards render at
+    // ~80px tall, decision nodes ~180px, capsules ~48px. Ranksep is 90
+    // (see WorkflowRendererX6 layout config). A ~120px per-node budget is
+    // a comfortable fit that keeps fitView at scale ~1. Plus a 100px
+    // header. Previously this was 200 px — leftover from the old React
+    // Flow cards that were taller — which produced cards ~60% taller than
+    // the actual graph and left empty space top + bottom.
     const HEADER_PX = 100;
-    const STEP_PX = 200;           // 130 node + 70 gap
-    const MIN_H = 500;
-    const MAX_H = 2400;            // cap so a 40-step workflow doesn't produce a 8000px card
+    const STEP_PX = 120;
+    const MIN_H = 420;             // matches the renderer's embedded floor
+    const MAX_H = 2000;            // 40 nodes → 4,900 pre-clamp, clipped to 2,000
     const height = Math.max(MIN_H, Math.min(MAX_H, HEADER_PX + count * STEP_PX));
     return { width: 800, height };
   }

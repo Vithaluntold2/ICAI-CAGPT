@@ -45,9 +45,14 @@ export function ArtifactCard({
         left: artifact.canvasX,
         top: artifact.canvasY,
         width: artifact.width,
-        minHeight: artifact.height,
-        // No `height` — height is content-driven via min-height so diagrams
-        // larger than the natural size render in full.
+        // Fixed height (not minHeight). Earlier the card was a soft floor,
+        // leaving children ambiguous: "fill parent or grow past me?" — which
+        // made workflow's fitView drift against the stored dimensions. With
+        // a hard height, every child sees a concrete bounded container.
+        // Content that exceeds the height scrolls inside the body slot's
+        // overflow-auto; the server's compute*Size heuristics should be tuned
+        // so overflow is rare.
+        height: artifact.height,
       }}
       data-artifact-id={artifact.id}
       data-testid={`artifact-card-${artifact.id}`}

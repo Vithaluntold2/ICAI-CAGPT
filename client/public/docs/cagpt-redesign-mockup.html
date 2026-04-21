@@ -480,6 +480,188 @@
       letter-spacing: .03em;
     }
 
+    /* ══ CHAT DASHBOARD LAYER (SCREEN 2) ══ */
+    #screen-chat .main-area { background: linear-gradient(180deg, hsl(214, 22%, 98%) 0%, hsl(214, 26%, 96%) 100%); }
+    .chat-dashboard-shell {
+      padding: 12px 18px 10px;
+      border-bottom: 1px solid var(--border);
+      background: linear-gradient(180deg, rgba(255,255,255,.75) 0%, rgba(255,255,255,.35) 100%);
+      backdrop-filter: blur(6px);
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .chat-ops-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+    .chat-ops-bar::-webkit-scrollbar { display: none; }
+    .ops-chip {
+      height: 27px;
+      border-radius: 999px;
+      padding: 0 11px;
+      border: 1px solid hsl(214, 28%, 85%);
+      background: rgba(255,255,255,.8);
+      color: hsl(214, 34%, 37%);
+      font-size: 11px;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      white-space: nowrap;
+      transition: all .14s;
+    }
+    .ops-chip:hover { border-color: hsl(202, 55%, 65%); color: var(--ca-navy); }
+    .ops-chip.active {
+      background: var(--ca-navy);
+      color: #fff;
+      border-color: var(--ca-navy);
+      box-shadow: 0 3px 10px rgba(0, 80, 150, 0.25);
+    }
+    .chat-dashboard-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 2fr) minmax(230px, 1fr);
+      gap: 10px;
+    }
+    .chat-kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .kpi-card {
+      border: 1px solid hsl(214, 28%, 86%);
+      background: rgba(255, 255, 255, 0.88);
+      border-radius: 12px;
+      padding: 9px 10px;
+      cursor: pointer;
+      transition: all .16s;
+      min-height: 74px;
+    }
+    .kpi-card:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 6px 20px rgba(15, 31, 51, .09);
+      border-color: hsl(202, 58%, 72%);
+    }
+    .kpi-label {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      color: var(--text-tertiary);
+      font-weight: 700;
+      margin-bottom: 5px;
+    }
+    .kpi-value {
+      font-size: 18px;
+      font-family: var(--font-display);
+      font-weight: 700;
+      color: hsl(216, 28%, 20%);
+      line-height: 1.1;
+    }
+    .kpi-delta {
+      margin-top: 4px;
+      font-size: 11px;
+      color: hsl(160, 75%, 32%);
+      font-weight: 600;
+    }
+    .quick-rail {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .quick-btn {
+      height: 30px;
+      border-radius: 9px;
+      padding: 0 11px;
+      border: 1px solid hsl(214, 26%, 84%);
+      background: hsl(0, 0%, 100%);
+      color: hsl(214, 35%, 36%);
+      font-size: 11px;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all .12s;
+    }
+    .quick-btn:hover { background: var(--ca-navy-soft); border-color: hsl(202,60%,75%); color: var(--ca-navy); }
+    .evidence-panel {
+      border: 1px solid hsl(214, 28%, 85%);
+      border-radius: 12px;
+      background: rgba(255, 255, 255, .88);
+      padding: 9px;
+      box-shadow: 0 5px 16px rgba(11, 29, 49, 0.06);
+    }
+    .evidence-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 7px;
+      gap: 8px;
+    }
+    .evidence-title {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      color: var(--text-tertiary);
+    }
+    .health-chip {
+      font-size: 10px;
+      font-weight: 700;
+      color: hsl(160, 75%, 30%);
+      background: hsl(160, 70%, 95%);
+      border: 1px solid hsl(160, 40%, 82%);
+      border-radius: 999px;
+      height: 21px;
+      padding: 0 8px;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .health-bar {
+      width: 100%;
+      height: 7px;
+      border-radius: 999px;
+      background: hsl(214, 26%, 92%);
+      overflow: hidden;
+      margin-bottom: 8px;
+    }
+    .health-fill {
+      width: 74%;
+      height: 100%;
+      background: linear-gradient(90deg, hsl(38,88%,52%) 0%, hsl(160,84%,39%) 100%);
+      transition: width .24s ease;
+    }
+    .evidence-item {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 11.5px;
+      color: hsl(214, 24%, 36%);
+      padding: 5px 4px;
+      border-radius: 7px;
+      cursor: pointer;
+      transition: background .12s;
+    }
+    .evidence-item:hover { background: hsl(214, 40%, 97%); }
+    .evidence-item i { color: var(--ca-navy); font-size: 12px; }
+    #screen-chat .messages-area { padding-top: 12px; }
+    .pulse-focus {
+      animation: pulseFocus 1s ease-in-out 2;
+    }
+    @keyframes pulseFocus {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(0, 80, 150, 0); }
+      50% { box-shadow: 0 0 0 5px rgba(0, 80, 150, 0.12); }
+    }
+
+    @media (max-width: 1100px) {
+      .chat-dashboard-grid { grid-template-columns: 1fr; }
+      .chat-kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+
     /* ══ THINKING BLOCK ══ */
     .thinking-block {
       margin: 4px 0 12px;
@@ -1558,6 +1740,57 @@
           </button>
         </div>
       </header>
+
+      <div class="chat-dashboard-shell">
+        <div class="chat-ops-bar">
+          <button class="ops-chip active" onclick="toggleOpsChip(this)"><i class="ph ph-faders"></i> Live Filters</button>
+          <button class="ops-chip" onclick="toggleOpsChip(this)"><i class="ph ph-globe"></i> India GAAP</button>
+          <button class="ops-chip" onclick="toggleOpsChip(this)"><i class="ph ph-hourglass-low"></i> 5-Year Horizon</button>
+          <button class="ops-chip" onclick="toggleOpsChip(this)"><i class="ph ph-file-xls"></i> Spreadsheet Output</button>
+          <button class="ops-chip" onclick="toggleOpsChip(this)"><i class="ph ph-shield-check"></i> Verification Guardrails</button>
+        </div>
+        <div class="chat-dashboard-grid">
+          <div>
+            <div class="chat-kpi-grid">
+              <button class="kpi-card" onclick="cycleKpi(this, ['Medium', 'Low', 'High'])">
+                <div class="kpi-label">Risk Band</div>
+                <div class="kpi-value">Medium</div>
+                <div class="kpi-delta">Sensitivity stable</div>
+              </button>
+              <button class="kpi-card" onclick="cycleKpi(this, ['74%', '81%', '68%'])">
+                <div class="kpi-label">Confidence</div>
+                <div class="kpi-value">74%</div>
+                <div class="kpi-delta">+6% after checks</div>
+              </button>
+              <button class="kpi-card" onclick="cycleKpi(this, ['4 Sources', '7 Sources', '10 Sources'])">
+                <div class="kpi-label">Sources Linked</div>
+                <div class="kpi-value">4 Sources</div>
+                <div class="kpi-delta">CBDT + case law</div>
+              </button>
+              <button class="kpi-card" onclick="cycleKpi(this, ['Ready', 'Review', 'Draft'])">
+                <div class="kpi-label">Delivery State</div>
+                <div class="kpi-value">Ready</div>
+                <div class="kpi-delta">Spreadsheet generated</div>
+              </button>
+            </div>
+            <div class="quick-rail">
+              <button class="quick-btn" onclick="showScreen('spreadsheet')"><i class="ph ph-table"></i> Open Worksheet</button>
+              <button class="quick-btn" onclick="focusChecklist()"><i class="ph ph-check-square"></i> Focus Checklist</button>
+              <button class="quick-btn" onclick="appendInsight()"><i class="ph ph-lightbulb"></i> Add Insight Note</button>
+            </div>
+          </div>
+          <aside class="evidence-panel">
+            <div class="evidence-head">
+              <span class="evidence-title">Evidence Health</span>
+              <span class="health-chip"><i class="ph ph-pulse"></i><span id="health-label">Stable</span></span>
+            </div>
+            <div class="health-bar"><div class="health-fill" id="health-fill"></div></div>
+            <div class="evidence-item" onclick="setEvidenceState(82, 'Strong')"><i class="ph ph-seal-check"></i> CBDT Notification tags attached</div>
+            <div class="evidence-item" onclick="setEvidenceState(70, 'Review')"><i class="ph ph-gavel"></i> Case law cross-check pending</div>
+            <div class="evidence-item" onclick="setEvidenceState(91, 'Excellent')"><i class="ph ph-file-xls"></i> Excel formulas validated</div>
+          </aside>
+        </div>
+      </div>
 
       <!-- Messages -->
       <div class="messages-area">
@@ -2655,6 +2888,48 @@
     const overlay = document.getElementById('ob-overlay');
     if (overlay) { overlay.style.opacity = '0'; overlay.style.transition = 'opacity .3s'; setTimeout(() => overlay.style.display = 'none', 300); }
     showScreen('welcome');
+  }
+
+  /* ── CHAT DASHBOARD INTERACTIONS ── */
+  function toggleOpsChip(el) {
+    el.classList.toggle('active');
+  }
+
+  function cycleKpi(el, values) {
+    const valueEl = el.querySelector('.kpi-value');
+    if (!valueEl || !Array.isArray(values) || values.length === 0) return;
+    const idx = parseInt(el.dataset.kpiIndex || '0', 10);
+    const next = (idx + 1) % values.length;
+    valueEl.textContent = values[next];
+    el.dataset.kpiIndex = String(next);
+  }
+
+  function setEvidenceState(score, label) {
+    const fill = document.getElementById('health-fill');
+    const tag = document.getElementById('health-label');
+    if (fill) fill.style.width = Math.max(18, Math.min(100, score)) + '%';
+    if (tag) tag.textContent = label;
+  }
+
+  function focusChecklist() {
+    const item = document.querySelector('#screen-chat .artifact-card[style*="max-width:570px"]');
+    if (!item) return;
+    item.classList.add('pulse-focus');
+    item.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setTimeout(() => item.classList.remove('pulse-focus'), 2200);
+  }
+
+  function appendInsight() {
+    const hint = document.querySelector('#screen-chat .input-hints');
+    if (!hint) return;
+    const old = document.getElementById('insight-note');
+    if (old) old.remove();
+    const note = document.createElement('span');
+    note.id = 'insight-note';
+    note.className = 'input-hint';
+    note.style.color = 'hsl(202,100%,30%)';
+    note.textContent = 'Insight saved: add downside scenario at 12% discount rate';
+    hint.appendChild(note);
   }
 
   // Init

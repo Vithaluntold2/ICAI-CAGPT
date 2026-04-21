@@ -37,20 +37,37 @@ const injectShimmerCSS = () => {
       0% { background-position: -200% 0; }
       100% { background-position: 200% 0; }
     }
+    /* Shimmer pulled from Aurora tokens — teal + cyan with navy
+       anchors — instead of the original violet/indigo which clashed
+       with the rest of the palette. */
     .thinking-shimmer {
       background: linear-gradient(
         90deg,
-        currentColor 0%,
-        rgba(168, 139, 250, 1) 40%,
-        rgba(129, 140, 248, 1) 50%,
-        rgba(168, 139, 250, 1) 60%,
-        currentColor 100%
+        hsl(var(--aurora-navy)) 0%,
+        hsl(var(--aurora-cyan)) 40%,
+        hsl(var(--aurora-teal-soft)) 50%,
+        hsl(var(--aurora-cyan)) 60%,
+        hsl(var(--aurora-navy)) 100%
       );
       background-size: 200% 100%;
       -webkit-background-clip: text;
       background-clip: text;
       -webkit-text-fill-color: transparent;
       animation: shimmer-sweep 2s ease-in-out infinite;
+    }
+    .dark .thinking-shimmer {
+      background: linear-gradient(
+        90deg,
+        hsl(var(--aurora-teal) / 0.55) 0%,
+        hsl(var(--aurora-cyan)) 40%,
+        hsl(var(--aurora-teal-soft)) 50%,
+        hsl(var(--aurora-cyan)) 60%,
+        hsl(var(--aurora-teal) / 0.55) 100%
+      );
+      background-size: 200% 100%;
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
     }
     @keyframes dot-pulse {
       0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); }

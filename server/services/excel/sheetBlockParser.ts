@@ -303,8 +303,20 @@ function parseSheetBlock(body: string): ParsedBlock | null {
 //   - no digit immediately before the start (so we don't pick up a
 //     fragment of a longer number)
 //   - no digit immediately after the end (ditto for trailing)
+// Boundary guards:
+//   left  (?<![0-9A-Za-z\-/])  — don't start inside a number, identifier, or
+//                                 a date fragment like `08-03-2026` where the
+//                                 dash-adjacent digits would otherwise match.
+//   right (?![0-9\-/:])        — don't end where a digit, dash, slash, or
+//                                 colon follows. This stops the regex from
+//                                 swallowing `1,08` in `1,08-03-2026` (ID=1,
+//                                 date=08-03-2026 — two separate cells) or
+//                                 fragments of timestamps like `1,08:30`.
+//                                 Legitimate grouped numbers end at a cell
+//                                 delimiter (`,`), closing paren, whitespace,
+//                                 or end-of-line — all allowed by this guard.
 const PROTECT_NUMBER_RE =
-  /(?<![0-9])(?:[₹$€£]|Rs\.?\s*|INR\s*)?\d{1,3}(?:,\d{2,3})+(?:\.\d+)?(?![0-9])/g;
+  /(?<![0-9A-Za-z\-/])(?:[₹$€£]|Rs\.?\s*|INR\s*)?\d{1,3}(?:,\d{2,3})+(?:\.\d+)?(?![0-9\-/:])/g;
 const COMMA_PLACEHOLDER = '\x1F';
 
 function protectGroupedNumbers(line: string): string {

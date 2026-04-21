@@ -34,7 +34,6 @@ import { useToast } from "@/hooks/use-toast";
 import OutputPane from "@/components/OutputPane";
 import type { ChartData } from "@/components/visualizations/VisualizationRenderer";
 
-import ReasoningFeedback from "@/components/ReasoningFeedback";
 import ChatOverlay from "@/components/ChatOverlay";
 import ReactMarkdown from "react-markdown";
 import remarkMath from "remark-math";
@@ -142,6 +141,7 @@ const getStatusForMode = (mode: string): string => {
 interface MessageMetadata {
   showInOutputPane?: boolean;
   reasoningContent?: string;
+  thinkingSteps?: Array<{ phase: string; detail: string }>;
   visualization?: ChartData;
   deliverableContent?: string;
   spreadsheetData?: Record<string, unknown>;
@@ -667,17 +667,25 @@ export default function Chat() {
           justFinishedStreamingRef.current = true;
           setIsStreaming(false);
           setCagptStatus('');
-          setThinkingSteps([]); // Clear thinking steps
+          // Snapshot the live thinking steps onto the completed message so
+          // the ThinkingBlock in the reasoning slot can keep rendering them
+          // after streaming ends (live state is about to be cleared).
+          const stepsSnapshot = thinkingSteps;
+          setThinkingSteps([]);
           // Store metadata for visualization - ensure showInOutputPane is preserved
           // CRITICAL: Also update the message ID from streaming-xxx to real server ID for download URLs
           if (metadata) {
             setMessages(prev => {
-              const updated = prev.map(msg => 
-                msg.id === streamingId 
-                  ? { 
-                      ...msg, 
+              const updated = prev.map(msg =>
+                msg.id === streamingId
+                  ? {
+                      ...msg,
                       id: messageId || msg.id, // Use real message ID from server for download URLs
-                      metadata: { ...metadata, showInOutputPane: metadata.showInOutputPane || false } 
+                      metadata: {
+                        ...metadata,
+                        showInOutputPane: metadata.showInOutputPane || false,
+                        thinkingSteps: stepsSnapshot.length > 0 ? stepsSnapshot : metadata.thinkingSteps,
+                      }
                     }
                   : msg
               );
@@ -1241,14 +1249,37 @@ export default function Chat() {
                         isStreaming && message.id.startsWith('streaming-')
                       }
                       onStop={handleStop}
-                      reasoning={
-                        message.metadata?.reasoningContent ? (
-                          <ReasoningFeedback
-                            messageContent={message.metadata.reasoningContent}
-                            messageId={message.id}
+                      reasoning={(() => {
+                        const isStreamingThis =
+                          isStreaming && message.id.startsWith('streaming-');
+                        // Prefer live steps for the active stream, then the
+                        // snapshot we persist onEnd, and finally fall back to
+                        // splitting the reasoningContent prose on newlines so
+                        // historical messages still get a structured view.
+                        const liveSteps = isStreamingThis ? thinkingSteps : [];
+                        const persistedSteps = message.metadata?.thinkingSteps ?? [];
+                        const fallbackSteps =
+                          persistedSteps.length === 0 && message.metadata?.reasoningContent
+                            ? message.metadata.reasoningContent
+                                .split(/\n+/)
+                                .map((line) => line.trim())
+                                .filter(Boolean)
+                                .map((detail) => ({ phase: 'reasoning', detail }))
+                            : [];
+                        const steps = isStreamingThis
+                          ? liveSteps
+                          : persistedSteps.length > 0
+                            ? persistedSteps
+                            : fallbackSteps;
+                        if (steps.length === 0 && !isStreamingThis) return undefined;
+                        return (
+                          <ThinkingBlock
+                            steps={steps}
+                            isActive={isStreamingThis}
+                            currentStatus={isStreamingThis ? cagptStatus || undefined : undefined}
                           />
-                        ) : undefined
-                      }
+                        );
+                      })()}
                       feedback={
                         !message.id.startsWith('streaming-') &&
                         !message.id.startsWith('uploading-') &&

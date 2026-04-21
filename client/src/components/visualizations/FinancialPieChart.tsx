@@ -37,9 +37,17 @@ export default function FinancialPieChart({
 }: FinancialPieChartProps) {
   const total = data.reduce((sum, item) => sum + item.value, 0);
 
+  // Some series names the AI emits are full sentences ("turnover below ₹2
+  // crore - Due Date"). Cap at a readable length so extreme outliers can't
+  // defeat the chart's horizontal margin and clip on the card edge. Hover
+  // tooltip still shows the full name.
+  const truncate = (s: string, max = 32) =>
+    s.length > max ? s.slice(0, max - 1).trimEnd() + "…" : s;
+
   const renderLabel = (entry: DataPoint) => {
     const percentage = ((entry.value / total) * 100).toFixed(1);
-    return showPercentage ? `${entry.name} (${percentage}%)` : entry.name;
+    const name = truncate(entry.name);
+    return showPercentage ? `${name} (${percentage}%)` : name;
   };
 
   // Pie slices are keyed by `name` (the slice label), not a series dataKey.
@@ -60,14 +68,19 @@ export default function FinancialPieChart({
         <h3 className="text-lg font-semibold mb-4 text-center">{title}</h3>
       )}
       <ChartContainer config={chartConfig} className="h-[400px] w-full">
-        <PieChart>
+        {/* Horizontal margin reserves room for the external label lines
+            ("Electronic Cash Ledger", "turnover below ₹2 crore", etc.) so
+            they don't spill past the SVG viewport and get clipped by the
+            card edges. Radius is a percentage so the pie auto-scales with
+            container width instead of staying locked at 120px. */}
+        <PieChart margin={{ top: 16, right: 96, bottom: 16, left: 96 }}>
           <Pie
             data={data}
             cx="50%"
             cy="50%"
             labelLine={true}
             label={renderLabel}
-            outerRadius={120}
+            outerRadius="70%"
             fill="#8884d8"
             dataKey="value"
             nameKey="name"

@@ -265,12 +265,34 @@ export class AIOrchestrator {
       console.log('[AIOrchestrator] Ambiguous pronoun query with artifacts present — skipping clarifier, letting agent resolve from manifest');
     } else if (!options?.attachment) {
       // INTERVIEW-FIRST PATTERN: Use AI-driven async analysis for accurate context detection
-      // Check if the user has already answered interview questions in this conversation
-      const alreadyInterviewed = this.hasCompletedInterview(conversationHistory);
-      
+      // Check if the user has already answered interview questions in this conversation.
+      //
+      // Professional modes (calculation, audit-plan, workflow, deep-research,
+      // forensic-intelligence, deliverable-composer, roundtable) do per-turn
+      // topic re-scoping: we only skip the clarifier when the IMMEDIATELY
+      // PREVIOUS assistant turn was itself a clarification. This way, a new
+      // question in the same conversation re-triggers scoping. Standard chat
+      // keeps the old conversation-wide skip so casual follow-ups don't get
+      // interrogated.
+      const PROFESSIONAL_MODES = new Set([
+        'calculation',
+        'audit-plan',
+        'workflow',
+        'deep-research',
+        'forensic-intelligence',
+        'deliverable-composer',
+        'roundtable',
+        'checklist',
+      ]);
+      const isProfessionalMode = chatMode ? PROFESSIONAL_MODES.has(chatMode) : false;
+
+      const alreadyInterviewed = isProfessionalMode
+        ? this.wasLastAssistantTurnClarification(conversationHistory)
+        : this.hasCompletedInterview(conversationHistory);
+
       if (alreadyInterviewed) {
-        // User already answered clarifying questions — proceed directly to answering
-        console.log('[AIOrchestrator] Interview already completed in conversation history — proceeding to answer');
+        // User just answered clarifying questions — proceed directly to answering.
+        console.log('[AIOrchestrator] Interview already completed (last-turn=clarification) — proceeding to answer');
         // Still run analysis to extract detected context for prompt building
         clarificationAnalysis = requirementClarificationAIService.analyzeQuery(query, conversationHistory);
         // Override: don't re-ask
@@ -279,32 +301,35 @@ export class AIOrchestrator {
           clarificationAnalysis.recommendedApproach = 'answer';
         }
       } else {
-        // Use AI-powered async analysis (GPT-4o-mini chain-of-thought) for accurate detection.
-        // The clarifier receives the conversationId so it can pull the memory
-        // glossary + rolling summary and build a deterministic "DO NOT ASK
-        // ABOUT" negative list from history — fixing context re-asks at the
-        // source instead of post-filtering the model's output.
+        // AI-powered async analysis with memory glossary + rolling summary.
+        // The analyzer sees a "DO NOT ASK ABOUT" negative list so it doesn't
+        // re-ask about facts already in history.
         try {
           clarificationAnalysis = await requirementClarificationAIService.analyzeQueryAsync(
             query,
             conversationHistory,
             options?.conversationId,
           );
-          console.log(`[AIOrchestrator] AI clarification analysis: needsClarification=${clarificationAnalysis.needsClarification}, approach=${clarificationAnalysis.recommendedApproach}, missing=${clarificationAnalysis.missingContext.length} items`);
+          console.log(`[AIOrchestrator] AI clarification analysis: needsClarification=${clarificationAnalysis.needsClarification}, approach=${clarificationAnalysis.recommendedApproach}, missing=${clarificationAnalysis.missingContext.length} items (mode=${chatMode}, professional=${isProfessionalMode})`);
         } catch (err) {
           console.error('[AIOrchestrator] AI clarification analysis failed, falling back to heuristic:', err);
           clarificationAnalysis = requirementClarificationAIService.analyzeQuery(query, conversationHistory);
         }
       }
 
-      // INQUIRY-FIRST: Always clarify when critical/high context is missing
-      // This applies to ALL modes including Deep Research
-      // We don't make assumptions about jurisdiction, entity type, etc.
+      // Threshold differs by mode:
+      //   Standard chat: only clarify when critical/high context is missing
+      //                  (keeps casual Q&A fluent — don't interrogate "what is 80C?")
+      //   Professional:  clarify when any critical/high/medium is missing
+      //                  (these modes generate artifacts/spreadsheets/plans —
+      //                   wrong assumptions cost real money, scope first.)
       const shouldClarify = (
         clarificationAnalysis.needsClarification &&
         clarificationAnalysis.recommendedApproach === 'clarify' &&
         clarificationAnalysis.missingContext.some(m =>
-          m.importance === 'critical' || m.importance === 'high'
+          isProfessionalMode
+            ? (m.importance === 'critical' || m.importance === 'high' || m.importance === 'medium')
+            : (m.importance === 'critical' || m.importance === 'high')
         )
       );
       
@@ -1514,6 +1539,49 @@ export class AIOrchestrator {
    * assistant asked clarifying questions → user answered them.
    * This prevents re-asking the same questions in a loop.
    */
+  /**
+   * Topic-scoped variant of hasCompletedInterview used for professional modes.
+   *
+   * Returns true ONLY when the immediately previous assistant turn was a
+   * clarification prompt — i.e. the user's current message is a direct
+   * answer to that specific set of questions. This prevents the permanent
+   * conversation-wide skip that hasCompletedInterview enforces: in
+   * professional modes each new topic should re-scope, because the stakes
+   * (generated spreadsheets, audit plans, workflows) mean unassumed context
+   * bites hard. Standard chat still uses the permanent-skip behaviour to
+   * stay fluent on casual follow-ups.
+   */
+  private wasLastAssistantTurnClarification(
+    conversationHistory: Array<{ role: 'user' | 'assistant'; content: string }>
+  ): boolean {
+    if (conversationHistory.length < 2) return false;
+    // Last entry is the CURRENT user message — we want the turn just before it.
+    const last = conversationHistory[conversationHistory.length - 1];
+    if (last.role !== 'user') return false;
+    const prior = conversationHistory[conversationHistory.length - 2];
+    if (prior.role !== 'assistant') return false;
+    const msg = prior.content.toLowerCase();
+
+    const hasNumberedQuestions = /\b\d+\.\s+.+\?/m.test(prior.content);
+    const hasClarificationCue = (
+      msg.includes('clarifying question') ||
+      msg.includes('context-building') ||
+      msg.includes('need to understand') ||
+      msg.includes('need a bit more') ||
+      msg.includes('before i can') ||
+      msg.includes('which jurisdiction') ||
+      msg.includes('what specific') ||
+      msg.includes('to provide') ||
+      msg.includes('to ensure') ||
+      msg.includes('help me understand')
+    );
+    const result = hasNumberedQuestions && hasClarificationCue;
+    if (result) {
+      console.log('[AIOrchestrator] Last assistant turn was a clarification — current user turn is the answer');
+    }
+    return result;
+  }
+
   private hasCompletedInterview(
     conversationHistory: Array<{ role: 'user' | 'assistant'; content: string }>
   ): boolean {

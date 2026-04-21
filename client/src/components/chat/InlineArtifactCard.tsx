@@ -1,8 +1,10 @@
 // client/src/components/chat/InlineArtifactCard.tsx
+import { useRef } from 'react';
 import { Copy, Download, Maximize2 } from 'lucide-react';
 import type { WhiteboardArtifact } from '../../../../shared/schema';
 import { ArtifactRenderer } from './artifacts/ArtifactRenderer';
 import { KindPill } from './KindPill';
+import { useToast } from '@/hooks/use-toast';
 
 interface InlineArtifactCardProps {
   artifact: WhiteboardArtifact;
@@ -16,25 +18,64 @@ export function InlineArtifactCard({
   onOpenInWhiteboard,
 }: InlineArtifactCardProps) {
   const title = (artifact.payload as any)?.title ?? artifact.kind;
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const { toast } = useToast();
 
-  const handleCopy = () => {
+  // Capture the rendered artifact body as a PNG blob. html-to-image's
+  // skipFonts avoids the `font.trim()` crash in v1.11 when the page has
+  // external @font-face rules (the same workaround used in workflow /
+  // flowchart exports).
+  const captureBlob = async (): Promise<Blob | null> => {
+    const el = bodyRef.current;
+    if (!el) return null;
+    const htmlToImage = await import('html-to-image');
+    return htmlToImage.toBlob(el, {
+      pixelRatio: 2,
+      cacheBust: true,
+      skipFonts: true,
+    });
+  };
+
+  const slug = ((title as string) || artifact.kind)
+    .toString()
+    .replace(/[^a-z0-9_-]+/gi, '_');
+
+  const handleCopy = async () => {
     try {
-      navigator.clipboard.writeText(JSON.stringify(artifact.payload, null, 2));
-    } catch {
-      // silently fail; clipboard may be blocked
+      const blob = await captureBlob();
+      if (!blob) throw new Error('Nothing to copy');
+      // ClipboardItem with image/png — supported in modern Chromium /
+      // WebKit / Firefox. Falls through to the catch on older browsers.
+      await navigator.clipboard.write([
+        new ClipboardItem({ 'image/png': blob }),
+      ]);
+      toast({ title: 'Copied as PNG', description: 'Image copied to clipboard.' });
+    } catch (err: any) {
+      toast({
+        title: 'Copy failed',
+        description: err?.message ?? 'Clipboard rejected the image.',
+        variant: 'destructive',
+      });
     }
   };
 
-  const handleDownload = () => {
-    const blob = new Blob([JSON.stringify(artifact.payload, null, 2)], {
-      type: 'application/json',
-    });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${artifact.kind}-${artifact.id}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
+  const handleDownload = async () => {
+    try {
+      const blob = await captureBlob();
+      if (!blob) return;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${slug}-${artifact.id}.png`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      toast({
+        title: 'Download failed',
+        description: err?.message ?? String(err),
+        variant: 'destructive',
+      });
+    }
   };
 
   return (
@@ -45,10 +86,10 @@ export function InlineArtifactCard({
           <span>{title}</span>
         </div>
         <div className="flex gap-0.5 text-muted-foreground">
-          <ActionButton title="Copy JSON" onClick={handleCopy}>
+          <ActionButton title="Copy as PNG" onClick={handleCopy}>
             <Copy className="w-[13px] h-[13px]" strokeWidth={1.75} />
           </ActionButton>
-          <ActionButton title="Download JSON" onClick={handleDownload}>
+          <ActionButton title="Download PNG" onClick={handleDownload}>
             <Download className="w-[13px] h-[13px]" strokeWidth={1.75} />
           </ActionButton>
           {onOpenInWhiteboard && (
@@ -61,7 +102,7 @@ export function InlineArtifactCard({
           )}
         </div>
       </header>
-      <div className="p-4">
+      <div ref={bodyRef} className="p-4">
         <ArtifactRenderer
           artifact={artifact}
           conversationId={conversationId}

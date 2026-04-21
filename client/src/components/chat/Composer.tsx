@@ -77,6 +77,13 @@ export function Composer({
     if (e.key === 'Enter' && !e.shiftKey && !disabled) {
       e.preventDefault();
       if (value.trim().length > 0) onSend();
+      return;
+    }
+    // Esc blurs the textarea so keyboard users can return to the canvas
+    // (cards, zoom, pan shortcuts) without clicking elsewhere.
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      textareaRef.current?.blur();
     }
   };
 
@@ -145,6 +152,10 @@ export function Composer({
         placeholder={placeholder}
         disabled={disabled}
         rows={1}
+        // Testid varies by variant so the Whiteboard ⌘/Ctrl+Enter handler
+        // can target the PIP composer specifically (the main composer isn't
+        // mounted in output view).
+        data-testid={variant === 'pip' ? 'pip-composer-input' : 'composer-input'}
         className="w-full bg-transparent outline-none resize-none text-[14px] text-foreground placeholder:text-muted-foreground font-sans leading-[1.5]"
       />
 

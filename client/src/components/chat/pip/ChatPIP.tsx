@@ -135,6 +135,31 @@ export function ChatPIP({
     localStorage.setItem(LS_KEY, JSON.stringify(state));
   }, [state]);
 
+  // External focus trigger — the Whiteboard ⌘/Ctrl+Enter shortcut fires
+  // `cagpt:focus-pip-composer` after the user asks about selected artifacts.
+  // If the PIP is collapsed we expand it first, wait a tick for the composer
+  // textarea to mount, then focus. Two rAFs because the textarea's autosize
+  // effect also runs on mount and we want focus to land after layout settles.
+  useEffect(() => {
+    const focusTextarea = () => {
+      const el = pipRef.current?.querySelector<HTMLTextAreaElement>(
+        '[data-testid="pip-composer-input"]'
+      );
+      el?.focus();
+      // Place cursor at end so typing appends to any existing draft.
+      if (el) {
+        const len = el.value.length;
+        el.setSelectionRange(len, len);
+      }
+    };
+    const onFocusEvent = () => {
+      setState((s) => (s.collapsed ? { ...s, collapsed: false } : s));
+      requestAnimationFrame(() => requestAnimationFrame(focusTextarea));
+    };
+    window.addEventListener('cagpt:focus-pip-composer', onFocusEvent);
+    return () => window.removeEventListener('cagpt:focus-pip-composer', onFocusEvent);
+  }, []);
+
   // Re-clamp on window resize so the PIP doesn't get stranded off-screen
   // after the window is shrunk (common when docking/undocking a monitor).
   useEffect(() => {

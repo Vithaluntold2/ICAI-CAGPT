@@ -270,7 +270,14 @@ Remember: Output ONLY valid JSON, no markdown formatting.`;
       }
 
       const response = await provider.generateCompletion({
-        model: 'gpt-4o-mini', // Fast and cheap for classification
+        // Use gpt-4o here. Clarification is a judgment call (read query +
+        // history + memory glossary, decide if missing context is
+        // material). gpt-4o-mini tends to under-flag ambiguity on complex
+        // accounting queries and over-returns "answer". Note: on the Azure
+        // provider the `model` field is currently ignored in favour of the
+        // deployment name — this string matters for OpenAI-direct / Claude
+        // when those providers come back online.
+        model: 'gpt-4o',
         messages: [
           { role: 'system', content: CLARIFICATION_SYSTEM_PROMPT },
           { role: 'user', content: userMessage }

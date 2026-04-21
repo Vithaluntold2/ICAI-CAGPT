@@ -10,13 +10,11 @@ import { Graph } from '@antv/x6';
 // and skip the minimap (nice-to-have, not critical for a single-pane view).
 import dagre from 'dagre';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-  DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
 import {
   Dialog,
@@ -29,14 +27,11 @@ import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Download,
-  Search,
   ZoomIn,
   ZoomOut,
   Maximize2,
   GitBranch,
   Expand,
-  MoreHorizontal,
-  FileJson,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { registerWorkflowShapes } from './register-nodes';
@@ -128,7 +123,6 @@ export default function WorkflowRendererX6({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const graphRef = useRef<Graph | null>(null);
 
-  const [searchTerm, setSearchTerm] = useState('');
   const [detailNode, setDetailNode] = useState<WorkflowNode | null>(null);
   const [isDark, setIsDark] = useState<boolean>(() =>
     typeof document !== 'undefined' &&
@@ -351,32 +345,6 @@ export default function WorkflowRendererX6({
     });
   }, [nodes, edges, compactMode]);
 
-  // Search — center the first matching node and flag it so the React shape
-  // component draws the teal outline.
-  useEffect(() => {
-    const graph = graphRef.current;
-    if (!graph) return;
-
-    const term = searchTerm.trim().toLowerCase();
-    graph.getNodes().forEach((cell) => {
-      const data = (cell.getData() ?? {}) as WorkflowNodeData;
-      const matches = !!term && !!data.label && data.label.toLowerCase().includes(term);
-      if (!!data.matchesSearch !== matches) {
-        cell.setData({ ...data, matchesSearch: matches });
-      }
-    });
-
-    if (term) {
-      const first = graph.getNodes().find((cell) => {
-        const data = (cell.getData() ?? {}) as WorkflowNodeData;
-        return data.label?.toLowerCase().includes(term);
-      });
-      if (first) {
-        graph.centerCell(first);
-      }
-    }
-  }, [searchTerm]);
-
   // Fullscreen is now handled by the parent (a dedicated
   // WorkflowFullscreenModal that mounts a *fresh* graph instance in a
   // portal). This component never portals its own DOM, so x6's internal
@@ -421,12 +389,6 @@ export default function WorkflowRendererX6({
     [toast],
   );
 
-  const copyJson = () => {
-    const payload = { nodes, edges, title };
-    navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
-    toast({ title: 'Copied JSON', description: 'Workflow JSON copied to clipboard' });
-  };
-
   // Canvas background — defers to the app surface so the workflow blends with
   // whatever card the artifact is in. Light mode uses --muted so white cards
   // pop against the surface; dark mode uses --background.
@@ -464,10 +426,13 @@ export default function WorkflowRendererX6({
 
   const tree = (
     <div className={containerClass} style={containerStyle}>
-      {/* Header / toolbar. Hidden in preview mode — the card has its own
-          title row (from WorkflowArtifact / whiteboard ArtifactCard) and
-          preview has no interactive controls. */}
-      {!preview && (
+      {/* Header / toolbar. Hidden when:
+          - preview (whiteboard card — parent has its own header)
+          - chat-inline (embedded AND parent supplies onOpenFullscreen —
+            the user goes to Output / fullscreen for interactive controls).
+          Shown in the fullscreen modal (embedded, no onOpenFullscreen)
+          and in the rare standalone case. */}
+      {!preview && !(embedded && onOpenFullscreen) && (
       <div className="shrink-0 px-4 py-3 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 flex items-center justify-between gap-4">
         {embedded ? (
           <div aria-hidden />
@@ -489,22 +454,6 @@ export default function WorkflowRendererX6({
         )}
 
         <div className="flex items-center gap-1.5 flex-wrap">
-          {/* Search */}
-          <div className="relative">
-            <Search
-              className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground"
-              strokeWidth={1.75}
-            />
-            <Input
-              placeholder="Search nodes..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="h-8 w-36 pl-8 text-xs"
-            />
-          </div>
-
-          <div className="h-5 w-px bg-border mx-1" aria-hidden />
-
           <Button
             variant="ghost"
             size="sm"
@@ -571,28 +520,6 @@ export default function WorkflowRendererX6({
               <Expand className="h-3.5 w-3.5" strokeWidth={1.75} />
             </Button>
           )}
-
-          {/* Overflow */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-8 w-8 p-0 rounded-md hover:bg-foreground/5 text-muted-foreground"
-                title="More options"
-              >
-                <MoreHorizontal className="h-3.5 w-3.5" strokeWidth={1.75} />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56">
-              <DropdownMenuItem disabled>Theme (coming soon)</DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={copyJson}>
-                <FileJson className="h-3.5 w-3.5 mr-2" strokeWidth={1.75} />
-                Copy as JSON
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
         </div>
       </div>
       )}

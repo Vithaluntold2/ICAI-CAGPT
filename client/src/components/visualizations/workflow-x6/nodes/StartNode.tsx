@@ -14,12 +14,14 @@ export function StartNode({ node }: { node: Node }) {
         'relative w-full h-full px-4 flex items-center justify-center',
         'rounded-full text-white text-center',
         'font-display font-semibold text-[13px] leading-[1.25]',
-        'bg-gradient-to-br from-aurora-navy via-aurora-cyan to-aurora-teal',
+        // aurora-* tailwind tokens are not registered in tailwind.config,
+        // so `from-aurora-navy` etc. emit nothing and the capsule went
+        // white in light mode. Paint the gradient via the CSS variable
+        // we already define in index.css.
         'shadow-[0_0_24px_rgba(8,145,178,0.25)]',
         'transition-shadow duration-200 hover:shadow-[0_0_32px_rgba(8,145,178,0.45)]',
-        data.matchesSearch &&
-          'outline outline-[3px] outline-aurora-teal-soft outline-offset-[3px]',
       )}
+      style={{ backgroundImage: 'var(--gradient-aurora)' }}
       title={data.tooltip}
     >
       <span className="line-clamp-2 break-words">{data.label}</span>

@@ -1,4 +1,4 @@
-import { useCallback, useRef } from "react";
+import { useCallback, useMemo, useRef } from "react";
 import { Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import VisualizationRenderer, { type ChartData } from "../../visualizations/VisualizationRenderer";
@@ -11,6 +11,21 @@ export function ChartArtifact({
   embedded?: boolean;
 }) {
   const bodyRef = useRef<HTMLDivElement>(null);
+
+  // Parent re-renders during the SSE end → metadata plumbing → setQueryData
+  // sequence hand ChartArtifact a fresh `payload` object reference even when
+  // the data hasn't changed. Recharts shallow-compares its `data` prop and
+  // re-runs its mount animation on every new reference, which is what the
+  // user sees as "the chart flashing 2-3 times before it settles".
+  //
+  // Freeze the payload reference by its structural content — as long as the
+  // serialised payload is unchanged, VisualizationRenderer sees the same
+  // object and Recharts skips the re-animation.
+  const stablePayload = useMemo(
+    () => payload,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [JSON.stringify(payload)]
+  );
 
   const handleDownload = useCallback(async () => {
     const target = bodyRef.current;
@@ -51,7 +66,7 @@ export function ChartArtifact({
         </Button>
       </div>
       <div ref={bodyRef}>
-        <VisualizationRenderer chartData={payload} embedded={embedded} />
+        <VisualizationRenderer chartData={stablePayload} embedded={embedded} />
       </div>
     </div>
   );

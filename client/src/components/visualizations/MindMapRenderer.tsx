@@ -293,7 +293,10 @@ const MindMapRenderer = forwardRef<MindMapRendererHandle, MindMapRendererProps>(
           // Embedded (InlineArtifactCard / whiteboard ArtifactCard) — fill
           // the parent's fixed height. Standalone — fall back to a sensible
           // 600 px default since nothing above sets a height for us.
-          "w-full relative border border-border rounded-lg overflow-hidden bg-background " +
+          // Canvas uses the same --card tone as the surrounding chrome so
+          // the inner canvas visually continues from the outer frame instead
+          // of looking like a punched-in panel.
+          "w-full relative border border-border rounded-lg overflow-hidden bg-card " +
           (embedded ? "h-full" : "h-[600px]")
         }
       >

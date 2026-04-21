@@ -27,6 +27,13 @@ interface FinancialAreaChartProps {
   stacked?: boolean;
 }
 
+// Matches the Bar / Line truncation + rotation scheme so all three Recharts
+// variants behave consistently when the AI emits long category names.
+const truncateTick = (s: string | number, max = 20) => {
+  const str = String(s);
+  return str.length > max ? str.slice(0, max - 1).trimEnd() + '…' : str;
+};
+
 export default function FinancialAreaChart({
   data,
   areas,
@@ -41,13 +48,18 @@ export default function FinancialAreaChart({
     return acc;
   }, {});
 
+  const hasLongLabels = data.some(d => String(d.name ?? '').length > 8);
+
   return (
     <div className="w-full" data-testid="chart-financial-area">
       {title && (
         <h3 className="text-lg font-semibold mb-4 text-center">{title}</h3>
       )}
       <ChartContainer config={chartConfig} className="h-[400px] w-full">
-        <AreaChart data={data} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+        <AreaChart
+          data={data}
+          margin={{ top: 5, right: 30, left: 20, bottom: hasLongLabels ? 60 : 5 }}
+        >
           {/* Soft gradient fill per series. `--color-<key>` resolves through
               ChartContainer's CSS vars, so light/dark switches reflow the
               gradient automatically. */}
@@ -62,6 +74,13 @@ export default function FinancialAreaChart({
           <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
           <XAxis
             dataKey="name"
+            // Ensure every tick renders rather than letting Recharts
+            // silently skip labels at narrow widths.
+            interval={0}
+            angle={hasLongLabels ? -35 : 0}
+            textAnchor={hasLongLabels ? 'end' : 'middle'}
+            height={hasLongLabels ? 70 : 30}
+            tickFormatter={(v) => truncateTick(v)}
             label={xAxisLabel ? { value: xAxisLabel, position: 'insideBottom', offset: -5 } : undefined}
           />
           <YAxis

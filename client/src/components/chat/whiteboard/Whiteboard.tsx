@@ -218,17 +218,28 @@ export function Whiteboard({ conversationId }: { conversationId: string }) {
     return () => el.removeEventListener('wheel', onWheel);
   }, []);
 
-  // Cmd/Ctrl+K — focus composer + push current selection as referred artifacts
+  // Cmd/Ctrl+Enter — focus composer + push current selection as referred
+  // artifacts. Previously this was Cmd/Ctrl+K, but that already opens the
+  // global command menu (search chats, switch modes, new chat). Enter is a
+  // natural "submit/ask" affordance and has no other global binding.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      const isK = e.key === "k" || e.key === "K";
-      if (!isK) return;
+      if (e.key !== "Enter") return;
       if (!(e.metaKey || e.ctrlKey)) return;
       if (selected.size === 0) return;
+      // Don't steal the keystroke if the user is typing somewhere —
+      // Cmd+Enter inside an input should behave the way that input wants.
+      const active = document.activeElement as HTMLElement | null;
+      if (active) {
+        const tag = active.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || active.isContentEditable) return;
+      }
       e.preventDefault();
       setArtifacts([...selected]);
-      const el = document.querySelector<HTMLTextAreaElement>('[data-testid="composer-input"]');
-      el?.focus();
+      // Fire at the PIP composer rather than the main-page composer (which
+      // isn't mounted in output view). ChatPIP listens for this event and
+      // will expand itself if collapsed before focusing its textarea.
+      window.dispatchEvent(new CustomEvent('cagpt:focus-pip-composer'));
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
@@ -413,7 +424,7 @@ export function Whiteboard({ conversationId }: { conversationId: string }) {
           <Info className="w-3.5 h-3.5 text-aurora-teal-soft" strokeWidth={1.75} />
           <span>
             Click artifacts to select · Shift-click for multiple ·{" "}
-            <Kbd keys={["mod", "K"]} /> to ask about selection
+            <Kbd keys={["mod", "return"]} /> to ask about selection
           </span>
           <button
             type="button"

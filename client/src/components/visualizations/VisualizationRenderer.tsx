@@ -1,3 +1,4 @@
+import React from 'react';
 // Legacy Recharts-based visualizations
 import FinancialLineChart from './FinancialLineChart';
 import FinancialBarChart from './FinancialBarChart';
@@ -72,7 +73,7 @@ function isMindMapVisualization(viz: VisualizationData): viz is MindMapData {
   return viz.type === 'mindmap';
 }
 
-export default function VisualizationRenderer({ chartData, embedded = false }: VisualizationRendererProps) {
+function VisualizationRendererImpl({ chartData, embedded = false }: VisualizationRendererProps) {
   const { type, title } = chartData;
 
   // Handle MindMap visualization first (different structure)
@@ -306,3 +307,11 @@ export default function VisualizationRenderer({ chartData, embedded = false }: V
       );
   }
 }
+
+// Memoised so a parent re-render with referentially-equal chartData doesn't
+// remount the underlying Recharts/ECharts instance (which re-runs its mount
+// animation and causes the "flashes 2-3 times before settling" behaviour).
+// Paired with the useMemo wrapper in ChartArtifact that freezes the payload
+// reference by its serialised content.
+const VisualizationRenderer = React.memo(VisualizationRendererImpl);
+export default VisualizationRenderer;

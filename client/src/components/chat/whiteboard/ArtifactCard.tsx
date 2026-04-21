@@ -92,15 +92,6 @@ export function ArtifactCard({
               >
                 Reference in chat
               </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={(e) => {
-                  e.stopPropagation();
-                  window.alert("Full-size view coming soon");
-                }}
-                data-testid={`artifact-card-open-${artifact.id}`}
-              >
-                Open full size
-              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>

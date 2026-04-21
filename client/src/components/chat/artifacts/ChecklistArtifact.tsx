@@ -3,6 +3,12 @@ import { Check, CircleDashed, Download, Loader2, Quote } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useSelectionContext } from "../whiteboard/useSelectionContext";
 
 interface ChecklistItem {
@@ -148,17 +154,58 @@ export function ChecklistArtifact({ artifactId, conversationId, payload, state }
     return lines.join("\n").trimEnd() + "\n";
   }, [payload?.title, sections, checked]);
 
-  const handleDownload = useCallback(() => {
+  const baseName = useMemo(
+    () => (payload?.title || "checklist").replace(/[^a-z0-9_-]+/gi, "_"),
+    [payload?.title],
+  );
+
+  const downloadMarkdown = useCallback(() => {
     const md = buildMarkdown();
     const blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    const base = (payload?.title || "checklist").replace(/[^a-z0-9_-]+/gi, "_");
-    a.download = `${base}.md`;
+    a.download = `${baseName}.md`;
     a.click();
     URL.revokeObjectURL(url);
-  }, [buildMarkdown, payload?.title]);
+  }, [buildMarkdown, baseName]);
+
+  // Vector PDF via the server. We hand the artifact ID to the whiteboard
+  // export endpoint, which renders the checklist as a real PDF (markdown →
+  // Puppeteer → PDF, selectable text + real checkbox glyphs). The previous
+  // client-side pdfmake + vfs_fonts path failed silently on Vite because of
+  // how pdfmake ships its font VFS; consolidating on the server pipeline
+  // also gives parity with the whiteboard "Export selected" path, so the
+  // two routes always produce the same file.
+  const downloadPdf = useCallback(async () => {
+    if (!conversationId) {
+      console.warn("[ChecklistArtifact] PDF export requires conversationId");
+      return;
+    }
+    try {
+      const res = await fetch(
+        `/api/conversations/${conversationId}/whiteboard/export`,
+        {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ format: "pdf", artifactIds: [artifactId] }),
+        },
+      );
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${baseName}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("[ChecklistArtifact] PDF export failed", err);
+    }
+  }, [conversationId, artifactId, baseName]);
 
   return (
     <div className="w-full h-full overflow-auto" data-testid={`checklist-artifact-${artifactId}`}>
@@ -172,17 +219,28 @@ export function ChecklistArtifact({ artifactId, conversationId, payload, state }
             saving…
           </span>
         )}
-        <Button
-          size="sm"
-          variant="ghost"
-          className="ml-auto h-6 px-2 text-[11px]"
-          onClick={handleDownload}
-          title="Download as Markdown"
-          data-testid="checklist-download"
-        >
-          <Download className="h-3 w-3 mr-1" />
-          .md
-        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="ml-auto h-6 px-2 text-[11px]"
+              title="Download…"
+              data-testid="checklist-download"
+            >
+              <Download className="h-3 w-3 mr-1" />
+              Export
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={downloadMarkdown} data-testid="checklist-export-md">
+              Markdown (.md)
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={downloadPdf} data-testid="checklist-export-pdf">
+              PDF (.pdf)
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
       <div className="p-3 space-y-3">
         {sections.map(({ name, items: sectionItems }, idx) => (

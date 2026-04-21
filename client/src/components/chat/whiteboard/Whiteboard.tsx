@@ -9,6 +9,124 @@ import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { Minus, Plus, Maximize, RotateCcw, Quote, Info, X } from "lucide-react";
 import { Kbd } from "@/components/ui/Kbd";
+import type { WhiteboardArtifact } from "../../../../../shared/schema";
+
+// Pick the native download format for each artifact kind. The user's spec:
+// - diagram/chart-ish artifacts (mindmap, workflow, flowchart, chart) export
+//   as PNG — their rendered visual IS the artifact
+// - spreadsheet exports as XLSX — tabular data round-trips losslessly
+// - document / checklist export as PDF — long-form text + task lists print
+//   cleanly as documents
+function nativeFormatForKind(kind: string): "png" | "pdf" | "xlsx" {
+  switch (kind) {
+    case "spreadsheet":
+      return "xlsx";
+    case "document":
+    case "checklist":
+      return "pdf";
+    default:
+      // chart, mindmap, workflow, flowchart, visualization, image-like
+      return "png";
+  }
+}
+
+function safeBaseName(a: WhiteboardArtifact): string {
+  const raw = (a.title || a.kind || a.id).toString();
+  return raw.replace(/[^a-z0-9_-]+/gi, "_").slice(0, 60) || a.id;
+}
+
+// Capture a single artifact card's rendered DOM as a PNG data URL. Uses
+// html-to-image with skipFonts to sidestep the v1.11 `font.trim()` crash
+// that fires when the page has external @font-face rules.
+async function captureArtifactPng(id: string): Promise<string | null> {
+  const el = document.querySelector<HTMLElement>(`[data-artifact-id="${id}"]`);
+  if (!el) return null;
+  const htmlToImage = await import("html-to-image");
+  try {
+    return await htmlToImage.toPng(el, {
+      pixelRatio: 2,
+      cacheBust: true,
+      skipFonts: true,
+      backgroundColor: "#ffffff",
+    });
+  } catch (err) {
+    console.warn(`[Whiteboard] Failed to capture artifact ${id}:`, err);
+    return null;
+  }
+}
+
+function dataUrlToBlob(dataUrl: string): Blob {
+  const [meta, b64] = dataUrl.split(",");
+  const mime = /data:([^;]+)/.exec(meta)?.[1] ?? "application/octet-stream";
+  const bin = atob(b64);
+  const arr = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  return new Blob([arr], { type: mime });
+}
+
+// Exports a single artifact via the appropriate native pipeline and returns
+// a named Blob ready for download or ZIP packaging.
+async function exportOneArtifact(
+  conversationId: string,
+  artifact: WhiteboardArtifact,
+): Promise<{ blob: Blob; filename: string } | null> {
+  const fmt = nativeFormatForKind(artifact.kind);
+  const base = safeBaseName(artifact);
+
+  if (fmt === "png") {
+    const dataUrl = await captureArtifactPng(artifact.id);
+    if (!dataUrl) return null;
+    return { blob: dataUrlToBlob(dataUrl), filename: `${base}.png` };
+  }
+
+  if (fmt === "xlsx") {
+    const res = await fetch(
+      `/api/conversations/${conversationId}/whiteboard/export`,
+      {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ format: "xlsx", artifactIds: [artifact.id] }),
+      },
+    );
+    if (!res.ok) throw new Error(`xlsx export failed: HTTP ${res.status}`);
+    return { blob: await res.blob(), filename: `${base}.xlsx` };
+  }
+
+  if (fmt === "pdf") {
+    // Server renders the artifact's markdown + KaTeX in headless Chrome and
+    // returns a real vector PDF (selectable text, sharp tables, proper
+    // math). No client-side image capture — would force rasterisation and
+    // kill the quality we ship on the per-artifact Document PDF button.
+    const res = await fetch(
+      `/api/conversations/${conversationId}/whiteboard/export`,
+      {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          format: "pdf",
+          artifactIds: [artifact.id],
+        }),
+      },
+    );
+    if (!res.ok) throw new Error(`pdf export failed: HTTP ${res.status}`);
+    return { blob: await res.blob(), filename: `${base}.pdf` };
+  }
+
+  return null;
+}
+
+function triggerDownload(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
 
 // Zoom bounds + step — kept here so the overlay UI and the TransformWrapper
 // stay in sync. Step is a multiplicative factor per press, not an additive
@@ -347,28 +465,69 @@ export function Whiteboard({ conversationId }: { conversationId: string }) {
     };
   }, [marquee, artifacts, setMany]);
 
-  // Bulk export selected as xlsx (no rendered images needed; backend supports subset by artifactIds).
+  // Export each selected artifact in its native format. Rules:
+  //   chart / mindmap / workflow / flowchart → PNG (client-captured)
+  //   spreadsheet                           → XLSX (server)
+  //   document / checklist                  → PDF  (server wraps PNG)
+  // Single artifact: direct download with the right extension.
+  // Multiple:        bundle into a ZIP so the browser only prompts once.
   const onExportSelected = async () => {
     if (selected.size === 0 || !conversationId) return;
+    const selectedArtifacts = artifacts.filter(a => selected.has(a.id));
+    if (selectedArtifacts.length === 0) return;
+
     setIsExporting(true);
     try {
-      const res = await fetch(`/api/conversations/${conversationId}/whiteboard/export`, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ format: "xlsx", artifactIds: [...selected] }),
+      const exports: Array<{ blob: Blob; filename: string }> = [];
+      const failures: string[] = [];
+      for (const a of selectedArtifacts) {
+        try {
+          const result = await exportOneArtifact(conversationId, a);
+          if (result) exports.push(result);
+          else failures.push(a.title || a.id);
+        } catch (err) {
+          console.warn(`[Whiteboard] Export failed for ${a.id}:`, err);
+          failures.push(a.title || a.id);
+        }
+      }
+
+      if (exports.length === 0) {
+        throw new Error("No artifacts could be exported");
+      }
+
+      if (exports.length === 1) {
+        triggerDownload(exports[0].blob, exports[0].filename);
+      } else {
+        const JSZip = (await import("jszip")).default;
+        const zip = new JSZip();
+        // Collisions on filename (two mindmaps sharing a title) get a numeric
+        // suffix so every entry in the zip stays unique.
+        const taken = new Set<string>();
+        for (const { blob, filename } of exports) {
+          let name = filename;
+          let i = 1;
+          while (taken.has(name)) {
+            const dot = filename.lastIndexOf(".");
+            name = dot > -1
+              ? `${filename.slice(0, dot)}-${i}${filename.slice(dot)}`
+              : `${filename}-${i}`;
+            i++;
+          }
+          taken.add(name);
+          zip.file(name, blob);
+        }
+        const zipBlob = await zip.generateAsync({ type: "blob" });
+        triggerDownload(zipBlob, `output-${conversationId.slice(0, 8)}.zip`);
+      }
+
+      const successMsg = failures.length === 0
+        ? `${exports.length} artifact${exports.length === 1 ? "" : "s"} exported.`
+        : `${exports.length} exported, ${failures.length} failed.`;
+      toast({
+        title: failures.length === 0 ? "Exported" : "Partial export",
+        description: successMsg,
+        variant: failures.length === 0 ? "default" : "destructive",
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `output-selected-${conversationId}.xlsx`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-      toast({ title: "Exported", description: `${selected.size} artifact${selected.size === 1 ? "" : "s"} exported.` });
     } catch (err) {
       toast({
         title: "Export failed",
@@ -568,17 +727,15 @@ export function Whiteboard({ conversationId }: { conversationId: string }) {
           <Button size="sm" onClick={() => setArtifacts([...selected])} data-testid="selection-ask">
             Ask about these
           </Button>
-          {selected.size >= 2 && (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={onExportSelected}
-              disabled={isExporting}
-              data-testid="selection-export"
-            >
-              {isExporting ? "Exporting…" : "Export selected"}
-            </Button>
-          )}
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={onExportSelected}
+            disabled={isExporting}
+            data-testid="selection-export"
+          >
+            {isExporting ? "Exporting…" : "Export selected"}
+          </Button>
           <Button size="sm" variant="ghost" onClick={clear} data-testid="selection-clear">Clear</Button>
         </div>
       )}

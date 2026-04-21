@@ -120,7 +120,7 @@ IMPORTANT PRINCIPLES:
 - Vague topic queries (e.g., "depreciation", "fixed assets") need scope clarification 
 - Specific questions with clear context can be answered directly
 - Casual messages (greetings, thanks) need no clarification
-- When a document is attached, assume context is in the document
+- When a document is attached in STANDARD chat mode, assume answers live in the document and only clarify if the user's question itself is ambiguous. In PROFESSIONAL modes (audit-plan, calculation, workflow, forensic-intelligence, deliverable-composer, deep-research, roundtable, checklist), an attachment is DATA — scope (period, jurisdiction, objective, materiality, framework, assertions, etc.) still needs to be established, so KEEP clarifying.
 
 OUTPUT FORMAT (JSON only, no markdown):
 {
@@ -199,6 +199,7 @@ class RequirementClarificationAIService {
     query: string,
     conversationHistory: Array<{ role: string; content: string }> = [],
     conversationId?: string,
+    ctx?: { chatMode?: string; hasAttachment?: boolean },
   ): Promise<ClarificationAnalysis> {
     // Cache key includes the known-facts fingerprint so a repeat query with
     // new facts (e.g. jurisdiction now known) doesn't hit a stale entry.
@@ -209,6 +210,10 @@ class RequirementClarificationAIService {
       knownFacts.hasPan ? 'pan' : '',
       knownFacts.hasTin ? 'tin' : '',
       knownFacts.entityType ?? '',
+      // Mode + attachment state affect the decision (audit-plan with CSV
+      // still needs scope clarified) so they must fork the cache key.
+      ctx?.chatMode ?? '',
+      ctx?.hasAttachment ? 'att' : '',
     ].filter(Boolean).join('|');
     const cacheKey = this.getCacheKey(query, conversationHistory) + '::' + factFingerprint;
     const cached = this.cache.get(cacheKey);
@@ -251,10 +256,49 @@ class RequirementClarificationAIService {
         }
       }
 
+      // Mode-aware scope hints. Professional modes produce high-stakes
+      // artifacts (audit plans, calculations, workflow maps) where the AI's
+      // assumptions silently become deliverables, so we nudge the classifier
+      // to scope aggressively even when the user has already attached a doc.
+      const MODE_SCOPE_HINTS: Record<string, string> = {
+        'audit-plan': `This is AUDIT-PLAN mode. An uploaded bank statement / ledger / trial balance gives you DATA, NOT SCOPE.
+Before producing an audit plan you MUST establish:
+  • Audit objective (statutory audit? internal audit? tax audit? forensic review? compliance check?)
+  • Reporting period (which FY / AY / quarter?)
+  • Entity type + jurisdiction (so you pick the right framework — Ind AS / IFRS / US GAAP / SA standards)
+  • Materiality threshold (percentage-of-revenue or absolute amount?)
+  • Which financial-statement assertions to prioritise (existence, completeness, valuation, cut-off, rights, presentation)
+  • Known risk areas the engagement partner has flagged
+If ANY of these are missing, set needsClarification=true with recommendedApproach="clarify".`,
+        'calculation': `This is CALCULATION mode. An uploaded sheet gives you DATA, NOT SCOPE.
+Before computing you MUST establish: jurisdiction + tax regime (old vs new), assessment year, entity type, and what specific quantity the user wants.`,
+        'workflow': `This is WORKFLOW mode. An uploaded file may illustrate the process but does NOT replace scope.
+You MUST establish: which process / compliance event, entity type, jurisdiction, starting point, desired end-state.`,
+        'forensic-intelligence': `This is FORENSIC mode. An uploaded ledger / bank statement gives you DATA, NOT SCOPE.
+You MUST establish: suspicion / allegation being investigated, period of interest, entities of interest, materiality, whether this is pre-litigation / regulatory / management-request.`,
+        'deliverable-composer': `This is DELIVERABLE-COMPOSER mode. An uploaded reference does NOT replace the deliverable's scope.
+You MUST establish: deliverable type (engagement letter / management representation / advisory memo / compliance report), addressee, tone (formal / advisory), deadline, and specific asks the deliverable must answer.`,
+        'deep-research': `This is DEEP-RESEARCH mode. Even with an attached document, establish: research question, jurisdiction, time horizon, depth (executive summary vs exhaustive memo), whether case law / standards / commentary are in scope.`,
+        'roundtable': `This is ROUNDTABLE mode. Establish: the proposition being debated, the functional areas whose panellists should weigh in (tax / audit / legal / finance / advisory), and the user's current stance (if any).`,
+        'checklist': `This is CHECKLIST mode. Establish: checklist purpose (compliance / audit / process / onboarding), entity / engagement context, jurisdiction, and level of granularity (high-level vs step-by-step).`,
+      };
+      const modeHint = ctx?.chatMode && MODE_SCOPE_HINTS[ctx.chatMode]
+        ? `\n${MODE_SCOPE_HINTS[ctx.chatMode]}\n`
+        : '';
+
+      // Attachment handling differs by mode. In standard chat, an attached
+      // doc usually IS the answer source, so skip interrogation. In
+      // professional modes the file is supplementary data — keep scoping.
+      const attachmentNote = ctx?.hasAttachment
+        ? (ctx.chatMode && MODE_SCOPE_HINTS[ctx.chatMode]
+            ? `\nThe user has attached a document. In ${ctx.chatMode} mode, an attachment provides INPUT DATA but does NOT answer the scoping questions above. Continue to clarify scope.\n`
+            : `\nThe user has attached a document — most of the answer likely lives in the document itself. Only ask for clarification if the USER'S QUESTION is itself ambiguous beyond what the document can resolve.\n`)
+        : '';
+
       const userMessage = `Analyze this query and determine if clarification is needed before providing professional advice:
 
 Query: "${query}"
-${historyContext}${memoryContext}${doNotAsk}
+${modeHint}${attachmentNote}${historyContext}${memoryContext}${doNotAsk}
 IMPORTANT:
 - If the conversation history OR the "ALREADY PROVIDED" list shows a fact, that fact IS known. Do NOT emit a missingContext item asking for it.
 - If the assistant has already asked clarifying questions and the user answered them, set needsClarification=false and recommendedApproach="answer".

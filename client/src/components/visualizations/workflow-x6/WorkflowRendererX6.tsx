@@ -362,23 +362,71 @@ export default function WorkflowRendererX6({
     async (format: 'png' | 'svg') => {
       const el = containerRef.current;
       if (!el) return;
+
+      // Fit before capture so the saved image shows the full graph and
+      // isn't clipped by whatever zoom/pan the user left it at.
       try {
-        // x6 Export plugin is incompatible with x6@2.19 (see import-block
-        // comment). Rehang export via html-to-image against the graph's
-        // container div — the same technique the old React Flow renderer
-        // + flowchart + mindmap artifacts use. skipFonts avoids the
-        // html-to-image@1.11 `font.trim()` crash.
+        graphRef.current?.zoomToFit({ padding: 24, maxScale: 1.6 });
+      } catch {
+        /* fit can throw on dispose race — ignore */
+      }
+      await new Promise<void>((r) => requestAnimationFrame(() => r()));
+
+      const rect = el.getBoundingClientRect();
+      const width = Math.max(1, Math.round(rect.width));
+      const height = Math.max(1, Math.round(rect.height));
+      // Honour the actual theme background so exports never come out with
+      // a transparent void that reads as black on dark viewers.
+      const bg =
+        typeof document !== 'undefined' &&
+        document.documentElement.classList.contains('dark')
+          ? '#0b1220'
+          : '#ffffff';
+
+      try {
         const htmlToImage = await import('html-to-image');
-        const dataUrl =
+        // toBlob is more reliable than toPng's giant data-URI (some
+        // browsers silently drop >2MB hrefs on <a download>).
+        const blob =
           format === 'png'
-            ? await htmlToImage.toPng(el, { pixelRatio: 2, cacheBust: true, skipFonts: true })
-            : await htmlToImage.toSvg(el, { cacheBust: true, skipFonts: true });
+            ? await htmlToImage.toBlob(el, {
+                pixelRatio: 2,
+                cacheBust: true,
+                skipFonts: true,
+                width,
+                height,
+                backgroundColor: bg,
+              })
+            : await (async () => {
+                const svg = await htmlToImage.toSvg(el, {
+                  cacheBust: true,
+                  skipFonts: true,
+                  width,
+                  height,
+                  backgroundColor: bg,
+                });
+                // toSvg returns a data URL; convert to a blob for the
+                // same anchor-download codepath as PNG.
+                const resp = await fetch(svg);
+                return await resp.blob();
+              })();
+
+        if (!blob) throw new Error('Capture produced no image data.');
+
+        const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
-        a.href = dataUrl;
+        a.href = url;
         a.download = `workflow-${Date.now()}.${format}`;
+        // Some Chromium builds require the anchor to be in the DOM for
+        // programmatic click() to kick off the download.
+        document.body.appendChild(a);
         a.click();
+        document.body.removeChild(a);
+        // Release the blob after the browser has latched onto the URL.
+        setTimeout(() => URL.revokeObjectURL(url), 2000);
         toast({ title: `Exported ${format.toUpperCase()}`, description: 'Downloaded.' });
       } catch (err: any) {
+        console.error('[WorkflowRendererX6] export failed', err);
         toast({
           title: 'Export failed',
           description: err?.message ?? String(err),

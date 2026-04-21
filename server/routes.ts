@@ -42,6 +42,7 @@ import { placeNext, type LayoutState } from "./services/whiteboard/autoLayout";
 import { buildBoardXlsxBuffer } from "./services/whiteboard/exportXlsx";
 import { buildBoardPptxBuffer } from "./services/whiteboard/exportPptx";
 import { buildBoardPdfBuffer } from "./services/whiteboard/exportPdf";
+import { buildDocumentPdfBuffer } from "./services/whiteboard/exportDocumentPdf";
 import { backfillIfNeeded } from "./services/whiteboard/backfill";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
@@ -1046,6 +1047,74 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
       return res.send(buf);
     }
     if (format === "pdf") {
+      // Single-artifact document / checklist gets the high-fidelity vector
+      // pipeline: markdown + KaTeX rendered in headless Chrome → real PDF
+      // with selectable text, proper tables, sharp math. The old PNG-wrap
+      // path (buildBoardPdfBuffer) is kept for multi-artifact boards and
+      // diagram-like kinds where rasterisation is fine.
+      if (subset.length === 1 && (subset[0].kind === "document" || subset[0].kind === "checklist")) {
+        const a = subset[0];
+        const payload = (a.payload ?? {}) as {
+          content?: string;
+          title?: string;
+          mode?: string;
+          // Checklist payload shape (different from document):
+          items?: Array<{ id: string; label: string; hint?: string; section?: string }>;
+        };
+        const title = payload.title ?? a.title ?? (a.kind === "checklist" ? "Checklist" : "Document");
+        const mode = payload.mode;
+
+        // Documents carry a plain markdown `content` string. Checklists carry
+        // a structured `items[]` array — synthesise markdown from it so the
+        // PDF pipeline has something to render. GFM task-list syntax
+        // (`- [ ]`, `- [x]`) renders as real checkboxes in the output.
+        let content: string;
+        if (a.kind === "checklist") {
+          const items = payload.items ?? [];
+          // Pull checked state from the persisted artifact state column.
+          const artifactState = (a.state ?? {}) as { checkedIds?: string[] };
+          const checkedIds = new Set(artifactState.checkedIds ?? []);
+
+          // Group by section, preserving first-seen order so the PDF matches
+          // what the user sees in the UI.
+          const order: string[] = [];
+          const bySection = new Map<string, typeof items>();
+          for (const it of items) {
+            const key = it.section ?? "";
+            if (!bySection.has(key)) {
+              bySection.set(key, []);
+              order.push(key);
+            }
+            bySection.get(key)!.push(it);
+          }
+
+          const parts: string[] = [];
+          for (const sectionName of order) {
+            if (sectionName) {
+              parts.push(`\n## ${sectionName}\n`);
+            }
+            for (const it of bySection.get(sectionName) ?? []) {
+              const mark = checkedIds.has(it.id) ? "x" : " ";
+              const hint = it.hint ? ` _${it.hint.replace(/[_*`]/g, "")}_` : "";
+              parts.push(`- [${mark}] ${it.label}${hint}`);
+            }
+          }
+          content = parts.join("\n");
+        } else {
+          content = payload.content ?? "";
+        }
+
+        try {
+          const buf = await buildDocumentPdfBuffer({ title, content, mode });
+          res.setHeader("Content-Type", "application/pdf");
+          res.setHeader("Content-Disposition", `attachment; filename="${title.replace(/[^a-z0-9_-]+/gi, "_")}.pdf"`);
+          return res.send(buf);
+        } catch (err) {
+          console.error("[whiteboard/export] document pdf failed, falling back to image-wrap:", err);
+          // Fall through to the renderedImages path below so the user still
+          // gets a PDF — lower fidelity, but never a hard failure.
+        }
+      }
       if (!renderedImages) return res.status(400).json({ error: "rendered_images_required" });
       const buf = await buildBoardPdfBuffer(subset, renderedImages);
       res.setHeader("Content-Type", "application/pdf");

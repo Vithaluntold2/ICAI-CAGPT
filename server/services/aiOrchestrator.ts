@@ -256,6 +256,32 @@ export class AIOrchestrator {
       }
     }
 
+    // Hoisted so it's in scope for both the clarifier guard and the skip-log
+    // below. Professional modes generate artifacts/plans/spreadsheets where
+    // wrong assumptions silently cost money — those modes must scope first
+    // even when the user has attached a document.
+    const PROFESSIONAL_MODES = new Set([
+      'calculation',
+      'audit-plan',
+      'workflow',
+      'deep-research',
+      'forensic-intelligence',
+      'deliverable-composer',
+      'roundtable',
+      'checklist',
+    ]);
+    const isProfessionalMode = chatMode ? PROFESSIONAL_MODES.has(chatMode) : false;
+
+    // Standard chat with an attachment bypasses the clarifier — the usual
+    // intent is "tell me what this document says", so the answer lives IN
+    // the doc and extra interrogation annoys the user. Professional modes
+    // are different: an uploaded CSV provides DATA, not scope. For an
+    // audit-plan over a bank statement we still need to know the reporting
+    // period, materiality threshold, entity jurisdiction, risk assertions
+    // to test, and framework (Ind AS / IFRS / US GAAP) — none of which live
+    // in the file.
+    const attachmentBypassesClarifier = !!options?.attachment && !isProfessionalMode;
+
     if (isCasualMessage) {
       // Skip all complex processing for casual messages
       console.log('[AIOrchestrator] Casual message detected - skipping clarification and research');
@@ -263,28 +289,14 @@ export class AIOrchestrator {
       console.log('[AIOrchestrator] Selection context present — skipping clarification analyzer, proceeding direct to answer');
     } else if (queryLooksLikeReference && hasArtifactsInConversation) {
       console.log('[AIOrchestrator] Ambiguous pronoun query with artifacts present — skipping clarifier, letting agent resolve from manifest');
-    } else if (!options?.attachment) {
-      // INTERVIEW-FIRST PATTERN: Use AI-driven async analysis for accurate context detection
-      // Check if the user has already answered interview questions in this conversation.
-      //
-      // Professional modes (calculation, audit-plan, workflow, deep-research,
-      // forensic-intelligence, deliverable-composer, roundtable) do per-turn
-      // topic re-scoping: we only skip the clarifier when the IMMEDIATELY
-      // PREVIOUS assistant turn was itself a clarification. This way, a new
-      // question in the same conversation re-triggers scoping. Standard chat
-      // keeps the old conversation-wide skip so casual follow-ups don't get
-      // interrogated.
-      const PROFESSIONAL_MODES = new Set([
-        'calculation',
-        'audit-plan',
-        'workflow',
-        'deep-research',
-        'forensic-intelligence',
-        'deliverable-composer',
-        'roundtable',
-        'checklist',
-      ]);
-      const isProfessionalMode = chatMode ? PROFESSIONAL_MODES.has(chatMode) : false;
+    } else if (attachmentBypassesClarifier) {
+      console.log(`[AIOrchestrator] Standard-mode attachment present — answer lives in doc, skipping clarifier`);
+    } else {
+      // INTERVIEW-FIRST PATTERN: AI-driven async analysis decides whether
+      // scope is clear enough to answer. Runs for:
+      //   - any query with no attachment
+      //   - professional-mode queries even WITH an attachment (the file is
+      //     data; scope still needs to be established)
 
       const alreadyInterviewed = isProfessionalMode
         ? this.wasLastAssistantTurnClarification(conversationHistory)
@@ -309,8 +321,9 @@ export class AIOrchestrator {
             query,
             conversationHistory,
             options?.conversationId,
+            { chatMode, hasAttachment: !!options?.attachment },
           );
-          console.log(`[AIOrchestrator] AI clarification analysis: needsClarification=${clarificationAnalysis.needsClarification}, approach=${clarificationAnalysis.recommendedApproach}, missing=${clarificationAnalysis.missingContext.length} items (mode=${chatMode}, professional=${isProfessionalMode})`);
+          console.log(`[AIOrchestrator] AI clarification analysis: needsClarification=${clarificationAnalysis.needsClarification}, approach=${clarificationAnalysis.recommendedApproach}, missing=${clarificationAnalysis.missingContext.length} items (mode=${chatMode}, professional=${isProfessionalMode}, attachment=${!!options?.attachment})`);
         } catch (err) {
           console.error('[AIOrchestrator] AI clarification analysis failed, falling back to heuristic:', err);
           clarificationAnalysis = requirementClarificationAIService.analyzeQuery(query, conversationHistory);

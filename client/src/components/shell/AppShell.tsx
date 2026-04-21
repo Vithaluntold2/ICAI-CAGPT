@@ -1,7 +1,7 @@
 // client/src/components/shell/AppShell.tsx
 import type { ReactNode } from 'react';
 import { IconRail } from './IconRail';
-import { ModeSidebar } from './ModeSidebar';
+import { ModeSidebar, type ThemeMode } from './ModeSidebar';
 import type { ChatMode } from '@/lib/mode-registry';
 
 interface SidebarConversation {
@@ -17,6 +17,8 @@ interface AppShellProps {
   userLabel?: string;
   userPlan?: string;
   userInitial?: string;
+  themeMode?: ThemeMode;
+  onChangeTheme?: (mode: ThemeMode) => void;
   onSelectMode: (mode: ChatMode) => void;
   onSelectConversation: (id: string) => void;
   onOpenSearch?: () => void;

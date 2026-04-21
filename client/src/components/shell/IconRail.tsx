@@ -1,6 +1,7 @@
 // client/src/components/shell/IconRail.tsx
-import { Grid3x3, Search, Plus, Settings, Sparkle } from 'lucide-react';
+import { Grid3x3, Search, Plus, Settings } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import logoImg from '@assets/icai-ca-india-logo.png';
 
 interface IconRailProps {
   activeView?: 'modes' | 'search';
@@ -19,8 +20,11 @@ export function IconRail({
 }: IconRailProps) {
   return (
     <nav className="w-[52px] bg-sidebar border-r border-border flex flex-col items-center py-3.5 gap-1.5 shrink-0">
-      <div className="w-8 h-8 rounded-lg bg-gradient-aurora flex items-center justify-center text-white mb-2.5">
-        <Sparkle className="w-[18px] h-[18px]" strokeWidth={2} />
+      <div
+        className="w-9 h-9 rounded-lg bg-white/95 dark:bg-white flex items-center justify-center mb-2.5 shadow-sm overflow-hidden"
+        title="CA-GPT"
+      >
+        <img src={logoImg} alt="CA-GPT" className="h-7 w-auto object-contain" />
       </div>
       <RailButton label="Modes" active={activeView === 'modes'} onClick={onOpenModes}>
         <Grid3x3 className="w-4 h-4" strokeWidth={1.75} />

@@ -1167,6 +1167,8 @@ export default function Chat() {
         userLabel={userLabel}
         userPlan={userPlan}
         userInitial={userInitial}
+        themeMode={themeMode}
+        onChangeTheme={applyTheme}
         onSelectMode={handleSelectMode}
         onSelectConversation={handleSelectConversation}
         onNewChat={handleNewChat}

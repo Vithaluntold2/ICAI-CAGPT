@@ -95,7 +95,7 @@ export function CommandMenu(props: CommandMenuProps) {
             ) : (
               <Minimize2 className="mr-2 w-4 h-4" strokeWidth={1.75} />
             )}
-            {currentView === 'chat' ? 'Open whiteboard' : 'Back to chat'}
+            {currentView === 'chat' ? 'Open output' : 'Back to chat'}
           </CommandItem>
           <CommandItem onSelect={run(props.onSignOut)}>
             <LogOut className="mr-2 w-4 h-4" strokeWidth={1.75} /> Sign out

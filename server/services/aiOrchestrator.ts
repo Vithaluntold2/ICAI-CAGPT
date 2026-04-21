@@ -820,7 +820,7 @@ export class AIOrchestrator {
         
         // If we have formatted outputs, prepend them to the AI response
         if (formattedOutputs.length > 0) {
-          const calculationSection = `\n\n---\n\n# 📊 Calculation Results\n\n${formattedOutputs.join('\n\n')}\n\n---\n\n# 💬 Professional Analysis\n\n`;
+          const calculationSection = `\n\n---\n\n# Calculation Results\n\n${formattedOutputs.join('\n\n')}\n\n---\n\n# Professional Analysis\n\n`;
           finalResponse = calculationSection + finalResponse;
           console.log('[Orchestrator] Professional calculation formatting applied');
         }
@@ -1673,7 +1673,7 @@ export class AIOrchestrator {
     // Add chat mode-specific instructions
     if (chatMode && chatMode !== 'standard') {
       context += `**PROFESSIONAL MODE SELECTED: ${chatMode.toUpperCase().replace(/-/g, ' ')}**\n\n`;
-      context += `🚨 CRITICAL: The user has selected ONLY the "${chatMode}" mode. DO NOT provide responses for other modes.\n`;
+      context += `CRITICAL: The user has selected ONLY the "${chatMode}" mode. DO NOT provide responses for other modes.\n`;
       context += `- Do NOT generate checklists unless the mode is "checklist"\n`;
       context += `- Do NOT generate workflows unless the mode is "workflow"\n`;
       context += `- Do NOT generate audit plans unless the mode is "audit-plan"\n`;
@@ -1846,7 +1846,7 @@ export class AIOrchestrator {
       context += `When presenting financial calculations, use this professional structure:\n\n`;
       context += `1. **Quick Summary Section**\n`;
       context += `   - Lead with key results in plain language\n`;
-      context += `   - Use emojis for visual clarity (📊 📈 💰 🎯)\n`;
+      context += `   - Do NOT use emojis. Use bold and markdown headers for emphasis.\n`;
       context += `   - Include benchmark comparisons where relevant\n\n`;
       context += `2. **Detailed Calculation Breakdown**\n`;
       context += `   - Present data in markdown tables\n`;
@@ -1857,7 +1857,7 @@ export class AIOrchestrator {
       context += `   - Compare with industry standards\n\n`;
       context += `4. **Trend Analysis** (when historical data exists)\n`;
       context += `   - Show period-over-period changes\n`;
-      context += `   - Use trend indicators: 📈 Improving | 📊 Stable | 📉 Declining\n\n`;
+      context += `   - Use trend indicators as plain text: "Improving" | "Stable" | "Declining"\n\n`;
       context += `5. **Professional Interpretation**\n`;
       context += `   - Explain what the numbers mean\n`;
       context += `   - Highlight key considerations\n`;

@@ -53,7 +53,7 @@ export function InlineArtifactCard({
           </ActionButton>
           {onOpenInWhiteboard && (
             <ActionButton
-              title="View in whiteboard"
+              title="View in output"
               onClick={() => onOpenInWhiteboard(artifact.id)}
             >
               <Maximize2 className="w-[13px] h-[13px]" strokeWidth={1.75} />

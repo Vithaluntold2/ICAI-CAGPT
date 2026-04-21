@@ -1344,7 +1344,7 @@ export default function Chat() {
               </>
             ) : (
               <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-                Start a conversation to populate your whiteboard.
+                Start a conversation to populate your output.
               </div>
             )}
           </div>

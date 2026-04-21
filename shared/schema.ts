@@ -269,6 +269,7 @@ export const conversations = pgTable("conversations", {
   title: text("title").notNull(),
   metadata: text("metadata"), // AI-generated subtitle describing conversation context
   preview: text("preview"),
+  chatMode: text("chat_mode").notNull().default('standard'), // mode conversation was created in ('standard', 'calculation', 'workflow', 'audit-plan', etc.)
   pinned: boolean("pinned").notNull().default(false),
   isShared: boolean("is_shared").notNull().default(false),
   sharedToken: varchar("shared_token").unique(),
@@ -723,6 +724,7 @@ export const insertConversationSchema = createInsertSchema(conversations).pick({
   title: true,
   metadata: true,
   preview: true,
+  chatMode: true,
 });
 
 // Schema for updating conversation feedback (user ratings/feedback)

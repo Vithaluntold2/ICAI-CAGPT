@@ -61,7 +61,7 @@ function ViewToggle({
               : 'text-muted-foreground hover:text-foreground'
           )}
         >
-          {v}
+          {v === 'whiteboard' ? 'Output' : 'Chat'}
         </button>
       ))}
     </div>

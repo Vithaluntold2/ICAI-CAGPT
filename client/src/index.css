@@ -1,4 +1,6 @@
 /* stylelint-disable at-rule-no-unknown */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import url('https://api.fontshare.com/v2/css?f[]=satoshi@400,500,600,700&display=swap');
 @import 'react-loading-skeleton/dist/skeleton.css';
 @tailwind base;
 @tailwind components;
@@ -7,6 +9,38 @@
 
 /* LIGHT MODE - CA BRAND COLOR SYSTEM */
 :root {
+  /* ============================================================
+     Aurora palette — shared across light + dark; usage differs.
+     ============================================================ */
+  --aurora-navy: 222 72% 14%;
+  --aurora-cyan: 190 88% 37%;
+  --aurora-teal: 172 78% 40%;
+  --aurora-teal-soft: 167 85% 65%;
+  --aurora-gold: 45 96% 75%;
+  --aurora-gold-deep: 48 96% 53%;
+  --aurora-amber-deep: 25 93% 37%;
+
+  --gradient-aurora: linear-gradient(135deg,
+    hsl(var(--aurora-navy)) 0%,
+    hsl(var(--aurora-cyan)) 55%,
+    hsl(var(--aurora-teal)) 100%);
+
+  /* Radii — shifted up one notch vs previous scale */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+  --radius-full: 999px;
+
+  /* Shadow + glow — earned depth */
+  --shadow-float: 0 8px 32px hsl(215 28% 17% / 0.08);
+  --shadow-popover: 0 4px 16px hsl(215 28% 17% / 0.08);
+  --shadow-dialog: 0 20px 60px hsl(215 28% 17% / 0.12);
+  --glow-teal: 0 0 10px hsl(var(--aurora-teal) / 0.2);
+
+  /* Border-strong for floating frames */
+  --border-strong: 215 20% 86%;
+
   --button-outline: rgba(0,0,0, .10);
   --badge-outline: rgba(0,0,0, .05);
   --opaque-button-border-intensity: -8;
@@ -70,10 +104,10 @@
   --chart-3: 202 100% 15%;           /* Deep Navy */
   --chart-4: 160 84% 39%;           /* Emerald */
   --chart-5: 38 92% 50%;            /* Gold */
-  --font-sans: 'Exo 2', Inter, sans-serif;
+  --font-sans: 'Inter', system-ui, -apple-system, 'Exo 2', sans-serif;
   --font-serif: Georgia, serif;
-  --font-mono: 'JetBrains Mono', monospace;
-  --font-display: 'Exo 2', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'JetBrains Mono', monospace;
+  --font-display: 'Satoshi', 'Inter', system-ui, sans-serif;
   --radius: .5rem;
   --shadow-2xs: 0px 2px 0px 0px hsl(0 0% 0% / 0.00);
   --shadow-xs: 0px 2px 0px 0px hsl(0 0% 0% / 0.00);
@@ -123,6 +157,13 @@
 }
 
 .dark {
+  /* Aurora — dark-mode shadow + glow overrides */
+  --shadow-float: 0 10px 40px hsl(0 0% 0% / 0.5), 0 0 32px hsl(var(--aurora-teal) / 0.08);
+  --shadow-popover: 0 4px 16px hsl(0 0% 0% / 0.4);
+  --shadow-dialog: 0 20px 60px hsl(0 0% 0% / 0.6);
+  --glow-teal: 0 0 16px hsl(var(--aurora-teal) / 0.35);
+  --border-strong: 220 10% 28%;
+
   /* TRUE DARK THEME — Linear/Notion-leaning.
    *
    * Five-layer surface stack (darkest → lightest):

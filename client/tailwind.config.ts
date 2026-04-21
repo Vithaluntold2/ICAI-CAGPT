@@ -6,9 +6,20 @@ export default {
   theme: {
     extend: {
       borderRadius: {
-        lg: ".5625rem", /* 9px */
-        md: ".375rem", /* 6px */
-        sm: ".1875rem", /* 3px */
+        sm: "var(--radius-sm)",
+        md: "var(--radius-md)",
+        lg: "var(--radius-lg)",
+        xl: "var(--radius-xl)",
+        full: "var(--radius-full)",
+      },
+      boxShadow: {
+        float: "var(--shadow-float)",
+        popover: "var(--shadow-popover)",
+        dialog: "var(--shadow-dialog)",
+        "glow-teal": "var(--glow-teal)",
+      },
+      backgroundImage: {
+        "gradient-aurora": "var(--gradient-aurora)",
       },
       colors: {
         // Flat / base colors (regular buttons)
@@ -91,11 +102,20 @@ export default {
           busy: "rgb(239 68 68)",
           offline: "rgb(156 163 175)",
         },
+        "aurora-navy": "hsl(var(--aurora-navy))",
+        "aurora-cyan": "hsl(var(--aurora-cyan))",
+        "aurora-teal": "hsl(var(--aurora-teal))",
+        "aurora-teal-soft": "hsl(var(--aurora-teal-soft))",
+        "aurora-gold": "hsl(var(--aurora-gold))",
+        "aurora-gold-deep": "hsl(var(--aurora-gold-deep))",
+        "aurora-amber-deep": "hsl(var(--aurora-amber-deep))",
+        "border-strong": "hsl(var(--border-strong))",
       },
       fontFamily: {
-        sans: ["var(--font-sans)"],
+        sans: ["Inter", "system-ui", "sans-serif"],
+        display: ["Satoshi", "Inter", "sans-serif"],
         serif: ["var(--font-serif)"],
-        mono: ["var(--font-mono)"],
+        mono: ["JetBrains Mono", "ui-monospace", "monospace"],
       },
       keyframes: {
         "accordion-down": {

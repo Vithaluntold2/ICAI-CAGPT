@@ -111,6 +111,16 @@ import { Composer } from "@/components/chat/Composer";
 import { ChatInputBox } from "@/components/chat/ChatInputBox";
 import { useConversationArtifacts } from "@/hooks/useConversationArtifacts";
 import type { ComposerSelection } from "@/components/chat/Composer";
+// New AppShell + chat primitives (UI rethink, Task 17).
+import { AppShell } from "@/components/shell/AppShell";
+import { CommandMenu } from "@/components/shell/CommandMenu";
+import { ChatBreadcrumb } from "@/components/chat/ChatBreadcrumb";
+import { MessageColumn } from "@/components/chat/MessageColumn";
+import { UserTurn } from "@/components/chat/UserTurn";
+import { AssistantTurn } from "@/components/chat/AssistantTurn";
+import { EmptyModeState } from "@/components/chat/EmptyModeState";
+import { ChatMessageBody } from "@/components/chat/ChatMessageBody";
+import { getMode, MODE_IDS, type ChatMode } from "@/lib/mode-registry";
 
 // Helper function to get appropriate status message based on chat mode
 const getStatusForMode = (mode: string): string => {
@@ -152,6 +162,7 @@ interface Conversation {
   title: string;
   metadata?: string | null;
   preview: string | null;
+  chatMode?: string | null;
   createdAt: string;
   updatedAt: string;
   profileId: string | null;
@@ -293,6 +304,14 @@ export default function Chat() {
   const { data: features } = useFeatureFlags();
   const whiteboardEnabled = !!features?.whiteboardV2;
   const [view, setView] = useChatView();
+  // Command palette (⌘K) state.
+  const [commandOpen, setCommandOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  // Composer text state — moved back into the page because the new
+  // primitive is controlled. Typing re-renders the page, but the heavy
+  // mindmap/flowchart blocks are memoised inside ChatMessageBody so
+  // they no longer thrash on each keystroke.
+  const [input, setInput] = useState('');
   // Artifacts for PIP chip lookup / rich message rendering when flag is ON.
   const { data: artifactsData } = useConversationArtifacts(activeConversation);
 
@@ -817,17 +836,27 @@ export default function Chat() {
   const handleSend = (text: string, selection?: ComposerSelection) => {
     if (!user) return;
     const trimmed = text.trim();
-    if (!trimmed) return;
+    if (!trimmed && !selectedFile) return;
+
+    const fileToSend = selectedFile;
+    const messageContent = trimmed
+      ? (fileToSend ? `${trimmed} [Attached: ${fileToSend.name}]` : trimmed)
+      : (fileToSend ? `[Attached: ${fileToSend.name}]` : '');
 
     const userMessage: Message = {
       id: Date.now().toString(),
       role: 'user',
-      content: trimmed,
+      content: messageContent,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     };
     setMessages(prev => [...prev, userMessage]);
-    sendMessageMutation.mutate({ content: trimmed, file: null, selection });
+    sendMessageMutation.mutate({ content: messageContent, file: fileToSend, selection });
+    setSelectedFile(null);
   };
+
+  // Hidden file input ref for composer attach.
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const openFilePicker = () => fileInputRef.current?.click();
 
   const handleNewChat = () => {
     setActiveConversation(undefined);
@@ -1087,710 +1116,257 @@ export default function Chat() {
   };
 
   const groupedConversations = groupConversationsByTime(filteredConversations);
+  // Sidebar grouping is kept for now but not rendered in the new shell; the
+  // new ModeSidebar will take ownership of grouping in a later task. The
+  // computation is cheap and has no side effects, so we leave it to avoid
+  // dead-code churn in this diff.
+  void groupedConversations;
+
+  // Map the legacy `chatMode` string into the new ChatMode union. Modes
+  // that exist only in the legacy list (e.g. `scenario-simulator`) fall
+  // back to `standard` for shell/primitive wiring. The actual send path
+  // still uses the legacy `chatMode` string verbatim, so backend behavior
+  // is unchanged.
+  const currentMode: ChatMode = (MODE_IDS as readonly string[]).includes(chatMode)
+    ? (chatMode as ChatMode)
+    : 'standard';
+
+  // Build sidebar conversation list for AppShell/ModeSidebar in the
+  // `{ id, title, mode }` shape it expects. Mode is unknown for most
+  // persisted conversations today — default to 'standard'.
+  const sidebarConversations = filteredConversations.map((c) => {
+    const m = c.chatMode ?? 'standard';
+    const mode: ChatMode = (MODE_IDS as readonly string[]).includes(m)
+      ? (m as ChatMode)
+      : 'standard';
+    return {
+      id: c.id,
+      title: c.title,
+      mode,
+      pinned: c.pinned,
+    };
+  });
+
+  const activeConversationTitle =
+    conversations.find((c) => c.id === activeConversation)?.title ?? 'New conversation';
+
+  // Map the legacy useChatView state (`'chat' | 'board'`) to the new
+  // primitive's expected shape (`'chat' | 'whiteboard'`).
+  const breadcrumbView: 'chat' | 'whiteboard' = view === 'board' ? 'whiteboard' : 'chat';
+  const setBreadcrumbView = (v: 'chat' | 'whiteboard') =>
+    setView(v === 'whiteboard' ? 'board' : 'chat');
+
+  const handleSelectMode = (mode: ChatMode) => {
+    setChatMode(mode);
+  };
+
+  const handleSelectConversation = (id: string) => {
+    setActiveConversation(id);
+    // Restore the conversation's original mode so the composer, prompt, and
+    // sidebar highlight stay in sync with what this chat was created in.
+    const conv = conversations.find((c) => c.id === id);
+    if (conv?.chatMode && conv.chatMode !== chatMode) {
+      setChatMode(conv.chatMode);
+    }
+  };
+
+  const handleStop = () => {
+    // Streaming cancel is not surfaced through chatApi today. Clear the
+    // local streaming flag so the UI stops showing the pulse; the in-
+    // flight SSE will complete on its own.
+    setIsStreaming(false);
+    setCagptStatus('');
+  };
+
+  const userLabel = user?.name || user?.email || 'User';
+  const userPlan = user?.subscriptionTier || 'Free';
+  const userInitial =
+    user?.name?.[0]?.toUpperCase() || user?.email?.[0]?.toUpperCase() || 'U';
 
   return (
-    <div className="h-screen flex flex-col bg-background">
-      {/* Top Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b bg-card">
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2">
-            <img src={cagptLogoUrl} alt="CA GPT" className="h-8 w-auto" data-testid="img-logo" />
-            <h1 className="text-xl font-bold bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent">
-              CA GPT
-            </h1>
-          </div>
-          <Separator orientation="vertical" className="h-6" />
-          <span className="text-sm text-muted-foreground">Accounting Superintelligence</span>
-        </div>
-
-        <div className="flex items-center gap-2">
-          {/* Whiteboard v2: chat/board view switcher (flag-gated) */}
-          {whiteboardEnabled && (
-            <ChatViewSwitcher value={view} onChange={setView} />
-          )}
-
-          {/* Chat mode indicator in header */}
-          <span className="text-xs font-medium text-muted-foreground bg-muted px-2.5 py-1 rounded-full">
-            {chatModes.find(m => m.id === chatMode)?.label || 'Standard Chat'}
-          </span>
-
-          {/* Theme mode switcher: Light / Dark / System */}
-          <div className="flex items-center bg-muted rounded-full p-0.5 gap-0.5">
-            <button
-              onClick={() => applyTheme('light')}
-              className={`p-1.5 rounded-full transition-colors ${
-                themeMode === 'light' ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'
-              }`}
-              title="Light mode"
-            >
-              <Sun className="h-4 w-4" />
-            </button>
-            <button
-              onClick={() => applyTheme('dark')}
-              className={`p-1.5 rounded-full transition-colors ${
-                themeMode === 'dark' ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'
-              }`}
-              title="Dark mode"
-            >
-              <Moon className="h-4 w-4" />
-            </button>
-            <button
-              onClick={() => applyTheme('system')}
-              className={`p-1.5 rounded-full transition-colors ${
-                themeMode === 'system' ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'
-              }`}
-              title="System mode"
-            >
-              <Monitor className="h-4 w-4" />
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Mode ribbon hidden for spacious layout — mode selector in input bar + menu */}
-
-      {/* 3-Pane Resizable Layout — sidebar always renders; middle+right pane content depends on whiteboardEnabled */}
-      <ResizablePanelGroup key={`layout-${rightPaneCollapsed}-${leftPaneCollapsed}-${whiteboardEnabled ? 'wb' : 'legacy'}`} direction="horizontal" className="flex-1">
-        {/* Left Pane: Sessions - Always render, control visibility with collapsedSize */}
-        <ResizablePanel 
-          defaultSize={leftPaneCollapsed ? 4 : 14} 
-          minSize={leftPaneCollapsed ? 4 : 12} 
-          maxSize={leftPaneCollapsed ? 4 : 25}
-          collapsible={true}
-          collapsedSize={4}
-        >
-          {!leftPaneCollapsed ? (
-            /* ====== EXPANDED SIDEBAR ====== */
-            <div className="flex flex-col h-full bg-muted/30 border-r">
-              {/* Top: Sidebar Toggle + New Chat */}
-              <div className="flex items-center gap-2 px-3 py-3">
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-9 w-9 shrink-0"
-                  onClick={() => setLeftPaneCollapsed(true)}
-                  title="Close sidebar"
-                  data-testid="button-collapse-left"
-                >
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg>
-                </Button>
-                <div className="flex-1" />
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-9 w-9 shrink-0"
-                  onClick={handleNewChat}
-                  title="New chat"
-                  data-testid="button-new-chat"
-                >
-                  <Plus className="h-5 w-5" />
-                </Button>
-              </div>
-
-              {/* Search */}
-              <div className="px-3 pb-2">
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    placeholder="Search chats..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="pl-9 h-9 text-sm bg-background/50"
-                    data-testid="input-search-conversations"
-                  />
-                </div>
-              </div>
-
-              {/* CA GPTs Section - Collapsible */}
-              <div className="px-2 pb-1">
-                <button
-                  onClick={() => setCagptGPTsExpanded(!cagptGPTsExpanded)}
-                  className="flex items-center gap-2 w-full px-2 py-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider hover:text-foreground transition-colors rounded-md"
-                >
-                  <ChevronRight className={`h-3 w-3 transition-transform ${cagptGPTsExpanded ? 'rotate-90' : ''}`} />
-                  CA GPTs
-                </button>
-                {cagptGPTsExpanded && (
-                  <div className="space-y-0.5 mt-1 overflow-y-auto" style={{ maxHeight: gptSectionHeight }}>
-                    {cagptGPTs.map((gpt) => {
-                      const Icon = gpt.icon;
-                      return (
-                        <button
-                          key={gpt.id}
-                          onClick={() => handleGPTSelect(gpt)}
-                          className={`flex items-center gap-2.5 w-full px-2 py-1.5 text-sm rounded-lg transition-colors ${
-                            chatMode === gpt.id
-                              ? 'bg-primary/10 text-foreground font-medium'
-                              : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
-                          }`}
-                          title={gpt.description}
-                        >
-                          <Icon className={`h-4 w-4 shrink-0 ${gpt.color}`} />
-                          <span className="truncate">{gpt.label}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-
-              {/* Draggable resize handle between GPTs and conversations */}
-              <div
-                className="mx-2 flex items-center justify-center cursor-row-resize group select-none"
-                style={{ height: 12 }}
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  gptDragRef.current = { startY: e.clientY, startHeight: gptSectionHeight };
-                  const onMouseMove = (ev: MouseEvent) => {
-                    if (!gptDragRef.current) return;
-                    const delta = ev.clientY - gptDragRef.current.startY;
-                    const newHeight = Math.max(80, Math.min(500, gptDragRef.current.startHeight + delta));
-                    setGptSectionHeight(newHeight);
-                  };
-                  const onMouseUp = () => {
-                    gptDragRef.current = null;
-                    document.removeEventListener('mousemove', onMouseMove);
-                    document.removeEventListener('mouseup', onMouseUp);
-                  };
-                  document.addEventListener('mousemove', onMouseMove);
-                  document.addEventListener('mouseup', onMouseUp);
-                }}
-                onTouchStart={(e) => {
-                  const touch = e.touches[0];
-                  gptDragRef.current = { startY: touch.clientY, startHeight: gptSectionHeight };
-                  const onTouchMove = (ev: TouchEvent) => {
-                    if (!gptDragRef.current) return;
-                    const delta = ev.touches[0].clientY - gptDragRef.current.startY;
-                    const newHeight = Math.max(80, Math.min(500, gptDragRef.current.startHeight + delta));
-                    setGptSectionHeight(newHeight);
-                  };
-                  const onTouchEnd = () => {
-                    gptDragRef.current = null;
-                    document.removeEventListener('touchmove', onTouchMove);
-                    document.removeEventListener('touchend', onTouchEnd);
-                  };
-                  document.addEventListener('touchmove', onTouchMove);
-                  document.addEventListener('touchend', onTouchEnd);
-                }}
-              >
-                <div className="w-8 h-1 rounded-full bg-border group-hover:bg-muted-foreground/40 transition-colors" />
-              </div>
-
-              {/* Conversation History */}
-              <ScrollArea className="flex-1">
-                <div className="px-2 py-2">
-                  {conversationsLoading ? (
-                    <ConversationListSkeleton count={8} />
-                  ) : conversationsError ? (
-                    <div className="text-center py-8 text-red-500 text-sm">
-                      Failed to load conversations
-                    </div>
-                  ) : groupedConversations.length === 0 ? (
-                    <div className="text-center py-8 text-muted-foreground text-sm">
-                      {searchTerm ? 'No conversations found' : 'No conversations yet'}
-                    </div>
-                  ) : (
-                    groupedConversations.map((group) => (
-                      <div key={group.label} className="mb-3">
-                        <h4 className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
-                          {group.label}
-                        </h4>
-                        <div className="space-y-0.5">
-                          {group.conversations.map((conv) => (
-                            <div
-                              key={conv.id}
-                              className={`group flex items-center rounded-lg transition-colors ${
-                                activeConversation === conv.id
-                                  ? 'bg-primary/10'
-                                  : 'hover:bg-muted/50'
-                              }`}
-                            >
-                              <button
-                                onClick={() => setActiveConversation(conv.id)}
-                                className="flex-1 text-left px-2 py-2 transition-colors overflow-hidden min-w-0"
-                                data-testid={`conversation-${conv.id}`}
-                              >
-                                <div className="flex items-center gap-2 min-w-0">
-                                  {conv.pinned && <Pin className="h-3 w-3 flex-shrink-0 text-primary" />}
-                                  <span className="text-sm truncate">{conv.title}</span>
-                                </div>
-                              </button>
-                              
-                              {/* Inline menu button */}
-                              <DropdownMenu>
-                                <DropdownMenuTrigger asChild>
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="h-6 w-6 flex-shrink-0 opacity-50 group-hover:opacity-100 transition-opacity mr-1"
-                                    data-testid={`button-conversation-menu-${conv.id}`}
-                                    onClick={(e) => e.stopPropagation()}
-                                  >
-                                    <MoreVertical className="h-3.5 w-3.5" />
-                                  </Button>
-                                </DropdownMenuTrigger>
-                                <DropdownMenuContent align="end">
-                                  <DropdownMenuItem 
-                                    onClick={() => pinMutation.mutate(conv.id)}
-                                    data-testid={`menu-item-pin-${conv.id}`}
-                                  >
-                                    {conv.pinned ? (
-                                      <><PinOff className="mr-2 h-4 w-4" /> Unpin</>
-                                    ) : (
-                                      <><Pin className="mr-2 h-4 w-4" /> Pin</>
-                                    )}
-                                  </DropdownMenuItem>
-                                  <DropdownMenuItem 
-                                    onClick={() => handleRename(conv.id, conv.title)}
-                                    data-testid={`menu-item-rename-${conv.id}`}
-                                  >
-                                    <Edit3 className="mr-2 h-4 w-4" />
-                                    Rename
-                                  </DropdownMenuItem>
-                                  <DropdownMenuItem 
-                                    onClick={() => handleFeedback(conv.id)}
-                                    data-testid={`menu-item-feedback-${conv.id}`}
-                                  >
-                                    <Star className="mr-2 h-4 w-4" />
-                                    Rate Conversation
-                                  </DropdownMenuItem>
-                                  {conv.isShared ? (
-                                    <DropdownMenuItem 
-                                      onClick={() => unshareMutation.mutate(conv.id)}
-                                      data-testid={`menu-item-unshare-${conv.id}`}
-                                    >
-                                      <Share2 className="mr-2 h-4 w-4" />
-                                      Unshare
-                                    </DropdownMenuItem>
-                                  ) : (
-                                    <DropdownMenuItem 
-                                      onClick={() => shareMutation.mutate(conv.id)}
-                                      data-testid={`menu-item-share-${conv.id}`}
-                                    >
-                                      <Share2 className="mr-2 h-4 w-4" />
-                                      Share
-                                    </DropdownMenuItem>
-                                  )}
-                                  <DropdownMenuSeparator />
-                                  <DropdownMenuItem 
-                                    onClick={() => deleteMutation.mutate(conv.id)}
-                                    className="text-destructive"
-                                    data-testid={`menu-item-delete-${conv.id}`}
-                                  >
-                                    <Trash2 className="mr-2 h-4 w-4" />
-                                    Delete
-                                  </DropdownMenuItem>
-                                </DropdownMenuContent>
-                              </DropdownMenu>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </ScrollArea>
-
-              {/* User Profile Row at Bottom */}
-              <div className="border-t px-2 py-2">
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <button className="flex items-center gap-3 w-full px-2 py-2 rounded-lg hover:bg-muted/60 transition-colors text-left">
-                      <div className="h-8 w-8 rounded-full bg-gradient-to-br from-primary to-primary/60 flex items-center justify-center text-primary-foreground text-sm font-semibold shrink-0">
-                        {user?.name?.[0]?.toUpperCase() || user?.email?.[0]?.toUpperCase() || 'U'}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium truncate">{user?.name || 'User'}</p>
-                        <p className="text-xs text-muted-foreground truncate">{user?.subscriptionTier || 'Free'}</p>
-                      </div>
-                      <MoreVertical className="h-4 w-4 text-muted-foreground shrink-0" />
-                    </button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" side="top" className="w-56">
-                    <DropdownMenuItem onClick={() => setLocation('/settings')} data-testid="menu-item-settings">
-                      <Settings className="mr-2 h-4 w-4" />
-                      Settings
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setLocation('/integrations')} data-testid="menu-item-integrations">
-                      <Building2 className="mr-2 h-4 w-4" />
-                      Integrations
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={toggleTheme}>
-                      {isDark ? <Sun className="mr-2 h-4 w-4" /> : <Moon className="mr-2 h-4 w-4" />}
-                      {isDark ? 'Light mode' : 'Dark mode'}
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem onClick={handleLogout} data-testid="menu-item-logout">
-                      <LogOut className="mr-2 h-4 w-4" />
-                      Log out
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
-            </div>
-          ) : (
-            /* ====== COLLAPSED SIDEBAR - Icon Rail ====== */
-            <div className="w-full h-full flex flex-col items-center border-r bg-muted/30 py-3">
-              {/* Top Icons */}
-              <div className="flex flex-col items-center gap-1">
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-9 w-9"
-                  onClick={() => setLeftPaneCollapsed(false)}
-                  title="Open sidebar"
-                  data-testid="button-expand-left"
-                >
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg>
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-9 w-9"
-                  onClick={handleNewChat}
-                  title="New chat"
-                  data-testid="button-new-chat-collapsed"
-                >
-                  <Plus className="h-5 w-5" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-9 w-9"
-                  onClick={() => { setLeftPaneCollapsed(false); setTimeout(() => document.querySelector<HTMLInputElement>('[data-testid="input-search-conversations"]')?.focus(), 100); }}
-                  title="Search chats"
-                >
-                  <Search className="h-5 w-5" />
-                </Button>
-              </div>
-
-              {/* Spacer */}
-              <div className="flex-1" />
-
-              {/* Bottom: User Avatar */}
-              <div className="flex flex-col items-center gap-1">
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <button
-                      className="h-9 w-9 rounded-full bg-gradient-to-br from-primary to-primary/60 flex items-center justify-center text-primary-foreground text-sm font-semibold hover:ring-2 hover:ring-primary/30 transition-all"
-                      title={user?.name || user?.email || 'User'}
-                    >
-                      {user?.name?.[0]?.toUpperCase() || user?.email?.[0]?.toUpperCase() || 'U'}
-                    </button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" side="right" className="w-56">
-                    <div className="px-3 py-2 border-b">
-                      <p className="text-sm font-medium">{user?.name || 'User'}</p>
-                      <p className="text-xs text-muted-foreground">{user?.email}</p>
-                    </div>
-                    <DropdownMenuItem onClick={() => setLocation('/settings')}>
-                      <Settings className="mr-2 h-4 w-4" />
-                      Settings
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setLocation('/integrations')}>
-                      <Building2 className="mr-2 h-4 w-4" />
-                      Integrations
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={toggleTheme}>
-                      {isDark ? <Sun className="mr-2 h-4 w-4" /> : <Moon className="mr-2 h-4 w-4" />}
-                      {isDark ? 'Light mode' : 'Dark mode'}
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem onClick={handleLogout}>
-                      <LogOut className="mr-2 h-4 w-4" />
-                      Log out
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
-            </div>
-          )}
-        </ResizablePanel>
-        <ResizableHandle withHandle />
-
-        {/* Middle Pane: Chat — board view swaps to Whiteboard+PIP; chat view keeps the familiar layout */}
-        <ResizablePanel defaultSize={whiteboardEnabled ? 86 : (rightPaneCollapsed ? 80 : 50)} minSize={30}>
-          {whiteboardEnabled && view === "board" ? (
-            <div className="relative h-full overflow-hidden">
-              {activeConversation ? (
-                <Whiteboard conversationId={activeConversation} />
-              ) : (
-                <div
-                  className="flex flex-col items-center justify-center h-full text-muted-foreground p-8 text-center"
-                  data-testid="whiteboard-no-conversation"
-                >
-                  <p className="text-sm">Start a conversation to populate your output.</p>
-                </div>
-              )}
-              <ChatPIP
-                messages={messages.map(m => ({ id: m.id, role: m.role, content: m.content }))}
-                byId={artifactsData?.byId ?? {}}
-                onSend={(text, selection) => handleSend(text, selection)}
-                isStreaming={isStreaming || sendMessageMutation.isPending}
-                conversationId={activeConversation}
-              />
-            </div>
-          ) : (
-          <div className="flex flex-col h-full">
-            <ScrollArea className="flex-1 p-4">
-              <div className="max-w-4xl mx-auto space-y-6">
-                {messages.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center h-full text-center">
-                    <h2 className="text-2xl font-medium text-foreground/80">What are you working on?</h2>
-                  </div>
-                ) : (
-                  <>
-                    {messages.map((message) => (
-                      <div
-                        key={message.id}
-                        className={`flex gap-3 ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
-                      >
-                        {message.role === 'assistant' && (
-                          <Avatar className="h-8 w-8 flex-shrink-0">
-                            <AvatarImage src={cagptLogoUrl} alt="CA GPT" />
-                            <AvatarFallback>L</AvatarFallback>
-                          </Avatar>
-                        )}
-                        <div
-                          className={`max-w-[80%] rounded-lg px-4 py-3 ${
-                            message.role === 'user'
-                              ? 'bg-primary text-primary-foreground'
-                              : ''
-                          }`}
-                        >
-                        {message.role === 'assistant' ? (
-                          <div className="space-y-4">
-                            <div className="prose prose-sm dark:prose-invert max-w-none">
-                              {/* Show loading indicator for streaming messages with empty content */}
-                              {message.content ? (
-                                <ReactMarkdown
-                                  remarkPlugins={[remarkMath, remarkGfm]}
-                                  rehypePlugins={[
-                                    rehypeRaw,
-                                    rehypeArtifactPlaceholder,
-                                    rehypeKatex,
-                                    // rehype-highlight wraps tokens in <span class="hljs-*">;
-                                    // ignoreMissing=true makes it a no-op for languages hljs
-                                    // doesn't ship (like 'mermaid' and 'mindmap'), so those still
-                                    // reach our custom <code> handler with plain-text children.
-                                    [rehypeHighlight, { ignoreMissing: true, detect: false }],
-                                  ]}
-                                  components={{
-                                    // Render fenced diagram blocks as actual diagrams instead of
-                                    // raw code. Currently handled languages: ```mermaid (flowcharts
-                                    // via FlowchartArtifact) and ```mindmap (JSON → MindmapArtifact).
-                                    // Other fenced blocks render with syntax highlighting + copy button.
-                                    code: ({ className, children, inline, ...props }: any) => {
-                                      // Inline `code` spans keep default rendering
-                                      if (inline || typeof className !== "string") {
-                                        return <code className={className} {...props}>{children}</code>;
-                                      }
-                                      if (/language-mermaid/.test(className)) {
-                                        return <FlowchartCodeBlock source={extractCodeText(children)} />;
-                                      }
-                                      if (/language-mindmap/.test(className)) {
-                                        return (
-                                          <MindmapCodeBlock
-                                            raw={extractCodeText(children)}
-                                            isStreaming={isStreaming}
-                                          />
-                                        );
-                                      }
-                                      // Fenced block with a recognised language → copy button + hljs styling
-                                      return <CodeBlockWithCopy className={className}>{children}</CodeBlockWithCopy>;
-                                    },
-                                    // Suppress the default <pre> wrapper — CodeBlockWithCopy brings its own.
-                                    pre: ({ children }: any) => <>{children}</>,
-                                    "artifact-placeholder": ({ id }: any) => {
-                                      const artifact = artifactsData?.byId?.[id];
-                                      if (!artifact) {
-                                        return (
-                                          <div className="text-xs text-muted-foreground italic my-2">
-                                            [artifact {id} loading…]
-                                          </div>
-                                        );
-                                      }
-                                      return (
-                                        <div className="my-4 not-prose">
-                                          <ArtifactRenderer
-                                            artifact={artifact}
-                                            conversationId={activeConversation}
-                                          />
-                                        </div>
-                                      );
-                                    },
-                                    table: ({ children, ...props }: any) => (
-                                      <div className="my-4 w-full overflow-auto">
-                                        <Table {...props}>
-                                          {children}
-                                        </Table>
-                                      </div>
-                                    ),
-                                    thead: ({ children, ...props }: any) => (
-                                      <TableHeader {...props}>
-                                        {children}
-                                      </TableHeader>
-                                    ),
-                                    tbody: ({ children, ...props }: any) => (
-                                      <TableBody {...props}>
-                                        {children}
-                                      </TableBody>
-                                    ),
-                                    tr: ({ children, ...props }: any) => (
-                                      <TableRow {...props}>
-                                        {children}
-                                      </TableRow>
-                                    ),
-                                    th: ({ children, ...props }: any) => (
-                                      <TableHead {...props}>
-                                        {children}
-                                      </TableHead>
-                                    ),
-                                    td: ({ children, ...props }: any) => (
-                                      <TableCell {...props}>
-                                        {children}
-                                      </TableCell>
-                                    ),
-                                  } as any}
-                                >
-                                  {normalizeMath(normalizeArtifactPlaceholders(message.content))}
-                                </ReactMarkdown>
-                              ) : (
-                                <div className="space-y-2">
-                                  {/* ChatGPT-style thinking block */}
-                                  {isStreaming && message.id.startsWith('streaming-') ? (
-                                    <ThinkingBlock
-                                      steps={thinkingSteps}
-                                      isActive={true}
-                                      currentStatus={cagptStatus || 'Thinking'}
-                                    />
-                                  ) : (
-                                    <span className="text-sm text-muted-foreground italic">Loading...</span>
-                                  )}
-                                </div>
-                              )}
-                            </div>
-                            
-                            {/* Show reasoning feedback for professional modes */}
-                            {message.metadata?.reasoningContent && (
-                              <ReasoningFeedback
-                                messageContent={message.metadata.reasoningContent}
-                                messageId={message.id}
-                                onSubmitFeedback={async (feedback) => {
-                                  // TODO: Send feedback to backend
-                                }}
-                              />
-                            )}
-                            
-                            {/* Quick message feedback (thumbs up/down) for continuous learning */}
-                            {message.content && !message.id.startsWith('streaming-') && !message.id.startsWith('uploading-') && activeConversation && (
-                              <div className="mt-2 pt-2 border-t border-border/50 flex items-center gap-1">
-                                <MessageFeedback 
-                                  messageId={message.id}
-                                  conversationId={activeConversation}
-                                />
-                                {/* Speaker icon - tap to hear this response (ChatGPT-style) */}
-                                <MessageSpeakButton 
-                                  text={message.content}
-                                  speakControls={speakControls}
-                                />
-                              </div>
-                            )}
-                          </div>
-                        ) : (
-                          <p className="text-sm whitespace-pre-wrap">{message.content}</p>
-                        )}
-                        <span className="text-xs opacity-70 mt-2 block">{message.timestamp}</span>
-                      </div>
-                      {message.role === 'user' && (
-                        <Avatar className="h-8 w-8 flex-shrink-0">
-                          <AvatarFallback>
-                            {user?.email?.[0]?.toUpperCase() || 'U'}
-                          </AvatarFallback>
-                        </Avatar>
-                      )}
-                    </div>
-                    ))}
-                    
-                    {/* Removed ChatMessageSkeleton - loading state is now shown inside the streaming message */}
-                    {/* Auto-scroll anchor */}
-                    <div ref={messagesEndRef} />
-                  </>
-                )}
-              </div>
-            </ScrollArea>
-
-            <div className="border-t p-3">
-              <ChatInputBox
-                selectedFile={selectedFile}
-                onRemoveFile={handleRemoveFile}
-                onFileSelect={handleFileSelect}
-                chatMode={chatMode}
-                onChatModeChange={setChatMode}
-                chatModes={chatModes}
-                onSend={handleSendMessage}
-                busy={sendMessageMutation.isPending}
-                uploadingFile={uploadingFile}
-                conversationId={activeConversation}
-                lastAssistantMessage={lastAssistantMessage}
-                onSpeakReady={setSpeakControls}
-              />
-            </div>
-          </div>
-          )}
-        </ResizablePanel>
-
-        {/* Right Pane: Output - only in legacy (flag-off) layout */}
-        {!whiteboardEnabled && !isOutputFullscreen && (
+    <div className="h-screen">
+      <AppShell
+        conversations={sidebarConversations}
+        activeMode={currentMode}
+        activeConversationId={activeConversation}
+        userLabel={userLabel}
+        userPlan={userPlan}
+        userInitial={userInitial}
+        themeMode={themeMode}
+        onChangeTheme={applyTheme}
+        sidebarOpen={sidebarOpen}
+        onToggleSidebar={() => setSidebarOpen((v) => !v)}
+        onSelectMode={handleSelectMode}
+        onSelectConversation={handleSelectConversation}
+        onRenameConversation={(id) => {
+          const conv = conversations.find((c) => c.id === id);
+          handleRename(id, conv?.title ?? '');
+        }}
+        onPinConversation={(id) => pinMutation.mutate(id)}
+        onDeleteConversation={(id) => {
+          if (window.confirm('Delete this conversation? This cannot be undone.')) {
+            deleteMutation.mutate(id);
+          }
+        }}
+        onNewChat={handleNewChat}
+        onOpenSettings={() => setLocation('/settings')}
+        onOpenSearch={() => setCommandOpen(true)}
+      >
+        <ChatBreadcrumb
+          mode={currentMode}
+          title={activeConversationTitle}
+          view={breadcrumbView}
+          onViewChange={setBreadcrumbView}
+        />
+        {breadcrumbView === 'chat' ? (
           <>
-            <ResizableHandle withHandle />
-            <ResizablePanel 
-              defaultSize={rightPaneCollapsed ? 3 : 30} 
-              minSize={rightPaneCollapsed ? 3 : 20} 
-              maxSize={rightPaneCollapsed ? 3 : 50}
-              collapsible={true}
-              collapsedSize={3}
-              key={`output-${rightPaneCollapsed}`}
-            >
-              {!rightPaneCollapsed ? (
-                <OutputPane
-                  content={outputContent}
-                  visualization={outputVisualization}
-                  contentType={outputContentType}
-                  title={
-                    chatMode === 'checklist' ? 'Professional Checklist' :
-                    chatMode === 'workflow' ? 'Process Workflow' :
-                    chatMode === 'audit-plan' ? 'Audit Plan' :
-                    chatMode === 'calculation' ? 'Financial Calculations' :
-                    'Output'
-                  }
-                  onCollapse={() => setRightPaneCollapsed(true)}
-                  isCollapsed={false}
-                  onFullscreenToggle={() => setIsOutputFullscreen(!isOutputFullscreen)}
-                  isFullscreen={false}
-                  conversationId={activeConversation}
-                  messageId={outputMessageId}
-                  hasExcel={hasExcel}
-                  spreadsheetData={spreadsheetData}
+            <MessageColumn>
+              {messages.length === 0 ? (
+                <EmptyModeState
+                  mode={currentMode}
+                  onPickStarter={(p) => setInput(p)}
                 />
               ) : (
-                <div className="w-full h-full flex items-center justify-center border-l bg-muted/30">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => setRightPaneCollapsed(false)}
-                    data-testid="button-expand-output-pane"
-                  >
-                    <Maximize2 className="h-4 w-4" />
-                  </Button>
-                </div>
+                messages.map((message) =>
+                  message.role === 'user' ? (
+                    <UserTurn key={message.id} timestamp={message.timestamp}>
+                      {message.content}
+                    </UserTurn>
+                  ) : (
+                    <AssistantTurn
+                      key={message.id}
+                      modeName={getMode(currentMode)?.label.toLowerCase()}
+                      timestamp={message.timestamp}
+                      streaming={
+                        isStreaming && message.id.startsWith('streaming-')
+                      }
+                      onStop={handleStop}
+                      reasoning={
+                        message.metadata?.reasoningContent ? (
+                          <ReasoningFeedback
+                            messageContent={message.metadata.reasoningContent}
+                            messageId={message.id}
+                          />
+                        ) : undefined
+                      }
+                      feedback={
+                        !message.id.startsWith('streaming-') &&
+                        !message.id.startsWith('uploading-') &&
+                        activeConversation ? (
+                          <MessageFeedback
+                            messageId={message.id}
+                            conversationId={activeConversation}
+                          />
+                        ) : undefined
+                      }
+                    >
+                      {message.content ? (
+                        <ChatMessageBody
+                          content={message.content}
+                          artifactsById={artifactsData?.byId}
+                          conversationId={activeConversation}
+                          isStreaming={isStreaming}
+                          onOpenInWhiteboard={() => setBreadcrumbView('whiteboard')}
+                        />
+                      ) : (
+                        <span className="text-sm text-muted-foreground italic">
+                          {cagptStatus || 'Thinking…'}
+                        </span>
+                      )}
+                    </AssistantTurn>
+                  )
+                )
               )}
-            </ResizablePanel>
+              <div ref={messagesEndRef} />
+            </MessageColumn>
+            <div className="absolute bottom-6 left-0 right-0 flex justify-center pointer-events-none">
+              <div className="pointer-events-auto w-[calc(100%-40px)] max-w-[720px]">
+                <Composer
+                  value={input}
+                  onChange={setInput}
+                  onSend={() => {
+                    const text = input;
+                    setInput('');
+                    handleSend(text);
+                  }}
+                  onAttach={openFilePicker}
+                  attachedFile={selectedFile ? { name: selectedFile.name, size: selectedFile.size } : null}
+                  onRemoveAttachment={handleRemoveFile}
+                  voiceSlot={
+                    <VoiceModeEnhanced
+                      onTranscription={(text) =>
+                        setInput((prev) => (prev ? `${prev} ${text}` : text))
+                      }
+                      onSendMessage={() => {
+                        const text = input;
+                        setInput('');
+                        handleSend(text);
+                      }}
+                      onSpeakReady={setSpeakControls}
+                      lastAssistantMessage={lastAssistantMessage}
+                      conversationId={activeConversation}
+                      inputMessage={input}
+                    />
+                  }
+                  placeholder={`Ask CA-GPT anything in ${
+                    getMode(currentMode)?.label ?? 'Standard'
+                  } mode…`}
+                  disabled={isStreaming || sendMessageMutation.isPending}
+                />
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  className="hidden"
+                  accept=".pdf,.jpg,.jpeg,.png,.tif,.tiff,.xlsx,.xls,.csv,.txt"
+                  onChange={(e) => {
+                    handleFileSelect(e);
+                    // Reset input so picking the same file twice re-fires onChange.
+                    if (e.target) e.target.value = '';
+                  }}
+                />
+              </div>
+            </div>
           </>
+        ) : (
+          <div className="flex-1 min-h-0">
+            {activeConversation ? (
+              <>
+                <Whiteboard conversationId={activeConversation} />
+                {whiteboardEnabled && (
+                  <ChatPIP
+                    messages={messages}
+                    byId={artifactsData?.byId ?? {}}
+                    onSend={handleSend}
+                    isStreaming={isStreaming}
+                    conversationId={activeConversation}
+                  />
+                )}
+              </>
+            ) : (
+              <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+                Start a conversation to populate your output.
+              </div>
+            )}
+          </div>
         )}
-      </ResizablePanelGroup>
 
-      {/* Rename Dialog */}
+        <CommandMenu
+          open={commandOpen}
+          onOpenChange={setCommandOpen}
+          recentConversations={sidebarConversations}
+          currentView={breadcrumbView}
+          onSelectMode={handleSelectMode}
+          onSelectConversation={handleSelectConversation}
+          onNewChat={handleNewChat}
+          onToggleTheme={toggleTheme}
+          onToggleView={() =>
+            setBreadcrumbView(breadcrumbView === 'chat' ? 'whiteboard' : 'chat')
+          }
+          onSignOut={handleLogout}
+        />
+      </AppShell>
+
+      {/* Rename Dialog — preserved from legacy layout */}
       <Dialog open={renameDialogOpen} onOpenChange={setRenameDialogOpen}>
         <DialogContent data-testid="dialog-rename-conversation">
           <DialogHeader>
@@ -1830,60 +1406,16 @@ export default function Chat() {
         </DialogContent>
       </Dialog>
 
-      {/* Conversation Feedback Dialog */}
+      {/* Conversation Feedback Dialog — preserved from legacy layout */}
       <ConversationFeedback
-        conversation={conversationsData?.conversations.find((c: Conversation) => c.id === feedbackConvId) || null}
+        conversation={
+          conversationsData?.conversations.find(
+            (c: Conversation) => c.id === feedbackConvId
+          ) || null
+        }
         open={feedbackDialogOpen}
         onOpenChange={setFeedbackDialogOpen}
       />
-
-      {/* Chat Overlay for Fullscreen Mode */}
-      {isOutputFullscreen && showChatOverlay && (
-        <ChatOverlay
-          isVisible={true}
-          onToggle={() => setShowChatOverlay(false)}
-          onSendMessage={handleSendMessage}
-          messages={messages
-            .filter(m => m.role === 'user' || (m.role === 'assistant' && !m.metadata?.showInOutputPane))
-            .slice(-5) // Show last 5 messages
-            .map(m => ({
-              id: m.id,
-              text: m.content,
-              isUser: m.role === 'user',
-              timestamp: new Date(m.timestamp)
-            }))
-          }
-          isLoading={isStreaming || sendMessageMutation.isPending}
-        />
-      )}
-      
-      {/* Fullscreen Output Pane */}
-      {isOutputFullscreen && (
-        <OutputPane
-          content={outputContent}
-          visualization={outputVisualization}
-          contentType={outputContentType}
-          title={
-            chatMode === 'checklist' ? 'Professional Checklist' :
-            chatMode === 'workflow' ? 'Process Workflow' :
-            chatMode === 'audit-plan' ? 'Audit Plan' :
-            chatMode === 'calculation' ? 'Financial Calculations' :
-            'Output'
-          }
-          onCollapse={() => setRightPaneCollapsed(true)}
-          isCollapsed={false}
-          onFullscreenToggle={() => {
-            setIsOutputFullscreen(!isOutputFullscreen);
-            setShowChatOverlay(false);
-          }}
-          isFullscreen={true}
-          onChatToggle={() => setShowChatOverlay(true)}
-          conversationId={activeConversation}
-          messageId={outputMessageId}
-          hasExcel={hasExcel}
-          spreadsheetData={spreadsheetData}
-        />
-      )}
     </div>
   );
 }

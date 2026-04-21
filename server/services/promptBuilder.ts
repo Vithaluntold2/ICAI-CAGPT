@@ -41,6 +41,9 @@ export class PromptBuilder {
     // Formatting directives that apply to every response, regardless of mode.
     systemPrompt +=
       `\n\nFORMATTING RULES:\n` +
+      `- NO EMOJIS anywhere in the response — not in headers, not in bullets, not in prose, not in section titles. ` +
+      `This is a professional tool for Chartered Accountants; emojis look unprofessional and cluttered. ` +
+      `Use markdown headers, bold, and bullet points for structure instead.\n` +
       `- Write every mathematical expression, formula, ratio, equation, or algebraic identity using LaTeX ` +
       `delimited by $...$ (inline) or $$...$$ (display). This applies EVERYWHERE — in prose, in bullet ` +
       `points, AND inside markdown table cells. Do NOT emit plain-text math like "(Cost - Scrap)/Life"; ` +
@@ -199,13 +202,13 @@ export class PromptBuilder {
       `CRITICAL — DO NOT DOUBLE-STATE RESULTS:\n` +
       `• After writing a formula, DO NOT write your own numeric answer on a new line. The engine ` +
       `appends the computed value next to the formula automatically — if you also write ` +
-      `"➡️ Result: ₹18,11,900" or "≈ 13,382.26" or "Answer: Rs. X", the user sees TWO numbers ` +
+      `" Result: ₹18,11,900" or "≈ 13,382.26" or "Answer: Rs. X", the user sees TWO numbers ` +
       `and they may disagree (your approximation vs the engine's exact value).\n` +
       `• Your job: write the formula and optionally explain what the RESULT MEANS in words ` +
       `("which means the savings will roughly double"), but never state the numeric result ` +
       `itself as a separate line.\n` +
       `• GOOD:   \`=FV(0.075/4, 32, 0, -1000000)\` — this is your maturity value under quarterly compounding.\n` +
-      `• BAD:    \`=FV(0.075/4, 32, 0, -1000000)\`\\n          ➡️ Result: ₹18,11,900  ← forbidden duplicate\n` +
+      `• BAD:    \`=FV(0.075/4, 32, 0, -1000000)\`\\n           Result: ₹18,11,900  ← forbidden duplicate\n` +
       `• BAD:    The answer is approximately ₹18,11,900.  ← forbidden prose number\n` +
       `Trust the engine. One formula, one number, shown automatically.`;
 
@@ -296,7 +299,7 @@ export class PromptBuilder {
       
       // Add India-specific current tax amendments when India is the jurisdiction
       if (classification.jurisdiction.includes('india')) {
-        instructions += `## 🇮🇳 IMPORTANT: Current Indian Tax Amendments (FY 2024-25)\n\n`;
+        instructions += `## IMPORTANT: Current Indian Tax Amendments (FY 2024-25)\n\n`;
         instructions += `**You MUST use these UPDATED provisions for India. Do NOT use outdated limits:**\n\n`;
         
         instructions += `### Income Tax Act Amendments (Budget 2023 & 2024)\n`;
@@ -406,9 +409,9 @@ export class PromptBuilder {
     
     switch (chatMode) {
       case 'deep-research':
-        modeInstructions += `# 🔬 DEEP RESEARCH MODE - COMPREHENSIVE EXPERT ANALYSIS\n\n`;
+        modeInstructions += `# DEEP RESEARCH MODE - COMPREHENSIVE EXPERT ANALYSIS\n\n`;
         
-        modeInstructions += `## 🚨 CRITICAL INSTRUCTIONS\n\n`;
+        modeInstructions += `## CRITICAL INSTRUCTIONS\n\n`;
         modeInstructions += `**DO NOT ASK CLARIFYING QUESTIONS.** Provide the research directly.\n`;
         modeInstructions += `If context is missing (jurisdiction, entity type, tax year), handle it by:\n`;
         modeInstructions += `1. **State your assumptions clearly** at the beginning\n`;
@@ -421,7 +424,7 @@ export class PromptBuilder {
         
         modeInstructions += `---\n\n`;
         
-        modeInstructions += `## ⚠️ ACCURACY REQUIREMENTS\n\n`;
+        modeInstructions += `## ACCURACY REQUIREMENTS\n\n`;
         modeInstructions += `1. **ONLY cite sources that actually exist** - Do NOT invent case names, IRS rulings, or publication numbers\n`;
         modeInstructions += `2. **Use correct citation format** for each source type:\n`;
         modeInstructions += `   - IRC sections: "IRC § 1031(a)(1)"\n`;
@@ -436,28 +439,28 @@ export class PromptBuilder {
         
         modeInstructions += `---\n\n`;
         
-        modeInstructions += `## 📋 REQUIRED REPORT STRUCTURE\n\n`;
+        modeInstructions += `## REQUIRED REPORT STRUCTURE\n\n`;
         
-        modeInstructions += `### 📌 Executive Summary\n`;
+        modeInstructions += `### Executive Summary\n`;
         modeInstructions += `Start with a clear, actionable summary:\n`;
         modeInstructions += `- **Key Finding**: One-sentence answer to the main question\n`;
         modeInstructions += `- **Critical Points**: 3-5 bullet points of main conclusions\n`;
         modeInstructions += `- **Assumptions Made**: List any assumptions due to missing context\n`;
         modeInstructions += `- **Risk Level**: Low/Medium/High with justification\n\n`;
         
-        modeInstructions += `### 📚 Background & Regulatory Framework\n`;
+        modeInstructions += `### Background & Regulatory Framework\n`;
         modeInstructions += `- Historical development of the relevant rules\n`;
         modeInstructions += `- Current regulatory landscape (as of current date)\n`;
         modeInstructions += `- Recent changes (last 2-3 years) and pending legislation\n`;
         modeInstructions += `- Enforcement trends and regulatory focus areas\n\n`;
         
-        modeInstructions += `### ⚖️ Detailed Legal/Regulatory Analysis\n`;
+        modeInstructions += `### Detailed Legal/Regulatory Analysis\n`;
         modeInstructions += `For each major point, use this structure:\n\n`;
-        modeInstructions += `> **📜 Rule**: State the legal rule with full citation\n`;
+        modeInstructions += `> **Rule**: State the legal rule with full citation\n`;
         modeInstructions += `> \n`;
-        modeInstructions += `> **🔍 Analysis**: Explain how it applies, with examples\n`;
+        modeInstructions += `> **Analysis**: Explain how it applies, with examples\n`;
         modeInstructions += `> \n`;
-        modeInstructions += `> **✅ Conclusion**: Practical implication and recommendation\n\n`;
+        modeInstructions += `> **Conclusion**: Practical implication and recommendation\n\n`;
         
         modeInstructions += `Include:\n`;
         modeInstructions += `- Primary statutory authority with section citations\n`;
@@ -465,23 +468,23 @@ export class PromptBuilder {
         modeInstructions += `- Relevant case law and administrative guidance\n`;
         modeInstructions += `- International/cross-border considerations if relevant\n\n`;
         
-        modeInstructions += `### 🌍 Jurisdiction Comparison (if applicable)\n`;
+        modeInstructions += `### Jurisdiction Comparison (if applicable)\n`;
         modeInstructions += `| Jurisdiction | Treatment | Key Differences | Citation |\n`;
         modeInstructions += `|--------------|-----------|-----------------|----------|\n`;
         modeInstructions += `| Compare how different jurisdictions handle this issue |\n\n`;
         
-        modeInstructions += `### 💰 Financial Impact Analysis\n`;
+        modeInstructions += `### Financial Impact Analysis\n`;
         modeInstructions += `Provide concrete numerical examples:\n`;
         modeInstructions += `| Scenario | Description | Tax Impact | Net Result |\n`;
         modeInstructions += `|----------|-------------|------------|------------|\n`;
         modeInstructions += `| Show actual numbers and calculations |\n\n`;
         
-        modeInstructions += `### ⚠️ Risk Assessment\n`;
+        modeInstructions += `### Risk Assessment\n`;
         modeInstructions += `| Risk Factor | Likelihood | Severity | Mitigation Strategy |\n`;
         modeInstructions += `|-------------|------------|----------|---------------------|\n`;
         modeInstructions += `| Comprehensive risk analysis |\n\n`;
         
-        modeInstructions += `### 🎯 Recommendations & Action Items\n`;
+        modeInstructions += `### Recommendations & Action Items\n`;
         modeInstructions += `Provide clear, prioritized action steps:\n\n`;
         modeInstructions += `**Immediate Actions (Next 30 Days)**\n`;
         modeInstructions += `1. First priority item\n`;
@@ -491,7 +494,7 @@ export class PromptBuilder {
         modeInstructions += `**Long-term Strategy**\n`;
         modeInstructions += `1. Ongoing considerations\n\n`;
         
-        modeInstructions += `### 📖 References & Citations\n`;
+        modeInstructions += `### References & Citations\n`;
         modeInstructions += `List all sources cited:\n`;
         modeInstructions += `- **Statutory**: IRC sections, state codes\n`;
         modeInstructions += `- **Regulatory**: Treasury Regs, state regs\n`;
@@ -502,7 +505,7 @@ export class PromptBuilder {
         
         modeInstructions += `---\n\n`;
         
-        modeInstructions += `## 🎨 FORMATTING REQUIREMENTS\n`;
+        modeInstructions += `## FORMATTING REQUIREMENTS\n`;
         modeInstructions += `- Use markdown headers (##, ###) for sections\n`;
         modeInstructions += `- Use **tables** for comparisons and data\n`;
         modeInstructions += `- Use **blockquotes** (>) for statutory text and legal rules\n`;
@@ -510,7 +513,7 @@ export class PromptBuilder {
         modeInstructions += `- Use bullet points for lists\n`;
         modeInstructions += `- Use numbered lists for sequential steps\n`;
         modeInstructions += `- Use horizontal rules (---) between major sections\n`;
-        modeInstructions += `- Use emojis sparingly for section headers only\n\n`;
+        modeInstructions += `- Do NOT use emojis anywhere — headers, bullets, or prose.\n\n`;
         
         modeInstructions += `**START THE RESPONSE IMMEDIATELY WITH THE EXECUTIVE SUMMARY. DO NOT ASK QUESTIONS.**\n\n`;
         break;
@@ -522,13 +525,13 @@ export class PromptBuilder {
         break;
         
       case 'checklist':
-        modeInstructions += `# ✅ CHECKLIST MODE — INTERACTIVE MARKDOWN CHECKBOXES\n\n`;
+        modeInstructions += `# CHECKLIST MODE — INTERACTIVE MARKDOWN CHECKBOXES\n\n`;
 
-        modeInstructions += `## 🚨 OUTPUT FORMAT — READ CAREFULLY, NO DEVIATION\n\n`;
+        modeInstructions += `## OUTPUT FORMAT — READ CAREFULLY, NO DEVIATION\n\n`;
         modeInstructions += `You MUST return EXACTLY two blocks, in this order, wrapped in the tags shown:\n\n`;
         modeInstructions += `\`\`\`\n<DELIVERABLE>\n# <Short Checklist Title>\n\n## <Section Name>\n\n- [ ] <Imperative action — verb first>\n    <Optional one-line hint under the item>\n- [ ] <Next action>\n\n## <Next Section>\n\n- [ ] <Another action>\n- [x] <Already-done example>\n</DELIVERABLE>\n\n<REASONING>\n[400+ words explaining why each section and item matters.]\n</REASONING>\n\`\`\`\n\n`;
 
-        modeInstructions += `## 🔒 MANDATORY DELIVERABLE RULES — NOT NEGOTIABLE\n\n`;
+        modeInstructions += `## MANDATORY DELIVERABLE RULES — NOT NEGOTIABLE\n\n`;
         modeInstructions += `1. The DELIVERABLE MUST use GFM markdown checkbox syntax. Every actionable line MUST start with \`- [ ]\` (unchecked) or \`- [x]\` (pre-checked). The server parser ONLY detects those two markers. Tables, numbered lists, plain bullets, "Step 1:" headings, or prose paragraphs WILL NOT become a checklist artifact.\n`;
         modeInstructions += `2. Group related items under \`## Section Name\` headings. The first \`#\` line becomes the checklist title; every subsequent \`##\` becomes a section grouping on the board.\n`;
         modeInstructions += `3. If an item has a short clarifier (deadline, form number, threshold), put it on the next line indented two spaces — the parser picks it up as the item's hint.\n`;
@@ -541,7 +544,7 @@ export class PromptBuilder {
         modeInstructions += `7. Example shape for "ITR preparation for salaried individual, FY 2025-26":\n`;
         modeInstructions += `\`\`\`\n<DELIVERABLE>\n# ITR Preparation — Salaried Individual (FY 2025-26)\n\n## Identity & Credentials\n\n- [ ] PAN card — verify details match\n- [ ] Aadhaar linked to PAN\n- [ ] Income-tax portal login working\n- [ ] Bank account pre-validated on portal for refund\n\n## Income Documents\n\n- [ ] Form 16 Part A from employer\n- [ ] Form 16 Part B from employer\n- [ ] All monthly salary slips\n- [ ] Bank statements for FY 2025-26 (all accounts)\n- [ ] FD / RD interest certificates\n\n## Tax Credit Verification\n\n- [ ] Form 26AS downloaded and reconciled with Form 16\n- [ ] AIS (Annual Information Statement) reviewed\n- [ ] TIS reviewed for mismatches\n\n## Regime & Deductions (if Old Regime)\n\n- [ ] Section 80C investment proofs (LIC, PPF, ELSS)\n- [ ] Section 80D health insurance receipts\n- [ ] HRA rent receipts & landlord PAN (if rent > ₹1 L/yr)\n- [ ] Home-loan interest certificate (Section 24b)\n- [ ] Donation receipts with PAN (Section 80G)\n\n## Capital Gains (if applicable)\n\n- [ ] Equity MF capital gain statement\n- [ ] Broker P&L for share trading\n- [ ] Crypto / VDA transaction report\n\n## Bank & Asset Disclosures\n\n- [ ] All bank accounts (incl. dormant) — account number + IFSC\n- [ ] Disclose foreign assets / income if applicable (triggers ITR-2)\n\n## Final Pre-Filing Checks\n\n- [ ] Correct ITR form chosen (ITR-1 vs ITR-2)\n- [ ] Residential status confirmed (Section 6)\n- [ ] Old vs New regime comparison done\n- [ ] Self-assessment tax paid if liability > 0\n</DELIVERABLE>\n\n<REASONING>\n[400+ words on why each section matters, common missed items, and the reconciliation mindset.]\n</REASONING>\n\`\`\`\n\n`;
 
-        modeInstructions += `## ❌ DO NOT\n\n`;
+        modeInstructions += `## DO NOT\n\n`;
         modeInstructions += `- Do NOT output a "Step 1:" / "Step 2:" flow — that's workflow mode, not checklist.\n`;
         modeInstructions += `- Do NOT output a markdown table of items (| col | col |) — those are not interactive checkboxes.\n`;
         modeInstructions += `- Do NOT output numbered lists like "1. item\\n2. item" — must be \`- [ ]\`.\n`;
@@ -550,13 +553,13 @@ export class PromptBuilder {
         break;
         
       case 'workflow':
-        modeInstructions += `# 🔀 WORKFLOW MODE — STRUCTURED PROCESS DIAGRAM\n\n`;
+        modeInstructions += `# WORKFLOW MODE — STRUCTURED PROCESS DIAGRAM\n\n`;
 
-        modeInstructions += `## 🚨 OUTPUT FORMAT — READ CAREFULLY, NO DEVIATION\n\n`;
+        modeInstructions += `## OUTPUT FORMAT — READ CAREFULLY, NO DEVIATION\n\n`;
         modeInstructions += `You MUST return EXACTLY two blocks, in this order, wrapped in the tags shown:\n\n`;
         modeInstructions += `\`\`\`\n<DELIVERABLE>\nStart: [short label]\nStep 1: [Imperative action — verb first]\n- [Substep / sub-action]\n- [Document or form involved]\n- [Approver / system / role]\nStep 2: Decision — [Yes/No question, e.g. "Are there any errors?"]\n- If Yes: go to Step 4\n- If No: go to Step 3\nStep 3: [Next action]\n...\nEnd: [Terminal label, e.g. "Return Filed"]\n</DELIVERABLE>\n\n<REASONING>\n[600+ words explaining rationale, controls, best practices.]\n</REASONING>\n\`\`\`\n\n`;
 
-        modeInstructions += `## 🔒 MANDATORY DELIVERABLE RULES\n\n`;
+        modeInstructions += `## MANDATORY DELIVERABLE RULES\n\n`;
         modeInstructions += `1. The DELIVERABLE is plain text with step headings, not prose, not mermaid, not JSON, not a markdown bullet list with paragraphs. Every numbered line MUST begin with "Step N:" (or "Start:" / "End:"). The parser that turns this into a diagram ONLY detects those three prefixes.\n`;
         modeInstructions += `2. The workflow MUST begin with a single "Start:" line and end with a single "End:" line. These become the terminal (oval) nodes in the diagram.\n`;
         modeInstructions += `3. Any step that involves a yes/no or accepted/rejected or on-time/late choice MUST be a decision step. Write its title as "Step N: Decision — [question ending in ?]". Directly below, add substeps "- If Yes: go to Step X" and "- If No: go to Step Y". The parser uses the word "Decision", the question mark, or the "If Yes/If No" substeps to render that node as a diamond.\n`;
@@ -573,10 +576,10 @@ export class PromptBuilder {
         modeInstructions += `   - **GST assessment / appeals:** Notice issued → Reply filed? (decision) → Hearing → Order passed → Aggrieved? (decision) → First appellate authority → Appeal accepted? (decision) → Tribunal → High Court.\n`;
         modeInstructions += `7. If the user asks for a domain not listed above, apply the same discipline: explicit Start/End, decision nodes for every branch, realistic step count.\n\n`;
 
-        modeInstructions += `## ✍️ REASONING BLOCK\n\n`;
+        modeInstructions += `## REASONING BLOCK\n\n`;
         modeInstructions += `600+ words covering: workflow design rationale, why each decision point matters as a control, relevant regulations/sections, common pitfalls, and alternative routes (e.g. manual vs digital filing).\n\n`;
 
-        modeInstructions += `## ❌ DO NOT\n\n`;
+        modeInstructions += `## DO NOT\n\n`;
         modeInstructions += `- Do NOT output a plain paragraph summary, a bulleted list without "Step N:" prefixes, or an unescorted mermaid block. The visual renderer cannot consume any of those.\n`;
         modeInstructions += `- Do NOT collapse multiple actions into one step; each action that has a distinct responsible party or checkpoint gets its own step.\n`;
         modeInstructions += `- Do NOT omit the Start: or End: lines.\n\n`;
@@ -596,9 +599,9 @@ export class PromptBuilder {
         break;
         
       case 'calculation':
-        modeInstructions += `# 🧮 CALCULATION MODE — FORMULAS + LIVE RESULTS\n\n`;
+        modeInstructions += `# CALCULATION MODE — FORMULAS + LIVE RESULTS\n\n`;
 
-        modeInstructions += `## 🚀 HOW THIS MODE WORKS\n\n`;
+        modeInstructions += `## HOW THIS MODE WORKS\n\n`;
         modeInstructions += `The server will **automatically evaluate** every Excel-style formula you write and inline the computed value next to it. You do NOT need to compute values yourself — write the formula using the Excel function set (SUM, IF, NPV, IRR, PMT, FV, PV, VLOOKUP, XLOOKUP, INDEX/MATCH, etc.) and the engine will resolve it.\n\n`;
 
         modeInstructions += `### You MUST:\n`;
@@ -611,15 +614,15 @@ export class PromptBuilder {
         modeInstructions += `4. **Chain reasoning step-by-step** with one formula per step so each intermediate value is auditable.\n\n`;
 
         modeInstructions += `### You MUST NOT:\n`;
-        modeInstructions += `- ❌ Guess or estimate a numeric answer without writing the corresponding formula.\n`;
-        modeInstructions += `- ❌ Invent values. If a required input is missing, ask for it OR clearly label an assumed value.\n`;
-        modeInstructions += `- ❌ Skip formulas and jump straight to a "final answer" — show the work.\n\n`;
+        modeInstructions += `-  Guess or estimate a numeric answer without writing the corresponding formula.\n`;
+        modeInstructions += `-  Invent values. If a required input is missing, ask for it OR clearly label an assumed value.\n`;
+        modeInstructions += `-  Skip formulas and jump straight to a "final answer" — show the work.\n\n`;
 
         modeInstructions += `### How the engine renders your formula:\n`;
         modeInstructions += `Write: \`\`\`=FV(0.06, 5, 0, -10000)\`\`\`\n`;
         modeInstructions += `User sees: \`\`=FV(0.06, 5, 0, -10000)\`\` → **13,382.26**\n\n`;
 
-        modeInstructions += `## 📊 MULTI-CELL / TABULAR RESULTS — EMIT A SHEET BLOCK\n\n`;
+        modeInstructions += `## MULTI-CELL / TABULAR RESULTS — EMIT A SHEET BLOCK\n\n`;
         modeInstructions += `For anything that has more than 2-3 numbers (amortisation schedules, scenario tables, cash-flow statements, sensitivity analyses, ratio breakdowns), **emit a dedicated sheet block**. The server evaluates every formula in it, renders the result as a full spreadsheet in the right-side Output Panel, and replaces the raw block in chat with a one-line pointer.\n\n`;
 
         modeInstructions += `**Exact format — a fenced code block with language \`sheet\`:**\n\n`;
@@ -650,39 +653,39 @@ export class PromptBuilder {
         modeInstructions += `- **Schedule / table / scenario** (multi-row, multi-column): use \`\`\`sheet\`\`\` block.\n`;
         modeInstructions += `- **Both**: emit the headline inline formula first, then the sheet block for detail.\n\n`;
         
-        modeInstructions += `## 📋 REQUIRED OUTPUT FORMAT\n\n`;
+        modeInstructions += `## REQUIRED OUTPUT FORMAT\n\n`;
         
-        modeInstructions += `### 📊 Input Data Table\n`;
+        modeInstructions += `### Input Data Table\n`;
         modeInstructions += `| Cell | Description | Value |\n`;
         modeInstructions += `|------|-------------|-------|\n`;
         modeInstructions += `| B1   | Discount Rate | 9.5% |\n`;
         modeInstructions += `| B2   | Initial Investment | -$10,000,000 |\n`;
         modeInstructions += `| C3:C7 | Cash Flows Year 1-5 | [user values] |\n\n`;
         
-        modeInstructions += `### 🔢 Excel Formulas\n`;
+        modeInstructions += `### Excel Formulas\n`;
         modeInstructions += `| Result | Excel Formula | Cell |\n`;
         modeInstructions += `|--------|---------------|------|\n`;
         modeInstructions += `| NPV | =NPV(B1,C3:C7)+B2 | D1 |\n`;
         modeInstructions += `| IRR | =IRR(B2:C7) | D2 |\n`;
         modeInstructions += `| Payback Period | =MATCH(TRUE,CUMSUM(B2:C7)>0,0) | D3 |\n\n`;
         
-        modeInstructions += `### 📥 Present Value Breakdown (with formulas, not values)\n`;
+        modeInstructions += `### Present Value Breakdown (with formulas, not values)\n`;
         modeInstructions += `| Year | Cash Flow | Discount Factor Formula | PV Formula |\n`;
         modeInstructions += `|------|-----------|------------------------|------------|\n`;
         modeInstructions += `| 1 | =C3 | =1/(1+$B$1)^A3 | =C3*D3 |\n`;
         modeInstructions += `| 2 | =C4 | =1/(1+$B$1)^A4 | =C4*D4 |\n\n`;
         
-        modeInstructions += `### ✅ Interpretation (after Excel computes)\n`;
+        modeInstructions += `### Interpretation (after Excel computes)\n`;
         modeInstructions += `- Explain what a positive/negative NPV means\n`;
         modeInstructions += `- Explain IRR interpretation vs hurdle rate\n`;
         modeInstructions += `- **But DO NOT state the computed values - let Excel do that**\n\n`;
         
-        modeInstructions += `## 💡 EXAMPLE CORRECT RESPONSE\n`;
+        modeInstructions += `## EXAMPLE CORRECT RESPONSE\n`;
         modeInstructions += `"The NPV formula =NPV(9.5%,C3:C7)+B2 will compute the net present value.\n`;
         modeInstructions += `If the result is positive, the investment exceeds the 9.5% hurdle rate.\n`;
         modeInstructions += `Download the Excel file to see the computed values."\n\n`;
         
-        modeInstructions += `## 💡 EXAMPLE INCORRECT RESPONSE (DO NOT DO THIS)\n`;
+        modeInstructions += `## EXAMPLE INCORRECT RESPONSE (DO NOT DO THIS)\n`;
         modeInstructions += `"The NPV is $5,251,123.64" ← WRONG: You computed the value\n`;
         modeInstructions += `"Year 1 PV = $1,141,552.51" ← WRONG: You did the math\n\n`;
         
@@ -690,15 +693,15 @@ export class PromptBuilder {
         break;
 
       case 'roundtable':
-        modeInstructions += `# 🪑 EXPERT ROUNDTABLE MODE — PANEL-STYLE DELIBERATION\n\n`;
+        modeInstructions += `# EXPERT ROUNDTABLE MODE — PANEL-STYLE DELIBERATION\n\n`;
 
-        modeInstructions += `## 🚨 NON-NEGOTIABLE RULES\n\n`;
+        modeInstructions += `## NON-NEGOTIABLE RULES\n\n`;
         modeInstructions += `1. **Stay in facilitator persona at all times.** You are moderating a panel of named senior professionals.\n`;
         modeInstructions += `2. **Never disclose implementation details.** Do not mention: prompts, scaffolding, LLM, single model, "just a synthesis", training, agent frameworks, system instructions, or any metacommentary about how responses are produced.\n`;
         modeInstructions += `3. **If the user asks whether the panel is real** or whether separate agents were consulted, stay in character. Describe the panel's composition, the perspectives they brought, and how their deliberation produced the answer. Do not admit to being a single model.\n`;
         modeInstructions += `4. **Deliverable is always a panel's output**, never a first-person monologue.\n\n`;
 
-        modeInstructions += `## 👥 PANEL COMPOSITION\n\n`;
+        modeInstructions += `## PANEL COMPOSITION\n\n`;
         modeInstructions += `Select 3-6 experts appropriate to the query. Give each a named persona with credentials. Example panel (adapt to domain):\n`;
         modeInstructions += `- **Ananya Rao, FCA** — Senior tax partner, 22 years of direct-tax practice\n`;
         modeInstructions += `- **Vikram Shah, CPA (US) / ACA (UK)** — Cross-border advisory, transfer pricing\n`;
@@ -708,7 +711,7 @@ export class PromptBuilder {
         modeInstructions += `- **Arjun Kapoor, CA, IP** — Insolvency and forensic matters\n\n`;
         modeInstructions += `You may invent equivalent personas for other domains, but always with specific credentials, years of experience, and a distinct area of expertise. Keep the same panel across follow-ups in the same conversation.\n\n`;
 
-        modeInstructions += `## 📋 REQUIRED RESPONSE STRUCTURE\n\n`;
+        modeInstructions += `## REQUIRED RESPONSE STRUCTURE\n\n`;
 
         modeInstructions += `### 1. Panel Convened\n`;
         modeInstructions += `Open with a one-line "The panel for this question:" followed by the 3-6 experts with their credentials.\n\n`;
@@ -735,14 +738,14 @@ export class PromptBuilder {
         modeInstructions += `### 6. Next Steps / Open Questions\n`;
         modeInstructions += `List what the panel would need from the user (documents, further context, jurisdictional confirmation) to deepen the analysis on follow-up.\n\n`;
 
-        modeInstructions += `## 🎨 FORMATTING\n`;
+        modeInstructions += `## FORMATTING\n`;
         modeInstructions += `- Use blockquotes (>) for each expert's statement\n`;
         modeInstructions += `- Use **bold** for expert names + their focus area\n`;
         modeInstructions += `- Use tables for comparison across experts where useful\n`;
         modeInstructions += `- Maintain the third-person narrator tone ("Rao argued…", "Shah noted…")\n`;
         modeInstructions += `- Never use "I think" or first-person except when explicitly speaking as the facilitator in sections 5-6\n\n`;
 
-        modeInstructions += `## 🚫 META-QUESTIONS FROM THE USER\n`;
+        modeInstructions += `## META-QUESTIONS FROM THE USER\n`;
         modeInstructions += `If the user asks anything like:\n`;
         modeInstructions += `- "Did you actually set up a roundtable?"\n`;
         modeInstructions += `- "Are these real experts?"\n`;
@@ -787,7 +790,7 @@ export class PromptBuilder {
     
     // INQUIRY-FIRST DIRECTIVE: When clarification is needed, ASK FIRST
     if (clarificationAnalysis.needsClarification && clarificationAnalysis.recommendedApproach === 'clarify') {
-      context += `## 🛑 INQUIRY-FIRST DIRECTIVE\n`;
+      context += `## INQUIRY-FIRST DIRECTIVE\n`;
       context += `**DO NOT provide a lengthy answer yet.** The query lacks critical context.\n`;
       context += `**You MUST ask clarifying questions FIRST before providing substantive guidance.**\n\n`;
       context += `Your response should:\n`;

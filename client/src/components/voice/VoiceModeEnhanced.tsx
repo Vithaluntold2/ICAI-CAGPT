@@ -8,6 +8,7 @@
  */
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { 
   Mic, 
   MicOff, 
@@ -714,45 +715,60 @@ export const VoiceModeEnhanced: React.FC<VoiceModeEnhancedProps> = ({
   };
 
   // ==================== RENDER ====================
+  //
+  // Fullscreen overlays (recording, transcribing, advanced voice mode) are
+  // portalled to <body> because this component renders inside the Composer's
+  // toolbar, and the Composer has `backdrop-filter: blur(14px)` which CSS
+  // promotes to a containing block for `fixed`-positioned descendants. Without
+  // the portal, `fixed inset-0` resolves against the composer's 300-or-so-px
+  // width instead of the viewport, producing a black strip at the top + a
+  // stray orb floating mid-page.
+  const recordingOverlay = isRecording && !advancedMode && (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+      <div className="flex flex-col items-center gap-6 p-8 rounded-2xl bg-background/95 border shadow-2xl max-w-md w-full mx-4">
+        <div className="flex items-center gap-3">
+          <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse" />
+          <span className="text-lg font-medium">Listening...</span>
+          <span className="text-sm text-muted-foreground font-mono">{formatDuration(recordingDuration)}</span>
+        </div>
+        <div className="relative w-24 h-24 flex items-center justify-center">
+          <div className="absolute inset-0 rounded-full bg-primary/100/20 animate-ping" />
+          <div className="absolute inset-2 rounded-full bg-primary/100/30 animate-pulse" />
+          <Mic className="w-8 h-8 text-primary relative z-10" />
+        </div>
+        <Button variant="destructive" size="lg" onClick={stopRecording} className="rounded-full h-14 w-14">
+          <Square className="w-5 h-5 fill-current" />
+        </Button>
+        <p className="text-xs text-muted-foreground">Will auto-send when you stop talking</p>
+      </div>
+    </div>
+  );
+
+  const transcribingOverlay = isTranscribing && !advancedMode && (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm">
+      <div className="flex flex-col items-center gap-4 p-8 rounded-2xl bg-background/95 border shadow-2xl">
+        <Loader2 className="w-10 h-10 animate-spin text-primary" />
+        <p className="text-sm font-medium">Transcribing...</p>
+      </div>
+    </div>
+  );
+
   return (
     <TooltipProvider>
       <div className="flex items-center gap-0.5">
 
-        {/* Recording overlay (simple mic mode) */}
-        {isRecording && !advancedMode && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-            <div className="flex flex-col items-center gap-6 p-8 rounded-2xl bg-background/95 border shadow-2xl max-w-md w-full mx-4">
-              <div className="flex items-center gap-3">
-                <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse" />
-                <span className="text-lg font-medium">Listening...</span>
-                <span className="text-sm text-muted-foreground font-mono">{formatDuration(recordingDuration)}</span>
-              </div>
-              <div className="relative w-24 h-24 flex items-center justify-center">
-                <div className="absolute inset-0 rounded-full bg-primary/100/20 animate-ping" />
-                <div className="absolute inset-2 rounded-full bg-primary/100/30 animate-pulse" />
-                <Mic className="w-8 h-8 text-primary relative z-10" />
-              </div>
-              <Button variant="destructive" size="lg" onClick={stopRecording} className="rounded-full h-14 w-14">
-                <Square className="w-5 h-5 fill-current" />
-              </Button>
-              <p className="text-xs text-muted-foreground">Will auto-send when you stop talking</p>
-            </div>
-          </div>
-        )}
+        {typeof document !== 'undefined' && recordingOverlay
+          ? createPortal(recordingOverlay, document.body)
+          : null}
 
-        {/* Transcribing overlay */}
-        {isTranscribing && !advancedMode && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-            <div className="flex flex-col items-center gap-4 p-8 rounded-2xl bg-background/95 border shadow-2xl">
-              <Loader2 className="w-10 h-10 animate-spin text-primary" />
-              <p className="text-sm font-medium">Transcribing...</p>
-            </div>
-          </div>
-        )}
+        {typeof document !== 'undefined' && transcribingOverlay
+          ? createPortal(transcribingOverlay, document.body)
+          : null}
 
-        {/* ADVANCED VOICE MODE — ChatGPT/Gemini style */}
-        {advancedMode && (
-          <div className="fixed inset-0 z-50 flex flex-col bg-black select-none">
+        {/* ADVANCED VOICE MODE — ChatGPT/Gemini style (portalled for same
+            reason as above) */}
+        {advancedMode && typeof document !== 'undefined' && createPortal(
+          <div className="fixed inset-0 z-[100] flex flex-col bg-black select-none">
 
             {/* Top bar */}
             <div className="flex items-center justify-between px-5 pt-5 pb-2 z-10">
@@ -928,7 +944,8 @@ export const VoiceModeEnhanced: React.FC<VoiceModeEnhancedProps> = ({
               </>
             )}
 
-          </div>
+          </div>,
+          document.body
         )}
 
         {/* ===== INPUT BAR: Just mic + headphones ===== */}

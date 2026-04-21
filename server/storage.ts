@@ -137,6 +137,7 @@ export class MemStorage implements IStorage {
       profileId: insertConv.profileId || null,
       preview: insertConv.preview || null,
       metadata: insertConv.metadata || null,
+      chatMode: insertConv.chatMode || 'standard',
       id,
       createdAt: new Date(),
       updatedAt: new Date(),

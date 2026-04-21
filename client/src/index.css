@@ -1,4 +1,6 @@
 /* stylelint-disable at-rule-no-unknown */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import url('https://api.fontshare.com/v2/css?f[]=satoshi@400,500,600,700&display=swap');
 @import 'react-loading-skeleton/dist/skeleton.css';
 @tailwind base;
 @tailwind components;
@@ -7,6 +9,38 @@
 
 /* LIGHT MODE - CA BRAND COLOR SYSTEM */
 :root {
+  /* ============================================================
+     Aurora palette — shared across light + dark; usage differs.
+     ============================================================ */
+  --aurora-navy: 222 72% 14%;
+  --aurora-cyan: 190 88% 37%;
+  --aurora-teal: 172 78% 40%;
+  --aurora-teal-soft: 167 85% 65%;
+  --aurora-gold: 45 96% 75%;
+  --aurora-gold-deep: 48 96% 53%;
+  --aurora-amber-deep: 25 93% 37%;
+
+  --gradient-aurora: linear-gradient(135deg,
+    hsl(var(--aurora-navy)) 0%,
+    hsl(var(--aurora-cyan)) 55%,
+    hsl(var(--aurora-teal)) 100%);
+
+  /* Radii — shifted up one notch vs previous scale */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+  --radius-full: 999px;
+
+  /* Shadow + glow — earned depth */
+  --shadow-float: 0 8px 32px hsl(215 28% 17% / 0.08);
+  --shadow-popover: 0 4px 16px hsl(215 28% 17% / 0.08);
+  --shadow-dialog: 0 20px 60px hsl(215 28% 17% / 0.12);
+  --glow-teal: 0 0 10px hsl(var(--aurora-teal) / 0.2);
+
+  /* Border-strong for floating frames */
+  --border-strong: 215 20% 86%;
+
   --button-outline: rgba(0,0,0, .10);
   --badge-outline: rgba(0,0,0, .05);
   --opaque-button-border-intensity: -8;
@@ -70,10 +104,10 @@
   --chart-3: 202 100% 15%;           /* Deep Navy */
   --chart-4: 160 84% 39%;           /* Emerald */
   --chart-5: 38 92% 50%;            /* Gold */
-  --font-sans: 'Exo 2', Inter, sans-serif;
+  --font-sans: 'Inter', system-ui, -apple-system, 'Exo 2', sans-serif;
   --font-serif: Georgia, serif;
-  --font-mono: 'JetBrains Mono', monospace;
-  --font-display: 'Exo 2', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'JetBrains Mono', monospace;
+  --font-display: 'Satoshi', 'Inter', system-ui, sans-serif;
   --radius: .5rem;
   --shadow-2xs: 0px 2px 0px 0px hsl(0 0% 0% / 0.00);
   --shadow-xs: 0px 2px 0px 0px hsl(0 0% 0% / 0.00);
@@ -123,6 +157,13 @@
 }
 
 .dark {
+  /* Aurora — dark-mode shadow + glow overrides */
+  --shadow-float: 0 10px 40px hsl(0 0% 0% / 0.5), 0 0 32px hsl(var(--aurora-teal) / 0.08);
+  --shadow-popover: 0 4px 16px hsl(0 0% 0% / 0.4);
+  --shadow-dialog: 0 20px 60px hsl(0 0% 0% / 0.6);
+  --glow-teal: 0 0 16px hsl(var(--aurora-teal) / 0.35);
+  --border-strong: 220 10% 28%;
+
   /* TRUE DARK THEME — Linear/Notion-leaning.
    *
    * Five-layer surface stack (darkest → lightest):
@@ -141,41 +182,43 @@
   --elevate-1: rgba(255,255,255, .04);
   --elevate-2: rgba(255,255,255, .08);
 
-  /* Surface stack */
-  --background: 220 14% 7%;          /* #0f1012 — base canvas */
-  --foreground: 0 0% 95%;            /* #F2F2F2 — off-white primary text */
-  --border: 220 10% 20%;             /* #2e3036 — subtle seams */
-  --card: 220 10% 15%;               /* #23252a — artifacts, dialogs */
+  /* Aurora surface stack — deepened to match the approved D3 mockups.
+   * Base is near-black with a slight cool cast; each layer steps up ~3% so
+   * elevation reads cleanly without graying out. */
+  --background: 222 40% 4%;          /* #05070f — canvas (mock) */
+  --foreground: 0 0% 95%;            /* off-white primary text */
+  --border: 220 14% 14%;             /* subtle seams, slightly cooler */
+  --card: 222 28% 7%;                /* #0c0f1a — artifact cards */
   --card-foreground: 0 0% 95%;
-  --card-border: 220 10% 24%;        /* #393c43 — slightly stronger card edges */
+  --card-border: 220 14% 18%;        /* stronger card edges */
 
   /* Sidebar — layer 1, lifted above base */
-  --sidebar: 220 12% 10%;            /* #17181c */
+  --sidebar: 222 32% 6%;             /* #0a0e1a — rail + mode sidebar */
   --sidebar-foreground: 0 0% 95%;
-  --sidebar-border: 220 10% 20%;
-  --sidebar-primary: 202 85% 55%;    /* brightened CA navy for contrast on dark */
+  --sidebar-border: 220 14% 14%;
+  --sidebar-primary: 172 78% 55%;    /* Aurora teal for focus rings */
   --sidebar-primary-foreground: 0 0% 100%;
-  --sidebar-accent: 220 10% 16%;     /* active item — step above sidebar */
+  --sidebar-accent: 172 78% 40%;     /* teal for active row tint */
   --sidebar-accent-foreground: 0 0% 95%;
-  --sidebar-ring: 202 85% 55%;
+  --sidebar-ring: 172 78% 55%;
 
   /* Popovers / dropdowns — highest surface in the stack */
-  --popover: 220 9% 18%;             /* #2a2c32 */
+  --popover: 222 22% 11%;            /* #131727 */
   --popover-foreground: 0 0% 95%;
-  --popover-border: 220 10% 24%;
+  --popover-border: 220 14% 20%;
 
-  /* Brand — brightened so buttons and rings remain visible on near-black */
-  --primary: 202 85% 55%;            /* visible CA navy (was 26%) */
-  --primary-foreground: 0 0% 100%;
-  --secondary: 202 70% 40%;          /* deeper navy for secondary actions */
+  /* Brand — Aurora teal carries "AI moment" accents in dark mode. */
+  --primary: 172 78% 55%;            /* Aurora teal */
+  --primary-foreground: 222 40% 4%;  /* dark on teal */
+  --secondary: 190 88% 45%;          /* Aurora cyan */
   --secondary-foreground: 0 0% 95%;
 
   /* Muted surfaces + text */
-  --muted: 220 10% 13%;              /* #1e1f24 — hover bgs, subtle fills */
-  --muted-foreground: 220 6% 62%;    /* #9b9da3 — clearly secondary text */
+  --muted: 222 22% 10%;              /* hover bgs, subtle fills */
+  --muted-foreground: 220 9% 62%;    /* clearly secondary text */
 
-  /* Accent — subtle elevation, NOT white-in-dark-mode like before */
-  --accent: 220 10% 20%;             /* matches border lightness */
+  /* Accent — subtle elevation, NOT white-in-dark-mode */
+  --accent: 220 14% 16%;
   --accent-foreground: 0 0% 90%;
 
   /* Feedback colours */
@@ -333,26 +376,6 @@
 
 /* SURPASSING PERPLEXITY - SOPHISTICATED ANIMATIONS & EFFECTS */
 
-@keyframes pulse-success {
-  0%, 100% {
-    opacity: 1;
-    transform: scale(1);
-  }
-  50% {
-    opacity: 0.8;
-    transform: scale(1.05);
-  }
-}
-
-@keyframes shimmer {
-  0% {
-    background-position: -200% center;
-  }
-  100% {
-    background-position: 200% center;
-  }
-}
-
 @keyframes glow-pulse {
   0%, 100% {
     box-shadow: 0 0 10px hsl(var(--primary) / 0.3);
@@ -373,37 +396,9 @@
   }
 }
 
-@keyframes float-orb {
-  0%, 100% {
-    transform: translate(0, 0) scale(1);
-  }
-  50% {
-    transform: translate(20px, -20px) scale(1.1);
-  }
-}
-
-@keyframes gradient-shift {
-  0%, 100% {
-    background-position: 0% 50%;
-  }
-  50% {
-    background-position: 100% 50%;
-  }
-}
-
 /* Utility classes for premium interactions */
-.animate-pulse-success {
-  animation: pulse-success 0.3s ease-out;
-}
-
 .animate-slide-up {
   animation: slide-up-fade 0.25s ease-out;
-}
-
-.shimmer-effect {
-  background: linear-gradient(90deg, transparent, hsl(var(--gold) / 0.3), transparent);
-  background-size: 200% 100%;
-  animation: shimmer 2s infinite;
 }
 
 .gradient-text {
@@ -464,20 +459,6 @@
 
 .glow-gold {
   box-shadow: 0 0 20px hsl(var(--gold) / 0.3), 0 0 40px hsl(var(--gold) / 0.1);
-}
-
-/* Floating effect for premium elements */
-.float-card {
-  box-shadow: 
-    0 20px 25px -5px hsl(var(--primary) / 0.1),
-    0 8px 10px -6px hsl(var(--primary) / 0.1);
-}
-
-.float-card:hover {
-  transform: translateY(-4px);
-  box-shadow: 
-    0 25px 30px -5px hsl(var(--primary) / 0.15),
-    0 10px 15px -6px hsl(var(--primary) / 0.15);
 }
 
 /* Smooth transitions */

@@ -90,15 +90,18 @@ function ArtifactChip({ id, byId }: { id: string; byId: Record<string, Whiteboar
  */
 function MessageMarkdown({ content, byId, isUser }: { content: string; byId: Record<string, WhiteboardArtifact>; isUser: boolean }) {
   const rewritten = rewriteArtifactPlaceholders(content);
+  // User and assistant bubbles both sit on low-alpha tinted surfaces against
+  // the PIP's dark card — the foreground text stays at the regular foreground
+  // colour in both cases, so `dark:prose-invert` is the right pick for both.
+  // The old code forced `prose-invert` on the user bubble, which only makes
+  // sense when the background is a solid primary fill (which it was before
+  // we switched to the subtle aurora-teal tint).
+  void isUser;
   return (
     <div
       className={cn(
         "prose prose-xs max-w-none break-words",
-        // In user bubbles the background is primary/coloured — invert prose
-        // so headings, links, code, etc. stay legible.
-        isUser
-          ? "prose-invert"
-          : "dark:prose-invert",
+        "dark:prose-invert",
         // Compact typography tuned for a ~360px-wide bubble
         "prose-headings:mt-2 prose-headings:mb-1 prose-headings:font-semibold",
         "prose-h1:text-sm prose-h2:text-sm prose-h3:text-xs prose-h4:text-xs",
@@ -204,8 +207,8 @@ export function PIPTranscript({
           key={m.id}
           className={
             m.role === "user"
-              ? "self-end bg-primary text-primary-foreground rounded-lg px-3 py-1.5 max-w-[92%]"
-              : "self-start bg-muted rounded-lg px-3 py-1.5 max-w-[92%]"
+              ? "self-end bg-aurora-teal/10 border border-aurora-teal/25 text-foreground rounded-lg px-3 py-1.5 max-w-[92%]"
+              : "self-start bg-muted/60 border border-border rounded-lg px-3 py-1.5 max-w-[92%]"
           }
         >
           <MessageMarkdown content={m.content} byId={byId} isUser={m.role === "user"} />

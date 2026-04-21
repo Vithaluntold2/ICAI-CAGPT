@@ -7,7 +7,8 @@ import { useSelectionTooltip } from "./useSelectionTooltip";
 import { ArtifactCard } from "./ArtifactCard";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
-import { Minus, Plus, Maximize, RotateCcw, Quote } from "lucide-react";
+import { Minus, Plus, Maximize, RotateCcw, Quote, Info, X } from "lucide-react";
+import { Kbd } from "@/components/ui/Kbd";
 
 // Zoom bounds + step — kept here so the overlay UI and the TransformWrapper
 // stay in sync. Step is a multiplicative factor per press, not an additive
@@ -97,6 +98,20 @@ export function Whiteboard({ conversationId }: { conversationId: string }) {
   // Mirror of the current transform scale so the overlay can show "75%" etc.
   // Updated via TransformWrapper's onTransformed callback.
   const [scale, setScale] = useState<number>(INITIAL_SCALE);
+  const [hintDismissed, setHintDismissed] = useState<boolean>(() => {
+    if (typeof window === "undefined") return true;
+    try {
+      return localStorage.getItem("cagpt.whiteboard.hint.v1") === "1";
+    } catch {
+      return false;
+    }
+  });
+  const dismissHint = () => {
+    setHintDismissed(true);
+    try {
+      localStorage.setItem("cagpt.whiteboard.hint.v1", "1");
+    } catch { /* ignore */ }
+  };
 
   // --- Stable zoom controls -----------------------------------------------
   // Multiplicative stepping so zoom is predictable (every press is the same
@@ -386,10 +401,30 @@ export function Whiteboard({ conversationId }: { conversationId: string }) {
   return (
     <div
       ref={wrapperRef}
-      className="relative w-full h-full"
+      className="relative w-full h-full overflow-auto bg-background [background-image:radial-gradient(circle,_hsl(var(--foreground)/0.04)_1px,_transparent_1px)] [background-size:24px_24px]"
       data-testid="whiteboard-root"
       onMouseDown={onWrapperMouseDown}
     >
+      {!hintDismissed && (
+        <div
+          className="absolute top-4 left-1/2 -translate-x-1/2 z-20 px-3.5 py-2 bg-card/92 backdrop-blur-[14px] border border-border-strong rounded-full text-[11px] text-muted-foreground inline-flex items-center gap-2 shadow-popover"
+          data-testid="whiteboard-hint"
+        >
+          <Info className="w-3.5 h-3.5 text-aurora-teal-soft" strokeWidth={1.75} />
+          <span>
+            Click artifacts to select · Shift-click for multiple ·{" "}
+            <Kbd keys={["mod", "K"]} /> to ask about selection
+          </span>
+          <button
+            type="button"
+            onClick={dismissHint}
+            className="ml-1 opacity-50 hover:opacity-100"
+            aria-label="Dismiss hint"
+          >
+            <X className="w-3 h-3" />
+          </button>
+        </div>
+      )}
       <TransformWrapper
         ref={transformRef}
         minScale={MIN_SCALE}

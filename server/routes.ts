@@ -1263,7 +1263,8 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
           userId,
           profileId: profileId !== undefined ? profileId : null,
           title: 'New Chat',
-          preview: message.slice(0, 100)
+          preview: message.slice(0, 100),
+          chatMode,
         });
         // Queue intelligent title generation in background
         addTitleGenerationJob(conversation.id, message);
@@ -4655,7 +4656,8 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
         conversation = await storage.createConversation({
           userId,
           title: 'New Chat',
-          profileId
+          profileId,
+          chatMode,
         });
         // Queue intelligent title generation in background
         addTitleGenerationJob(conversation.id, query);

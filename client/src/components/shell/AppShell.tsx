@@ -44,7 +44,12 @@ export function AppShell({
   ...sidebarProps
 }: AppShellProps) {
   return (
-    <div className="flex h-full min-h-0 bg-background text-foreground">
+    <div className="relative flex h-full min-h-0 bg-background text-foreground">
+      {/* Aurora accent bar — 2px gradient at the very top edge of the app. */}
+      <div
+        aria-hidden
+        className="absolute top-0 left-0 right-0 h-0.5 bg-gradient-aurora z-50 pointer-events-none"
+      />
       <IconRail
         sidebarOpen={sidebarOpen}
         onToggleSidebar={onToggleSidebar}
@@ -52,17 +57,13 @@ export function AppShell({
         onNewChat={onNewChat}
         onOpenSettings={onOpenSettings}
       />
-      {/* Width animates 0 ↔ 280; overflow-hidden clips content on collapse so
-          the sidebar doesn't shove the main pane around as it narrows. */}
-      <div
-        className={
-          'overflow-hidden transition-[width] duration-200 ease-out ' +
-          (sidebarOpen ? 'w-[280px]' : 'w-0')
-        }
-        aria-hidden={!sidebarOpen}
-      >
-        <ModeSidebar {...sidebarProps} />
-      </div>
+      {/* Width animates 0 ↔ 280 via `width` on the sidebar itself. The
+          previous attempt used an extra wrapper div, which broke the sidebar's
+          own `flex-col` + `flex-1 overflow-y-auto` chain (the wrapper had no
+          bounded height, so the inner `overflow-y-auto` collapsed to content
+          and never scrolled). Passing `collapsed` directly lets the aside
+          keep its own flex column while still animating width. */}
+      <ModeSidebar collapsed={!sidebarOpen} {...sidebarProps} />
       <main className="flex-1 flex flex-col min-w-0 relative">{children}</main>
     </div>
   );

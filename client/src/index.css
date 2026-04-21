@@ -182,41 +182,43 @@
   --elevate-1: rgba(255,255,255, .04);
   --elevate-2: rgba(255,255,255, .08);
 
-  /* Surface stack */
-  --background: 220 14% 7%;          /* #0f1012 — base canvas */
-  --foreground: 0 0% 95%;            /* #F2F2F2 — off-white primary text */
-  --border: 220 10% 20%;             /* #2e3036 — subtle seams */
-  --card: 220 10% 15%;               /* #23252a — artifacts, dialogs */
+  /* Aurora surface stack — deepened to match the approved D3 mockups.
+   * Base is near-black with a slight cool cast; each layer steps up ~3% so
+   * elevation reads cleanly without graying out. */
+  --background: 222 40% 4%;          /* #05070f — canvas (mock) */
+  --foreground: 0 0% 95%;            /* off-white primary text */
+  --border: 220 14% 14%;             /* subtle seams, slightly cooler */
+  --card: 222 28% 7%;                /* #0c0f1a — artifact cards */
   --card-foreground: 0 0% 95%;
-  --card-border: 220 10% 24%;        /* #393c43 — slightly stronger card edges */
+  --card-border: 220 14% 18%;        /* stronger card edges */
 
   /* Sidebar — layer 1, lifted above base */
-  --sidebar: 220 12% 10%;            /* #17181c */
+  --sidebar: 222 32% 6%;             /* #0a0e1a — rail + mode sidebar */
   --sidebar-foreground: 0 0% 95%;
-  --sidebar-border: 220 10% 20%;
-  --sidebar-primary: 202 85% 55%;    /* brightened CA navy for contrast on dark */
+  --sidebar-border: 220 14% 14%;
+  --sidebar-primary: 172 78% 55%;    /* Aurora teal for focus rings */
   --sidebar-primary-foreground: 0 0% 100%;
-  --sidebar-accent: 220 10% 16%;     /* active item — step above sidebar */
+  --sidebar-accent: 172 78% 40%;     /* teal for active row tint */
   --sidebar-accent-foreground: 0 0% 95%;
-  --sidebar-ring: 202 85% 55%;
+  --sidebar-ring: 172 78% 55%;
 
   /* Popovers / dropdowns — highest surface in the stack */
-  --popover: 220 9% 18%;             /* #2a2c32 */
+  --popover: 222 22% 11%;            /* #131727 */
   --popover-foreground: 0 0% 95%;
-  --popover-border: 220 10% 24%;
+  --popover-border: 220 14% 20%;
 
-  /* Brand — brightened so buttons and rings remain visible on near-black */
-  --primary: 202 85% 55%;            /* visible CA navy (was 26%) */
-  --primary-foreground: 0 0% 100%;
-  --secondary: 202 70% 40%;          /* deeper navy for secondary actions */
+  /* Brand — Aurora teal carries "AI moment" accents in dark mode. */
+  --primary: 172 78% 55%;            /* Aurora teal */
+  --primary-foreground: 222 40% 4%;  /* dark on teal */
+  --secondary: 190 88% 45%;          /* Aurora cyan */
   --secondary-foreground: 0 0% 95%;
 
   /* Muted surfaces + text */
-  --muted: 220 10% 13%;              /* #1e1f24 — hover bgs, subtle fills */
-  --muted-foreground: 220 6% 62%;    /* #9b9da3 — clearly secondary text */
+  --muted: 222 22% 10%;              /* hover bgs, subtle fills */
+  --muted-foreground: 220 9% 62%;    /* clearly secondary text */
 
-  /* Accent — subtle elevation, NOT white-in-dark-mode like before */
-  --accent: 220 10% 20%;             /* matches border lightness */
+  /* Accent — subtle elevation, NOT white-in-dark-mode */
+  --accent: 220 14% 16%;
   --accent-foreground: 0 0% 90%;
 
   /* Feedback colours */

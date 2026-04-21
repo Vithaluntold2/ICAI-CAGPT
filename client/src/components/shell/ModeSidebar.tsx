@@ -25,6 +25,9 @@ interface ModeSidebarProps {
   userInitial?: string;
   themeMode?: ThemeMode;
   onChangeTheme?: (mode: ThemeMode) => void;
+  /** When true, the sidebar collapses to 0 width (content stays mounted but
+   *  clipped so the rail's toggle animation reads smoothly). */
+  collapsed?: boolean;
   onSelectMode: (mode: ChatMode) => void;
   onSelectConversation: (id: string) => void;
   onRenameConversation?: (id: string) => void;
@@ -41,6 +44,7 @@ export function ModeSidebar({
   userInitial = 'U',
   themeMode = 'system',
   onChangeTheme,
+  collapsed = false,
   onSelectMode,
   onSelectConversation,
   onRenameConversation,
@@ -65,7 +69,13 @@ export function ModeSidebar({
   };
 
   return (
-    <aside className="w-[280px] bg-sidebar border-r border-border flex flex-col overflow-hidden shrink-0">
+    <aside
+      className={cn(
+        'bg-sidebar border-r border-border flex flex-col overflow-hidden shrink-0 transition-[width] duration-200 ease-out',
+        collapsed ? 'w-0 border-r-0' : 'w-[280px]'
+      )}
+      aria-hidden={collapsed}
+    >
       <div className="px-4 pt-3.5 pb-2.5 border-b border-border">
         <div className="font-display font-bold text-[15px] tracking-tight text-foreground">
           CA-GPT

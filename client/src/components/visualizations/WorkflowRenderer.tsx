@@ -284,8 +284,25 @@ interface ResolvedTheme {
 }
 
 function resolveTheme(theme: ColorTheme, isDark: boolean): ResolvedTheme {
+  // The variant-B redesign makes step nodes Aurora-token-based cards
+  // (hsl(var(--card)) with hsl(var(--border-strong)) outline). These are kept
+  // here only for the MiniMap's colour callback and the legacy theme dropdown
+  // — getNodeStyle no longer uses the stepBg / stepText / stepBorder /
+  // stepShadow / startBg / endBg / decisionBg fields. Keeping them typed so
+  // the signature stays stable.
   const stepFirstHex = theme.step.match(/#[0-9a-fA-F]{6}/)?.[0] ?? '#e0e7ff';
   const stepIsLight = hexLuminance(stepFirstHex) > 0.55;
+
+  // Canvas + dot colour ALWAYS follow the app's Aurora surface stack, not the
+  // theme dropdown's legacy per-palette `background` hex. Previously the light
+  // branch used theme.background (e.g. #f8fafc from CA GPT Classic) which
+  // made the workflow pane render as a bright-white island inside a dark app
+  // shell, AND made near-white step cards disappear against a near-white
+  // canvas. App tokens fix both in one swap.
+  const canvasBackground = 'hsl(var(--background))';
+  const dotColor = isDark
+    ? 'rgba(255,255,255,0.06)'
+    : 'rgba(15,23,42,0.07)';
 
   if (!isDark) {
     return {
@@ -299,30 +316,25 @@ function resolveTheme(theme: ColorTheme, isDark: boolean): ResolvedTheme {
         : 'none',
       stepShadow: stepIsLight ? 'none' : '0 2px 8px rgba(0,0,0,0.3)',
       edge: theme.edge,
-      canvasBackground: theme.background,
-      dotColor: theme.edge + '20',
+      canvasBackground,
+      dotColor,
     };
   }
 
-  // Dark mode: pastel step gradients would blow out on a dark canvas, so
-  // blend each hex stop toward a near-black base. Computed in JS so the final
-  // `background` is a plain `linear-gradient(..., #rrggbb, #rrggbb)` — avoids
-  // CSS `color-mix()`, which silently dropped in at least one user's browser
-  // and reverted nodes to the React Flow default white panel.
   const darkStepBg = theme.step.replace(/#[0-9a-fA-F]{6}/g, (hex) =>
     blendHex(hex, '#1a1b1f', 0.25)
   );
   return {
-    startBg: theme.start,      // start/end/decision use saturated colors
-    endBg: theme.end,          // already — leave them alone.
+    startBg: theme.start,
+    endBg: theme.end,
     decisionBg: theme.decision,
     stepBg: darkStepBg,
     stepText: '#ffffff',
     stepBorder: '1px solid rgba(255,255,255,0.08)',
     stepShadow: '0 2px 8px rgba(0,0,0,0.6)',
     edge: theme.edge,
-    canvasBackground: 'hsl(var(--background))',
-    dotColor: theme.edge + '40',
+    canvasBackground,
+    dotColor,
   };
 }
 
@@ -392,6 +404,11 @@ const getNodeStyle = (type: string, _resolved: ResolvedTheme): React.CSSProperti
         justifyContent: 'center',
       };
     default:
+      // Step card. `--card` is only ~2% off `--background` in light mode,
+      // so a bare border-only card disappears against a white canvas. We
+      // lean on a soft drop-shadow + `--border-strong` to give the card
+      // explicit elevation. Works in both modes (shadow is alpha-black,
+      // border-strong adjusts per theme).
       return {
         ...base,
         background: 'hsl(var(--card))',
@@ -402,6 +419,8 @@ const getNodeStyle = (type: string, _resolved: ResolvedTheme): React.CSSProperti
         fontSize: '13px',
         fontWeight: 600,
         lineHeight: 1.3,
+        boxShadow:
+          '0 1px 2px rgba(15,23,42,0.04), 0 4px 12px rgba(15,23,42,0.06)',
       };
   }
 };

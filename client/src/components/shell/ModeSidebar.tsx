@@ -13,6 +13,7 @@ interface SidebarConversation {
   id: string;
   title: string;
   mode: ChatMode;
+  pinned?: boolean;
 }
 
 interface ModeSidebarProps {
@@ -26,6 +27,9 @@ interface ModeSidebarProps {
   onChangeTheme?: (mode: ThemeMode) => void;
   onSelectMode: (mode: ChatMode) => void;
   onSelectConversation: (id: string) => void;
+  onRenameConversation?: (id: string) => void;
+  onPinConversation?: (id: string) => void;
+  onDeleteConversation?: (id: string) => void;
 }
 
 export function ModeSidebar({
@@ -39,6 +43,9 @@ export function ModeSidebar({
   onChangeTheme,
   onSelectMode,
   onSelectConversation,
+  onRenameConversation,
+  onPinConversation,
+  onDeleteConversation,
 }: ModeSidebarProps) {
   const [expanded, setExpanded] = useState<ChatMode | null>(activeMode ?? null);
 
@@ -91,7 +98,23 @@ export function ModeSidebar({
                       key={c.id}
                       title={c.title}
                       selected={c.id === activeConversationId}
+                      isPinned={c.pinned}
                       onClick={() => onSelectConversation(c.id)}
+                      onRename={
+                        onRenameConversation
+                          ? () => onRenameConversation(c.id)
+                          : undefined
+                      }
+                      onPin={
+                        onPinConversation
+                          ? () => onPinConversation(c.id)
+                          : undefined
+                      }
+                      onDelete={
+                        onDeleteConversation
+                          ? () => onDeleteConversation(c.id)
+                          : undefined
+                      }
                     />
                   ))}
                 </div>

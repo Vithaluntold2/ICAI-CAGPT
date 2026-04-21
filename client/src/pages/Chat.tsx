@@ -1137,6 +1137,7 @@ export default function Chat() {
     id: c.id,
     title: c.title,
     mode: 'standard' as ChatMode,
+    pinned: c.pinned,
   }));
 
   const activeConversationTitle =
@@ -1184,6 +1185,16 @@ export default function Chat() {
         onToggleSidebar={() => setSidebarOpen((v) => !v)}
         onSelectMode={handleSelectMode}
         onSelectConversation={handleSelectConversation}
+        onRenameConversation={(id) => {
+          const conv = conversations.find((c) => c.id === id);
+          handleRename(id, conv?.title ?? '');
+        }}
+        onPinConversation={(id) => pinMutation.mutate(id)}
+        onDeleteConversation={(id) => {
+          if (window.confirm('Delete this conversation? This cannot be undone.')) {
+            deleteMutation.mutate(id);
+          }
+        }}
         onNewChat={handleNewChat}
         onOpenSettings={() => setLocation('/settings')}
         onOpenSearch={() => setCommandOpen(true)}

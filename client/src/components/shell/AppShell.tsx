@@ -8,6 +8,7 @@ interface SidebarConversation {
   id: string;
   title: string;
   mode: ChatMode;
+  pinned?: boolean;
 }
 
 interface AppShellProps {
@@ -23,6 +24,9 @@ interface AppShellProps {
   onToggleSidebar?: () => void;
   onSelectMode: (mode: ChatMode) => void;
   onSelectConversation: (id: string) => void;
+  onRenameConversation?: (id: string) => void;
+  onPinConversation?: (id: string) => void;
+  onDeleteConversation?: (id: string) => void;
   onOpenSearch?: () => void;
   onNewChat?: () => void;
   onOpenSettings?: () => void;

@@ -217,9 +217,39 @@ export class VisualizationGenerator {
    * Parse cell value to number
    */
   private parseNumber(cell: string): number | null {
-    const cleaned = cell.replace(/[$,\s%]/g, '');
-    const num = parseFloat(cleaned);
-    return !isNaN(num) && isFinite(num) ? num : null;
+    if (typeof cell !== 'string') return null;
+    let s = cell.trim();
+    if (!s) return null;
+
+    // Accounting negatives in parens: "(1,200)" → -1200
+    let negative = false;
+    if (/^\(.*\)$/.test(s)) {
+      negative = true;
+      s = s.slice(1, -1);
+    }
+
+    // Indian/Western grouped numbers → strip separators + currency symbols.
+    // We preserve the decimal point and leading minus.
+    s = s.replace(/[₹$€£¥,\s]/g, '').replace(/^rs\.?/i, '').replace(/^inr/i, '');
+
+    // Unit suffixes the AI commonly attaches: %, k, m, bn, L (lakh), cr (crore).
+    // Normalise to a scalar multiplier then strip the suffix.
+    let multiplier = 1;
+    const unitMatch = /^(-?\d+(?:\.\d+)?)\s*(%|k|m|bn|b|l|cr)$/i.exec(s);
+    if (unitMatch) {
+      s = unitMatch[1];
+      const unit = unitMatch[2].toLowerCase();
+      if (unit === 'k') multiplier = 1_000;
+      else if (unit === 'm' || unit === 'b' || unit === 'bn') {
+        multiplier = unit === 'm' ? 1_000_000 : 1_000_000_000;
+      } else if (unit === 'l') multiplier = 100_000;           // lakh
+      else if (unit === 'cr') multiplier = 10_000_000;         // crore
+      // `%` keeps multiplier=1 — the bare number is what we want to chart.
+    }
+
+    const num = parseFloat(s);
+    if (isNaN(num) || !isFinite(num)) return null;
+    return (negative ? -num : num) * multiplier;
   }
 
   /**

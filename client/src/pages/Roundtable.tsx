@@ -855,7 +855,15 @@ export default function Roundtable() {
         </TabsContent>
 
         <TabsContent value="results" className="space-y-4">
-          {finalResults && (
+          {finalResults && (() => {
+            // Dig into the per-agent outputs that were stored on
+            // modesStatus when results arrived. Each bot's independent
+            // take lives under `perspective-collector` → `perspectives`.
+            const perspectiveOutput = modesStatus.find(m => m.id === 'perspective-collector')?.output;
+            const perspectives: any[] = perspectiveOutput?.perspectives || perspectiveOutput?.data?.perspectives || [];
+            const assemblerOutput = modesStatus.find(m => m.id === 'expert-assembler')?.output;
+            const panel: any[] = assemblerOutput?.experts || assemblerOutput?.data?.experts || [];
+            return (
             <Card>
               <CardHeader>
                 <CardTitle>Unified Results</CardTitle>
@@ -870,6 +878,78 @@ export default function Roundtable() {
                     <p className="text-sm font-medium mb-1">Original Query:</p>
                     <p className="text-sm text-muted-foreground">{finalResults.query || query}</p>
                   </div>
+
+                  {/* Panel of bots — each labelled by expertise. Shown
+                      up-front so the user can see who's on the panel. */}
+                  {panel.length > 0 && (
+                    <div className="p-3 border border-border rounded-lg bg-muted/30">
+                      <p className="text-sm font-medium mb-2 flex items-center gap-1.5">
+                        <Users className="h-4 w-4" />
+                        Panel ({panel.length})
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {panel.map((p, i) => (
+                          <Badge key={i} variant="secondary" className="text-[11px]">
+                            {p.role}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Per-bot perspectives — each bot's own take, own
+                      clarifying questions, own key findings. No unified
+                      collapse until the Final Recommendation below. */}
+                  {perspectives.length > 0 && (
+                    <div className="space-y-3">
+                      <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+                        Each Bot's Take
+                      </h4>
+                      {perspectives.map((p, i) => (
+                        <Card key={i} className="border-l-4 border-l-primary/50" data-testid={`roundtable-perspective-${i}`}>
+                          <CardHeader className="pb-2">
+                            <CardTitle className="text-base flex items-center justify-between gap-2">
+                              <span>{p.expert}</span>
+                              {typeof p.confidence === 'number' && (
+                                <Badge variant="outline" className="text-[10px]">
+                                  {Math.round(p.confidence * 100)}% confidence
+                                </Badge>
+                              )}
+                            </CardTitle>
+                          </CardHeader>
+                          <CardContent className="space-y-3 pb-4">
+                            {p.position && (
+                              <p className="text-sm leading-relaxed">{p.position}</p>
+                            )}
+                            {Array.isArray(p.questions) && p.questions.length > 0 && (
+                              <div>
+                                <p className="text-xs font-semibold text-muted-foreground mb-1">
+                                  Questions this bot would ask:
+                                </p>
+                                <ul className="list-disc list-inside space-y-1 text-sm text-foreground/90">
+                                  {p.questions.map((q: string, qi: number) => (
+                                    <li key={qi}>{q}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+                            {Array.isArray(p.keyPoints) && p.keyPoints.length > 0 && (
+                              <div>
+                                <p className="text-xs font-semibold text-muted-foreground mb-1">
+                                  Key findings:
+                                </p>
+                                <ul className="list-disc list-inside space-y-1 text-sm text-foreground/90">
+                                  {p.keyPoints.map((k: string, ki: number) => (
+                                    <li key={ki}>{k}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+                          </CardContent>
+                        </Card>
+                      ))}
+                    </div>
+                  )}
 
                   {/* Final synthesized result */}
                   {finalResults.finalResult && (
@@ -933,7 +1013,8 @@ export default function Roundtable() {
                 </div>
               </CardContent>
             </Card>
-          )}
+            );
+          })()}
         </TabsContent>
       </Tabs>
     </div>

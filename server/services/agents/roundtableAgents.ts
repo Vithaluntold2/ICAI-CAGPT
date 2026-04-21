@@ -74,14 +74,24 @@ export class ExpertAssembler extends EventEmitter implements AgentDefinition {
     const domain = input.data.domain as string;
     
     // Use AI to determine the best expert composition
-    const systemPrompt = `You are an expert team assembler for financial and accounting discussions. 
+    const systemPrompt = `You are an expert team assembler for financial and accounting discussions.
 Analyze the query and suggest 3-5 relevant experts with their specializations.
+
+STRICT RULES for the "role" field:
+- Use the "X Bot" format where X is the area of expertise (e.g. "Tax Bot",
+  "Audit Bot", "Forensics Bot", "GST Bot", "Transfer Pricing Bot",
+  "IFRS Bot"). Keep it short — 1–3 words before "Bot".
+- DO NOT invent personal names. DO NOT add credentials ("CA", "CFA",
+  "CPA", "Dr.", "Mr.", "Ms.", "Jr.", "Sr.", "Partner", "Associate").
+- DO NOT add firm names, cities, or years of experience.
+- "role" must be ONLY the expertise-bot label. Nothing else.
+
 Return a JSON array of objects with 'role' and 'expertise' (array) fields.`;
-    
+
     const userPrompt = `Query: "${query}"
 Domain: ${domain || 'general finance'}
 
-Select the most relevant experts for this discussion. Consider tax, audit, forensic, 
+Select the most relevant experts for this discussion. Consider tax, audit, forensic,
 international, and compliance aspects based on the query.`;
 
     try {
@@ -127,22 +137,23 @@ international, and compliance aspects based on the query.`;
   }
 
   private selectExperts(domain: string, query: string): Array<{ role: string; expertise: string[] }> {
+    // Expertise-bot naming (per user directive — no personal names, no
+    // fake credentials, no firm names). Each bot speaks from one area.
     const baseExperts = [
-      { role: 'Tax Strategist', expertise: ['tax planning', 'compliance', 'regulations'] },
-      { role: 'Financial Advisor', expertise: ['investments', 'wealth management', 'portfolio'] },
+      { role: 'Tax Bot', expertise: ['tax planning', 'compliance', 'regulations'] },
+      { role: 'Finance Bot', expertise: ['investments', 'wealth management', 'portfolio'] },
     ];
 
-    // Domain-specific experts
     if (domain.includes('international') || query.toLowerCase().includes('cross-border')) {
-      baseExperts.push({ role: 'International Tax Expert', expertise: ['transfer pricing', 'treaty', 'BEPS'] });
+      baseExperts.push({ role: 'International Tax Bot', expertise: ['transfer pricing', 'treaty', 'BEPS'] });
     }
 
     if (domain.includes('audit') || query.toLowerCase().includes('compliance')) {
-      baseExperts.push({ role: 'Audit Specialist', expertise: ['internal controls', 'risk assessment', 'procedures'] });
+      baseExperts.push({ role: 'Audit Bot', expertise: ['internal controls', 'risk assessment', 'procedures'] });
     }
 
     if (domain.includes('forensic') || query.toLowerCase().includes('investigation')) {
-      baseExperts.push({ role: 'Forensic Accountant', expertise: ['fraud detection', 'investigation', 'litigation support'] });
+      baseExperts.push({ role: 'Forensics Bot', expertise: ['fraud detection', 'investigation', 'litigation support'] });
     }
 
     return baseExperts.slice(0, 5); // Max 5 experts for manageable discussion
@@ -250,17 +261,38 @@ export class PerspectiveCollector extends EventEmitter implements AgentDefinitio
     const experts = (input.data.experts || input.data.previousOutputs?.['expert-assembler']?.data?.experts || []) as any[];
     const query = input.data.query as string;
     
-    // Use AI to generate expert perspectives
-    const systemPrompt = `You are simulating a roundtable discussion with multiple financial experts.
-For each expert, generate a unique perspective on the query that reflects their specialty.
-Return a JSON array with objects containing: expert, position (1-2 sentences), keyPoints (array of 3 points), confidence (0-1).`;
+    // Use AI to generate per-expert perspectives. Each bot speaks from
+    // its own lane — own reasoning, own clarifying questions, own
+    // findings. This mirrors the user's directive that every expert
+    // should "ask their own set of questions, solve their own set of
+    // problem and get back to me" rather than collapse to a single
+    // unified voice too early.
+    const systemPrompt = `You are simulating a roundtable of expertise-specialized bots.
+Each bot analyses the user's query independently, from ITS own specialty only.
+
+STRICT RULES:
+- Do NOT invent personal names, credentials, firm names, or years of
+  experience. Reference each bot only by its role label (e.g.
+  "Tax Bot", "Audit Bot").
+- Each bot's "position" should read like that bot speaking directly in
+  first person ("As the Tax Bot, I would…"), not a third-person summary.
+- Each bot should produce:
+  • "position" — 1–2 sentences of its take.
+  • "questions" — 2–3 SPECIFIC clarifying questions THIS bot would ask
+    the user to refine its analysis (areas only this bot cares about).
+  • "keyPoints" — 3 concrete findings or considerations from THIS bot's
+    specialty.
+  • "confidence" — 0–1 self-rating.
+
+Return a JSON array with objects containing:
+  expert, position, questions (array of strings), keyPoints (array of strings), confidence.`;
 
     const userPrompt = `Query: "${query}"
 
-Experts participating:
-${experts.map((e: any, i: number) => `${i + 1}. ${e.role} - Expertise: ${e.expertise?.join(', ') || 'general'}`).join('\n')}
+Bots participating:
+${experts.map((e: any, i: number) => `${i + 1}. ${e.role} — Expertise: ${e.expertise?.join(', ') || 'general'}`).join('\n')}
 
-Generate each expert's unique perspective based on their specialty.`;
+Generate each bot's independent take, its own clarifying questions, and its own key findings.`;
 
     try {
       const aiResponse = await getAIResponse(systemPrompt, userPrompt, 1500);
@@ -275,6 +307,7 @@ Generate each expert's unique perspective based on their specialty.`;
           perspectives = experts.map((expert: any, i: number) => ({
             expert: expert.role,
             position: this.generatePosition(expert.role, query, i),
+            questions: this.generateQuestions(expert.role),
             keyPoints: this.generateKeyPoints(expert.role),
             evidenceType: this.getEvidenceType(expert.role),
             confidence: this.calculateConfidence(expert, query, '', []),
@@ -308,12 +341,14 @@ Generate each expert's unique perspective based on their specialty.`;
       // Fallback to static generation
       const perspectives = experts.map((expert: any, i: number) => {
         const position = this.generatePosition(expert.role, query, i);
+        const questions = this.generateQuestions(expert.role);
         const keyPoints = this.generateKeyPoints(expert.role);
         const confidence = this.calculateConfidence(expert, query, position, keyPoints);
-        
+
         return {
           expert: expert.role,
           position,
+          questions,
           keyPoints,
           evidenceType: this.getEvidenceType(expert.role),
           confidence,
@@ -367,6 +402,48 @@ Generate each expert's unique perspective based on their specialty.`;
       `Consider ${role.toLowerCase()} implications`,
       'Evaluate regulatory requirements',
       'Assess risk-return tradeoffs',
+    ];
+  }
+
+  /**
+   * Fallback clarifying questions a bot would ask. The LLM-generated
+   * questions are preferred; this template only kicks in when the LLM
+   * call fails. Keeps each bot's voice distinct even in fallback mode.
+   */
+  private generateQuestions(role: string): string[] {
+    const lower = role.toLowerCase();
+    if (lower.includes('tax')) {
+      return [
+        'Which tax year and jurisdiction applies?',
+        'Is this for a company, LLP, or individual?',
+        'Are there any prior-year positions I should reconcile to?',
+      ];
+    }
+    if (lower.includes('audit')) {
+      return [
+        'What is the scope — statutory, internal, or forensic?',
+        'Which framework applies (Ind AS, IFRS, US GAAP)?',
+        'Have control weaknesses been flagged previously?',
+      ];
+    }
+    if (lower.includes('forensic')) {
+      return [
+        'What triggered the investigation — whistleblower, variance, external notice?',
+        'Do we have access to source documents and ERP logs?',
+        'Is the matter likely to end in litigation?',
+      ];
+    }
+    if (lower.includes('international')) {
+      return [
+        'Which counter-jurisdictions are involved?',
+        'Are there applicable tax treaties or BEPS considerations?',
+        'What is the functional vs legal characterisation of the flow?',
+      ];
+    }
+    return [
+      `What specific ${lower.replace(/ bot$/, '')} angle matters most to you?`,
+      'What constraints (timeline, cost, risk tolerance) should I optimise for?',
+      'Is there prior work or precedent I should align with?',
     ];
   }
 
@@ -1042,6 +1119,13 @@ export class RecommendationFinalizer extends EventEmitter implements AgentDefini
     // Use AI to generate executive summary and recommendations
     const systemPrompt = `You are finalizing a professional expert roundtable report.
 Create an executive summary and actionable recommendations based on the consensus reached.
+
+STRICT RULES:
+- Refer to participants ONLY by their role label ("Tax Bot", "Audit Bot",
+  etc.) — never invent personal names, credentials, firm names, or
+  years of experience.
+- Do not anthropomorphise beyond the bot label.
+
 Return JSON with: executiveSummary (2-3 paragraphs), detailedRecommendations (array of {priority, recommendation, rationale}), implementationRoadmap (array of {phase, duration, milestones}), riskConsiderations (array of {risk, severity, mitigation}).`;
 
     const userPrompt = `Original Query: "${query}"

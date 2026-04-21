@@ -1243,7 +1243,18 @@ export default function Chat() {
         ) : (
           <div className="flex-1 min-h-0">
             {activeConversation ? (
-              <Whiteboard conversationId={activeConversation} />
+              <>
+                <Whiteboard conversationId={activeConversation} />
+                {whiteboardEnabled && (
+                  <ChatPIP
+                    messages={messages}
+                    byId={artifactsData?.byId ?? {}}
+                    onSend={handleSend}
+                    isStreaming={isStreaming}
+                    conversationId={activeConversation}
+                  />
+                )}
+              </>
             ) : (
               <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
                 Start a conversation to populate your whiteboard.

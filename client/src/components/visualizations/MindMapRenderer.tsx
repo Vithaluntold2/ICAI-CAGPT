@@ -30,6 +30,12 @@ interface MindMapRendererProps {
   /** When true, suppresses the internal title/subtitle header. Set by
    *  wrappers that already render the title, to avoid duplication. */
   embedded?: boolean;
+  /** Preview mode: disables mind-elixir's own wheel/drag capture and
+   *  adds a click-overlay that fires `onOpenFullscreen`. Used in the
+   *  whiteboard card to avoid nested pan/zoom with the outer
+   *  react-zoom-pan-pinch. */
+  preview?: boolean;
+  onOpenFullscreen?: () => void;
 }
 
 /**
@@ -144,7 +150,10 @@ function toMindElixirData(data: MindMapData): MindElixirData {
 }
 
 const MindMapRenderer = forwardRef<MindMapRendererHandle, MindMapRendererProps>(
-  function MindMapRenderer({ data, embedded = false }, ref) {
+  function MindMapRenderer(
+    { data, embedded = false, preview = false, onOpenFullscreen },
+    ref,
+  ) {
     const containerRef = useRef<HTMLDivElement>(null);
     const instanceRef = useRef<MindElixirInstance | null>(null);
 
@@ -170,6 +179,11 @@ const MindMapRenderer = forwardRef<MindMapRendererHandle, MindMapRendererProps>(
         toolBar: false,
         keypress: false,
         allowUndo: false,
+        // In preview mode, swallow wheel events so the outer whiteboard's
+        // pan/zoom owns the scroll. An absolutely-positioned overlay above
+        // the canvas also blocks drag/pointer interactions and routes
+        // clicks to `onOpenFullscreen`.
+        handleWheel: preview ? () => {} : true,
         theme: isDark ? MindElixir.DARK_THEME : MindElixir.THEME,
       });
       instance.init(mindData);
@@ -298,6 +312,22 @@ const MindMapRenderer = forwardRef<MindMapRendererHandle, MindMapRendererProps>(
           ref={containerRef}
           className={showHeader ? "h-[calc(100%-60px)] mt-[60px]" : "h-full"}
         />
+        {/* Preview overlay — blocks drag/click on the mind-elixir canvas
+            and routes clicks to onOpenFullscreen. Only rendered in preview
+            mode so the interactive chat + fullscreen views keep drag/pan. */}
+        {preview && onOpenFullscreen && (
+          <button
+            type="button"
+            onClick={onOpenFullscreen}
+            aria-label="Open mindmap in fullscreen"
+            className="absolute inset-0 z-20 cursor-zoom-in group"
+            data-testid="mindmap-preview-overlay"
+          >
+            <span className="absolute bottom-3 right-3 inline-flex items-center gap-1.5 rounded-md bg-background/90 backdrop-blur border border-border px-2 py-1 text-[11px] text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity">
+              Open
+            </span>
+          </button>
+        )}
       </div>
     );
   }

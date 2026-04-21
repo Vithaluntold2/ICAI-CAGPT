@@ -11,6 +11,7 @@ export function ArtifactRenderer({
   artifact,
   conversationId,
   embedded = false,
+  preview = false,
 }: {
   artifact: WhiteboardArtifact;
   conversationId?: string;
@@ -19,14 +20,20 @@ export function ArtifactRenderer({
    *  individual artifact components suppress their own redundant title chrome
    *  in that case. */
   embedded?: boolean;
+  /** True when rendered inside the whiteboard canvas. Interactive artifacts
+   *  (workflow, mindmap) render as non-interactive thumbnails with a click
+   *  target that opens a fresh fullscreen instance — avoids the nested
+   *  pan/zoom trap where x6 / mind-elixir's scroll capture competes with
+   *  the whiteboard's react-zoom-pan-pinch. */
+  preview?: boolean;
 }) {
   switch (artifact.kind) {
     case "chart":
       return <ChartArtifact payload={artifact.payload as any} embedded={embedded} />;
     case "workflow":
-      return <WorkflowArtifact payload={artifact.payload as any} embedded={embedded} />;
+      return <WorkflowArtifact payload={artifact.payload as any} embedded={embedded} preview={preview} />;
     case "mindmap":
-      return <MindmapArtifact payload={artifact.payload as any} embedded={embedded} />;
+      return <MindmapArtifact payload={artifact.payload as any} embedded={embedded} preview={preview} />;
     case "spreadsheet":
       return (
         <SpreadsheetArtifact

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+// createPortal removed — fullscreen now lives in a separate modal with
+// its own graph instance (see WorkflowFullscreenModal).
 import { Graph } from '@antv/x6';
 // Plugins removed: @antv/x6-plugin-minimap and -export apply class
 // decorators that read static helpers (e.g. `View.dispose`) at module-load
@@ -34,7 +35,6 @@ import {
   Maximize2,
   GitBranch,
   Expand,
-  Shrink,
   MoreHorizontal,
   FileJson,
 } from 'lucide-react';
@@ -67,6 +67,19 @@ interface WorkflowRendererProps {
   title?: string;
   layout?: string;
   embedded?: boolean;
+  /** Preview mode: x6 is rendered as a non-interactive thumbnail — no pan,
+   *  no mousewheel zoom, no toolbar. Clicking anywhere fires
+   *  `onOpenFullscreen`. This mode is used when the renderer is embedded
+   *  inside another pan/zoom surface (the whiteboard canvas), where
+   *  stacking two interactive zoom libraries creates a scroll trap. */
+  preview?: boolean;
+  /** Called when the fullscreen button is clicked (non-preview) OR the
+   *  preview surface is clicked. The parent is expected to mount a
+   *  fresh, fully-interactive instance of this renderer in a dedicated
+   *  modal. We do NOT portal our own DOM — x6 stores internal refs tied
+   *  to parent layout and detaching mid-instance leaves the graph in a
+   *  blank, half-initialised state. */
+  onOpenFullscreen?: () => void;
 }
 
 const SHAPE_BY_TYPE: Record<WorkflowNode['type'], string> = {
@@ -106,6 +119,8 @@ export default function WorkflowRendererX6({
   edges: edgesInput,
   title,
   embedded = false,
+  preview = false,
+  onOpenFullscreen,
 }: WorkflowRendererProps) {
   const nodes = Array.isArray(nodesInput) ? nodesInput : [];
   const edges = Array.isArray(edgesInput) ? edgesInput : [];
@@ -115,7 +130,6 @@ export default function WorkflowRendererX6({
 
   const [searchTerm, setSearchTerm] = useState('');
   const [detailNode, setDetailNode] = useState<WorkflowNode | null>(null);
-  const [isFullscreen, setIsFullscreen] = useState(false);
   const [isDark, setIsDark] = useState<boolean>(() =>
     typeof document !== 'undefined' &&
     document.documentElement.classList.contains('dark'),
@@ -156,20 +170,28 @@ export default function WorkflowRendererX6({
           thickness: 1,
         },
       },
-      panning: true,
-      mousewheel: { enabled: true, modifiers: [] },
-      interacting: { nodeMovable: true, edgeMovable: false },
+      // Preview: the renderer sits inside another pan/zoom surface
+      // (whiteboard canvas), so disable x6's own input capture to avoid the
+      // scroll-zoom trap. Click is handled by the overlay below, not by x6.
+      panning: !preview,
+      mousewheel: preview ? false : { enabled: true, modifiers: [] },
+      interacting: preview ? false : { nodeMovable: true, edgeMovable: false },
       connecting: { allowBlank: false, allowMulti: false, allowLoop: false },
       autoResize: true,
     });
 
     // Plugins (MiniMap, Export) removed — see import-block comment at top.
 
-    graph.on('node:click', ({ node }) => {
-      const id = node.id;
-      const original = nodes.find((n) => n.id === id);
-      if (original) setDetailNode(original);
-    });
+    // Node click in interactive mode opens the detail dialog. In preview
+    // mode the clickable-overlay above the canvas swallows clicks and
+    // calls onOpenFullscreen instead.
+    if (!preview) {
+      graph.on('node:click', ({ node }) => {
+        const id = node.id;
+        const original = nodes.find((n) => n.id === id);
+        if (original) setDetailNode(original);
+      });
+    }
 
     graphRef.current = graph;
 
@@ -355,31 +377,13 @@ export default function WorkflowRendererX6({
     }
   }, [searchTerm]);
 
-  // Fullscreen — lock body scroll + Escape to exit, then re-fit the graph.
-  useEffect(() => {
-    const graph = graphRef.current;
-    if (!isFullscreen) {
-      if (graph) {
-        const t = window.setTimeout(() => graph.zoomToFit({ padding: 24, maxScale: 1.6 }), 120);
-        return () => window.clearTimeout(t);
-      }
-      return;
-    }
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setIsFullscreen(false);
-    };
-    window.addEventListener('keydown', onKey);
-    const t = window.setTimeout(() => {
-      if (graph) graph.zoomToFit({ padding: 24, maxScale: 1.6 });
-    }, 150);
-    return () => {
-      document.body.style.overflow = prevOverflow;
-      window.removeEventListener('keydown', onKey);
-      window.clearTimeout(t);
-    };
-  }, [isFullscreen]);
+  // Fullscreen is now handled by the parent (a dedicated
+  // WorkflowFullscreenModal that mounts a *fresh* graph instance in a
+  // portal). This component never portals its own DOM, so x6's internal
+  // refs stay bound to the container it was constructed with. The old
+  // portal approach broke both fullscreen (blank — x6 disoriented after
+  // DOM move) and exit (inline view broken — x6 canvas tied to the
+  // portaled container).
 
   // Toolbar actions
   const zoomIn = () => graphRef.current?.zoom(0.15);
@@ -445,30 +449,25 @@ export default function WorkflowRendererX6({
     );
   }
 
-  const containerClass = isFullscreen
-    ? 'fixed inset-0 z-50 w-screen h-screen rounded-none border-0 shadow-none flex flex-col'
-    : embedded
-      ? 'w-full h-full flex flex-col overflow-hidden'
-      : 'w-full border rounded-xl overflow-hidden shadow-2xl flex flex-col';
+  const containerClass = embedded
+    ? 'w-full h-full flex flex-col overflow-hidden relative'
+    : 'w-full border rounded-xl overflow-hidden shadow-2xl flex flex-col relative';
 
-  const containerStyle: React.CSSProperties = isFullscreen
-    ? { background: canvasBg }
-    : embedded
-      ? // `h-full` chains through from the class; minHeight: 420 is a floor
-        // for parents that don't set a concrete height (InlineArtifactCard
-        // in chat is p-4 with no height — child h-full there would collapse
-        // to 0). Whiteboard's ArtifactCard does set a concrete height and
-        // it always exceeds 420, so the floor is inert there.
-        { background: canvasBg, minHeight: 420 }
-      : { background: canvasBg, height: Math.max(480, Math.min(1800, nodes.length * 110 + 80)) };
+  const containerStyle: React.CSSProperties = embedded
+    ? // `h-full` chains through from the class; minHeight: 420 is a floor
+      // for parents that don't set a concrete height (InlineArtifactCard in
+      // chat is p-4 with no height — child h-full there would collapse to
+      // 0). Whiteboard's ArtifactCard sets a concrete height and it
+      // always exceeds 420, so the floor is inert there.
+      { background: canvasBg, minHeight: 420 }
+    : { background: canvasBg, height: Math.max(480, Math.min(1800, nodes.length * 110 + 80)) };
 
   const tree = (
-    <div
-      className={containerClass}
-      style={containerStyle}
-      data-fullscreen={isFullscreen || undefined}
-    >
-      {/* Header / toolbar */}
+    <div className={containerClass} style={containerStyle}>
+      {/* Header / toolbar. Hidden in preview mode — the card has its own
+          title row (from WorkflowArtifact / whiteboard ArtifactCard) and
+          preview has no interactive controls. */}
+      {!preview && (
       <div className="shrink-0 px-4 py-3 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 flex items-center justify-between gap-4">
         {embedded ? (
           <div aria-hidden />
@@ -558,21 +557,20 @@ export default function WorkflowRendererX6({
             </DropdownMenuContent>
           </DropdownMenu>
 
-          {/* Fullscreen */}
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setIsFullscreen(!isFullscreen)}
-            className="h-8 w-8 p-0 rounded-md hover:bg-foreground/5 text-muted-foreground"
-            title={isFullscreen ? 'Exit fullscreen (Esc)' : 'Open fullscreen'}
-            data-testid="workflow-fullscreen-toggle"
-          >
-            {isFullscreen ? (
-              <Shrink className="h-3.5 w-3.5" strokeWidth={1.75} />
-            ) : (
+          {/* Fullscreen — delegates to parent so a fresh instance mounts
+              in a portal. Hidden when the parent doesn't wire it. */}
+          {onOpenFullscreen && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onOpenFullscreen}
+              className="h-8 w-8 p-0 rounded-md hover:bg-foreground/5 text-muted-foreground"
+              title="Open fullscreen"
+              data-testid="workflow-fullscreen-toggle"
+            >
               <Expand className="h-3.5 w-3.5" strokeWidth={1.75} />
-            )}
-          </Button>
+            </Button>
+          )}
 
           {/* Overflow */}
           <DropdownMenu>
@@ -597,11 +595,29 @@ export default function WorkflowRendererX6({
           </DropdownMenu>
         </div>
       </div>
+      )}
 
       {/* Canvas. x6 paints into containerRef. Minimap dropped — plugin
           compat issue, see import-block comment. */}
       <div className="relative flex-1 min-h-0">
         <div ref={containerRef} className="absolute inset-0" />
+        {/* Preview overlay — swallows all pointer events above x6 (which
+            already has panning/mousewheel disabled). Click opens
+            fullscreen via the parent. Only rendered in preview mode. */}
+        {preview && onOpenFullscreen && (
+          <button
+            type="button"
+            onClick={onOpenFullscreen}
+            aria-label="Open workflow in fullscreen"
+            className="absolute inset-0 z-10 cursor-zoom-in group"
+            data-testid="workflow-preview-overlay"
+          >
+            <span className="absolute bottom-3 right-3 inline-flex items-center gap-1.5 rounded-md bg-background/90 backdrop-blur border border-border px-2 py-1 text-[11px] text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity">
+              <Expand className="h-3 w-3" strokeWidth={1.75} />
+              Open
+            </span>
+          </button>
+        )}
       </div>
 
       {/* Detail dialog */}
@@ -649,5 +665,6 @@ export default function WorkflowRendererX6({
     </div>
   );
 
-  return isFullscreen ? createPortal(tree, document.body) : tree;
+  // Always return the tree in place — fullscreen is a separate modal path.
+  return tree;
 }

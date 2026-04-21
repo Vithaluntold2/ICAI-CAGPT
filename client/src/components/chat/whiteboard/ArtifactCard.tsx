@@ -109,7 +109,12 @@ export function ArtifactCard({
         {/* `embedded` tells the child renderers that this card already shows
             the title + kind + menu in its own header — so they should suppress
             their own redundant title chrome to avoid duplication. */}
-        <ArtifactRenderer artifact={artifact} conversationId={conversationId} embedded />
+        <ArtifactRenderer
+          artifact={artifact}
+          conversationId={conversationId}
+          embedded
+          preview
+        />
       </div>
     </div>
   );

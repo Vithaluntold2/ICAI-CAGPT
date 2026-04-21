@@ -1,201 +1,147 @@
-import { useMemo, useState } from "react";
-import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
-import { Send, Sparkles, X } from "lucide-react";
-import { useSelectionContext } from "./whiteboard/useSelectionContext";
-import { useConversationArtifacts } from "@/hooks/useConversationArtifacts";
-import { useReferenceResolver } from "./whiteboard/useReferenceResolver";
-import type { WhiteboardArtifact } from "../../../../shared/schema";
-import { cn } from "@/lib/utils";
+// client/src/components/chat/Composer.tsx
+import { useRef, useEffect, type KeyboardEvent, type ReactNode } from 'react';
+import { Paperclip, AtSign, Mic, X } from 'lucide-react';
+import { Kbd } from '@/components/ui/Kbd';
+import { cn } from '@/lib/utils';
 
-export interface ComposerSelection {
-  artifactIds: string[];
-  highlightedText?: string;
-}
+export type ComposerVariant = 'main' | 'pip';
 
-const KIND_ICON: Record<string, string> = {
-  chart: "📊",
-  workflow: "⎇",
-  mindmap: "🧠",
-  flowchart: "🔀",
-  spreadsheet: "📋",
-  checklist: "✓",
-};
-
-function iconFor(kind: string | undefined): string {
-  if (!kind) return "📊";
-  return KIND_ICON[kind] ?? "📊";
-}
-
-function truncate(s: string, n: number): string {
-  return s.length > n ? s.slice(0, n - 1) + "…" : s;
-}
-
-function SelectionChip({
-  id, artifact, onRemove, autoReason,
-}: {
-  id: string;
-  artifact: WhiteboardArtifact | undefined;
-  onRemove: () => void;
-  /** When present, this chip is an auto-inferred reference, not an explicit selection. */
-  autoReason?: "viewport" | "recent" | "topic";
-}) {
-  const title = artifact ? artifact.title : id;
-  const kind = artifact?.kind;
-  const isAuto = !!autoReason;
-  const autoLabel =
-    autoReason === "viewport" ? "in view"
-    : autoReason === "topic" ? "matches your question"
-    : autoReason === "recent" ? "most recent"
-    : undefined;
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px]",
-        isAuto
-          ? "bg-muted text-foreground/80 border border-dashed border-muted-foreground/40"
-          : "bg-primary/10 text-primary",
-      )}
-      data-testid={`composer-chip-${id}`}
-      data-auto={isAuto || undefined}
-      title={isAuto ? `Auto-inferred (${autoLabel}). Click × to remove or pick a different artifact.` : undefined}
-    >
-      {isAuto && <Sparkles className="h-3 w-3 opacity-70" aria-hidden />}
-      <span aria-hidden>{iconFor(kind)}</span>
-      <span className="truncate max-w-[140px]">{truncate(title, 20)}</span>
-      {isAuto && <span className="text-muted-foreground text-[10px] ml-0.5">auto</span>}
-      <button
-        type="button"
-        aria-label={`Remove ${title}`}
-        className="ml-0.5 rounded-full hover:bg-primary/20 p-0.5"
-        onClick={onRemove}
-        data-testid={`composer-chip-remove-${id}`}
-      >
-        <X className="h-3 w-3" />
-      </button>
-    </span>
-  );
+interface ComposerProps {
+  value: string;
+  onChange: (value: string) => void;
+  onSend: () => void;
+  onAttach?: () => void;
+  onVoice?: () => void;
+  onMention?: () => void;
+  placeholder?: string;
+  disabled?: boolean;
+  variant?: ComposerVariant;
+  /** Shown above the textarea as removable chips. */
+  selectionChips?: Array<{ id: string; label: string; icon?: ReactNode }>;
+  onRemoveSelection?: (id: string) => void;
 }
 
 export function Composer({
-  onSend, disabled, placeholder = "Ask anything…", conversationId,
-}: {
-  onSend: (text: string, selection: ComposerSelection | undefined) => void;
-  disabled?: boolean;
-  placeholder?: string;
-  conversationId?: string;
-}) {
-  const [text, setText] = useState("");
-  const [dismissedAutoId, setDismissedAutoId] = useState<string | null>(null);
-  const artifactIds = useSelectionContext(s => s.artifactIds);
-  const highlightedText = useSelectionContext(s => s.highlightedText);
-  const setArtifacts = useSelectionContext(s => s.setArtifacts);
-  const clear = useSelectionContext(s => s.clear);
-  const { data } = useConversationArtifacts(conversationId);
-  const byId = data?.byId ?? {};
+  value,
+  onChange,
+  onSend,
+  onAttach,
+  onVoice,
+  onMention,
+  placeholder = 'Ask CA-GPT…',
+  disabled = false,
+  variant = 'main',
+  selectionChips,
+  onRemoveSelection,
+}: ComposerProps) {
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Auto-inferred reference: only active when the user has NO explicit
-  // selection and the typed text contains a pronoun/reference word.
-  const autoRef = useReferenceResolver(conversationId, text);
-  const showAuto = useMemo(() => {
-    if (artifactIds.length > 0) return null; // explicit selection wins
-    if (!autoRef) return null;
-    if (autoRef.artifactId === dismissedAutoId) return null;
-    return autoRef;
-  }, [artifactIds, autoRef, dismissedAutoId]);
+  // Auto-grow
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    const maxRows = variant === 'pip' ? 4 : 8;
+    const maxHeight = 24 * maxRows + 16;
+    el.style.height = Math.min(el.scrollHeight, maxHeight) + 'px';
+  }, [value, variant]);
 
-  const submit = () => {
-    const t = text.trim();
-    if (!t || disabled) return;
-    let selection: ComposerSelection | undefined;
-    if (artifactIds.length > 0) {
-      selection = { artifactIds, highlightedText };
-    } else if (showAuto) {
-      // Promote the auto-inferred reference into an explicit selection on send.
-      // The server-side selection preamble and clarifier bypass are already
-      // wired to treat selection.artifactIds identically regardless of source.
-      selection = { artifactIds: [showAuto.artifactId] };
+  const handleKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey && !disabled) {
+      e.preventDefault();
+      if (value.trim().length > 0) onSend();
     }
-    onSend(t, selection);
-    setText("");
-    setDismissedAutoId(null);
-    if (artifactIds.length > 0) clear();
   };
 
-  const hasVisibleReference = artifactIds.length > 0 || !!showAuto;
+  const frameClass = cn(
+    'border border-border-strong bg-card/85 rounded-xl px-4 py-3.5 transition-shadow',
+    'backdrop-blur-[14px] supports-[backdrop-filter]:bg-card/85',
+    value.trim() ? 'shadow-float ring-1 ring-aurora-teal/20' : 'shadow-float',
+    disabled && 'opacity-60'
+  );
 
   return (
-    <div className="flex flex-col gap-2" data-testid="composer">
-      {hasVisibleReference && (
-        <div
-          className="flex flex-col gap-1 text-xs px-2 py-1.5 bg-blue-50 dark:bg-blue-950/30 rounded border"
-          data-testid="composer-selection-bar"
-        >
-          <div className="flex flex-wrap items-center gap-1">
-            <span className="text-[11px] text-muted-foreground mr-1">
-              {artifactIds.length > 0 ? "Referring to:" : "Probably about:"}
+    <div className={frameClass}>
+      {selectionChips && selectionChips.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 pb-2 mb-2 border-b border-border">
+          {selectionChips.map((chip) => (
+            <span
+              key={chip.id}
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-aurora-teal/12 border border-aurora-teal/30 text-aurora-teal-soft text-[10px] font-medium"
+            >
+              {chip.icon}
+              {chip.label}
+              {onRemoveSelection && (
+                <button
+                  type="button"
+                  className="opacity-50 hover:opacity-100"
+                  onClick={() => onRemoveSelection(chip.id)}
+                  aria-label={`Remove ${chip.label}`}
+                >
+                  <X className="w-2.5 h-2.5" />
+                </button>
+              )}
             </span>
-            {artifactIds.length > 0
-              ? artifactIds.map((id) => (
-                  <SelectionChip
-                    key={id}
-                    id={id}
-                    artifact={byId[id]}
-                    onRemove={() => setArtifacts(artifactIds.filter(x => x !== id))}
-                  />
-                ))
-              : showAuto ? (
-                  <SelectionChip
-                    key={`auto-${showAuto.artifactId}`}
-                    id={showAuto.artifactId}
-                    artifact={byId[showAuto.artifactId]}
-                    onRemove={() => setDismissedAutoId(showAuto.artifactId)}
-                    autoReason={showAuto.reason}
-                  />
-                ) : null}
-            {artifactIds.length > 0 && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="ml-auto h-auto px-2 py-0.5 text-[11px]"
-                onClick={clear}
-                data-testid="composer-clear"
-              >
-                clear
-              </Button>
-            )}
-          </div>
-          {highlightedText && (
-            <div className="italic text-[11px] text-muted-foreground truncate">
-              quoted: "{highlightedText.slice(0, 60)}{highlightedText.length > 60 ? "…" : ""}"
-            </div>
-          )}
+          ))}
         </div>
       )}
-      <div className="flex items-end gap-2">
-        <Textarea
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          placeholder={placeholder}
-          className="flex-1 resize-none"
-          rows={2}
-          data-testid="composer-input"
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              submit();
-            } else if (e.key === "Escape") {
-              // Release focus so whiteboard keyboard shortcuts (+/-/0/F)
-              // work again without the user having to click outside.
-              e.preventDefault();
-              (e.currentTarget as HTMLTextAreaElement).blur();
-            }
-          }}
-        />
-        <Button onClick={submit} disabled={disabled || !text.trim()} size="icon" data-testid="composer-send">
-          <Send className="h-4 w-4" />
-        </Button>
+
+      <textarea
+        ref={textareaRef}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={handleKey}
+        placeholder={placeholder}
+        disabled={disabled}
+        rows={1}
+        className="w-full bg-transparent outline-none resize-none text-[14px] text-foreground placeholder:text-muted-foreground font-sans leading-[1.5]"
+      />
+
+      <div className="flex justify-between items-center mt-2.5 text-[11px] text-muted-foreground">
+        <div className="flex gap-0.5">
+          <ToolButton title="Attach" onClick={onAttach}>
+            <Paperclip className="w-[15px] h-[15px]" strokeWidth={1.75} />
+          </ToolButton>
+          <ToolButton title="Mention" onClick={onMention}>
+            <AtSign className="w-[15px] h-[15px]" strokeWidth={1.75} />
+          </ToolButton>
+          <ToolButton title="Voice" onClick={onVoice}>
+            <Mic className="w-[15px] h-[15px]" strokeWidth={1.75} />
+          </ToolButton>
+        </div>
+        {variant === 'main' ? (
+          <div className="flex items-center gap-2">
+            <Kbd keys={['shift', 'return']} /> newline
+            <Kbd keys={['return']} /> send
+            <Kbd keys={['mod', 'K']} /> commands
+          </div>
+        ) : (
+          <div className="flex items-center gap-2">
+            <Kbd keys={['return']} /> send
+          </div>
+        )}
       </div>
     </div>
+  );
+}
+
+function ToolButton({
+  title,
+  onClick,
+  children,
+}: {
+  title: string;
+  onClick?: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      title={title}
+      onClick={onClick}
+      className="w-7 h-7 rounded flex items-center justify-center text-muted-foreground hover:bg-foreground/5 hover:text-aurora-teal-soft transition-colors"
+    >
+      {children}
+    </button>
   );
 }

@@ -1,9 +1,10 @@
 // client/src/components/shell/ConvoRow.tsx
-import { MoreHorizontal, Pencil, Pin, PinOff, Trash2 } from 'lucide-react';
+import { MoreHorizontal, Pencil, Pin, PinOff, Trash2, Link2, Link2Off } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
@@ -12,9 +13,15 @@ interface ConvoRowProps {
   title: string;
   selected?: boolean;
   isPinned?: boolean;
+  isShared?: boolean;
   onClick?: () => void;
   onRename?: () => void;
   onPin?: () => void;
+  /** Create (or re-create) a share link. We treat this as idempotent at the
+   *  API level — the server returns the same token if one exists. */
+  onShare?: () => void;
+  /** Revoke an existing share link. Only shown when `isShared` is true. */
+  onUnshare?: () => void;
   onDelete?: () => void;
 }
 
@@ -22,12 +29,15 @@ export function ConvoRow({
   title,
   selected,
   isPinned,
+  isShared,
   onClick,
   onRename,
   onPin,
+  onShare,
+  onUnshare,
   onDelete,
 }: ConvoRowProps) {
-  const hasMenu = !!(onRename || onPin || onDelete);
+  const hasMenu = !!(onRename || onPin || onShare || onUnshare || onDelete);
   return (
     <div
       className={cn(
@@ -86,6 +96,26 @@ export function ConvoRow({
                     </>
                   )}
                 </DropdownMenuItem>
+              )}
+              {/* Share: create link (or recopy existing) / revoke. Mutually
+                  exclusive — both present as a single slot that changes label
+                  based on current state. */}
+              {(onShare || onUnshare) && (
+                <>
+                  {isShared && onUnshare ? (
+                    <DropdownMenuItem onClick={onUnshare}>
+                      <Link2Off className="w-3.5 h-3.5 mr-2" /> Stop sharing
+                    </DropdownMenuItem>
+                  ) : onShare ? (
+                    <DropdownMenuItem onClick={onShare}>
+                      <Link2 className="w-3.5 h-3.5 mr-2" />
+                      {isShared ? 'Copy share link' : 'Share link'}
+                    </DropdownMenuItem>
+                  ) : null}
+                </>
+              )}
+              {onDelete && (onRename || onPin || onShare || onUnshare) && (
+                <DropdownMenuSeparator />
               )}
               {onDelete && (
                 <DropdownMenuItem

@@ -834,7 +834,42 @@ export class AIOrchestrator {
     }
     
     let finalResponse = aiResponse.content;
-    
+
+    // Roundtable belt-and-suspenders: the prompt already forbids human names +
+    // credentials on panellists, but LLMs occasionally slip. Scrub two common
+    // leak patterns in blockquote headers so the user never sees fake-human
+    // panellists even if the model drifted.
+    //   1. Trailing credential list after a name:
+    //        **Ananya Rao, FCA**  →  **Ananya Rao**
+    //        **Vikram Shah, CPA (US) / ACA (UK)**  →  **Vikram Shah**
+    //   2. Honorific prefix:  **Mr. Rao — Tax perspective** → **Rao — Tax perspective**
+    // These are regex-only: we don't try to detect or rewrite fake names
+    // themselves (too fragile). Instead we log when the pattern fires so the
+    // issue is visible in server logs and the prompt can be tuned.
+    if (chatMode === 'roundtable') {
+      const before = finalResponse;
+      // Strip credential tokens trailing a name inside **...** blockquote headers.
+      const CREDENTIALS =
+        '(?:FCA|ACA|CA|CPA|CFA|DISA|LLB|LLM|PhD|MBA|IP|RA|CS|CMA|ICAI|ICSI|ICAEW|ACCA|FRM)';
+      finalResponse = finalResponse.replace(
+        new RegExp(
+          `(\\*\\*[^*\\n]+?)(,\\s*${CREDENTIALS}(?:\\s*(?:\\(|/|,)[^*\\n]*)?)(\\s*(?:—|-|–)?[^*\\n]*\\*\\*)`,
+          'g',
+        ),
+        '$1$3',
+      );
+      // Strip honorific prefixes (Mr./Ms./Mrs./Dr.) at the start of bold headers.
+      finalResponse = finalResponse.replace(
+        /(\*\*)(?:Mr\.|Mrs\.|Ms\.|Dr\.|Shri|Smt\.?)\s+/g,
+        '$1',
+      );
+      if (finalResponse !== before) {
+        console.warn(
+          '[AIOrchestrator] Roundtable scrubber removed human-name credentials/honorifics — model drifted from expertise-bot convention. Consider tightening the prompt.',
+        );
+      }
+    }
+
     // Step 5.5: Format calculation results professionally if calculations were performed
     if (calculationResults && Object.keys(calculationResults).length > 0) {
       try {

@@ -14,6 +14,7 @@ interface SidebarConversation {
   title: string;
   mode: ChatMode;
   pinned?: boolean;
+  shared?: boolean;
 }
 
 interface ModeSidebarProps {
@@ -32,6 +33,8 @@ interface ModeSidebarProps {
   onSelectConversation: (id: string) => void;
   onRenameConversation?: (id: string) => void;
   onPinConversation?: (id: string) => void;
+  onShareConversation?: (id: string) => void;
+  onUnshareConversation?: (id: string) => void;
   onDeleteConversation?: (id: string) => void;
 }
 
@@ -49,6 +52,8 @@ export function ModeSidebar({
   onSelectConversation,
   onRenameConversation,
   onPinConversation,
+  onShareConversation,
+  onUnshareConversation,
   onDeleteConversation,
 }: ModeSidebarProps) {
   const [expanded, setExpanded] = useState<ChatMode | null>(activeMode ?? null);
@@ -109,6 +114,7 @@ export function ModeSidebar({
                       title={c.title}
                       selected={c.id === activeConversationId}
                       isPinned={c.pinned}
+                      isShared={c.shared}
                       onClick={() => onSelectConversation(c.id)}
                       onRename={
                         onRenameConversation
@@ -118,6 +124,16 @@ export function ModeSidebar({
                       onPin={
                         onPinConversation
                           ? () => onPinConversation(c.id)
+                          : undefined
+                      }
+                      onShare={
+                        onShareConversation
+                          ? () => onShareConversation(c.id)
+                          : undefined
+                      }
+                      onUnshare={
+                        onUnshareConversation
+                          ? () => onUnshareConversation(c.id)
                           : undefined
                       }
                       onDelete={

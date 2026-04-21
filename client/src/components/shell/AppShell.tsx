@@ -26,6 +26,8 @@ interface AppShellProps {
   onSelectConversation: (id: string) => void;
   onRenameConversation?: (id: string) => void;
   onPinConversation?: (id: string) => void;
+  onShareConversation?: (id: string) => void;
+  onUnshareConversation?: (id: string) => void;
   onDeleteConversation?: (id: string) => void;
   onOpenSearch?: () => void;
   onNewChat?: () => void;

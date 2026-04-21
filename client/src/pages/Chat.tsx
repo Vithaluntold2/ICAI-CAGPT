@@ -1206,6 +1206,7 @@ export default function Chat() {
       title: c.title,
       mode,
       pinned: c.pinned,
+      shared: c.isShared,
     };
   });
 
@@ -1219,7 +1220,23 @@ export default function Chat() {
     setView(v === 'whiteboard' ? 'board' : 'chat');
 
   const handleSelectMode = (mode: ChatMode) => {
+    // Mode is a per-conversation property (persisted at creation and used to
+    // group the sidebar + pick the right prompt). Switching modes mid-chat
+    // would silently re-route subsequent messages to a different system
+    // prompt while the conversation stays in its original sidebar bucket —
+    // confusing, and it would also drift from the mode the AI was told it
+    // was operating in. Instead, picking a mode always starts a fresh chat
+    // so the conversation is cleanly scoped to one mode end-to-end.
+    //
+    // If the user already has an empty unsent chat (no messages) just
+    // update the mode on that same draft — no need to churn a new
+    // conversation-id slot for nothing.
     setChatMode(mode);
+    if (messages.length > 0 || activeConversation) {
+      setActiveConversation(undefined);
+      setMessages([]);
+      setSelectedFile(null);
+    }
   };
 
   const handleSelectConversation = (id: string) => {
@@ -1265,6 +1282,17 @@ export default function Chat() {
           handleRename(id, conv?.title ?? '');
         }}
         onPinConversation={(id) => pinMutation.mutate(id)}
+        onShareConversation={(id) => {
+          // For an already-shared conversation, we still POST: the server
+          // endpoint returns the existing token rather than minting a new
+          // one, so the menu item doubles as "Copy share link".
+          shareMutation.mutate(id);
+        }}
+        onUnshareConversation={(id) => {
+          if (window.confirm('Revoke the share link for this conversation? Anyone with the old link will lose access.')) {
+            unshareMutation.mutate(id);
+          }
+        }}
         onDeleteConversation={(id) => {
           if (window.confirm('Delete this conversation? This cannot be undone.')) {
             deleteMutation.mutate(id);

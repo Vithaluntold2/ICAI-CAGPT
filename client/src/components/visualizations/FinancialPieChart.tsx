@@ -35,7 +35,36 @@ export default function FinancialPieChart({
   formatValue = (value) => `$${value.toLocaleString()}`,
   showPercentage = true,
 }: FinancialPieChartProps) {
-  const total = data.reduce((sum, item) => sum + item.value, 0);
+  // Only slices with a positive numeric value are renderable — a slice with
+  // value 0, NaN, or undefined contributes no angular span and turns the pie
+  // into a blank circle with just the legend visible. Filter upstream here
+  // so the "total" math, the label generator, and Recharts all agree on
+  // what's renderable.
+  const usable = Array.isArray(data)
+    ? data.filter(
+        (d) =>
+          d &&
+          typeof d.value === "number" &&
+          isFinite(d.value) &&
+          d.value > 0 &&
+          typeof d.name === "string" &&
+          d.name.length > 0,
+      )
+    : [];
+
+  if (usable.length === 0) {
+    return (
+      <div
+        className="w-full border border-dashed border-border rounded-md p-6 text-sm text-muted-foreground text-center"
+        data-testid="chart-financial-pie-empty"
+      >
+        {title && <div className="font-semibold mb-2 text-foreground">{title}</div>}
+        <div>No renderable slices in this chart. The data payload had no positive numeric values.</div>
+      </div>
+    );
+  }
+
+  const total = usable.reduce((sum, item) => sum + item.value, 0);
 
   // Some series names the AI emits are full sentences ("turnover below ₹2
   // crore - Due Date"). Cap at a readable length so extreme outliers can't
@@ -57,7 +86,7 @@ export default function FinancialPieChart({
   // is missing or null. Coerce so toSafeKey can't throw during render.
   const toSafeKey = (s: string | null | undefined) =>
     String(s ?? "").replace(/[^a-z0-9]+/gi, "_").toLowerCase();
-  const chartConfig: ChartConfig = data.reduce<ChartConfig>((acc, item, idx) => {
+  const chartConfig: ChartConfig = usable.reduce<ChartConfig>((acc, item, idx) => {
     acc[toSafeKey(item.name)] = {
       label: item.name,
       color: item.color || DEFAULT_COLORS[idx % DEFAULT_COLORS.length],
@@ -78,7 +107,7 @@ export default function FinancialPieChart({
             container width instead of staying locked at 120px. */}
         <PieChart margin={{ top: 16, right: 96, bottom: 16, left: 96 }}>
           <Pie
-            data={data}
+            data={usable}
             cx="50%"
             cy="50%"
             labelLine={true}
@@ -88,7 +117,7 @@ export default function FinancialPieChart({
             dataKey="value"
             nameKey="name"
           >
-            {data.map((entry, index) => (
+            {usable.map((entry, index) => (
               <Cell
                 key={`cell-${index}`}
                 fill={entry.color || DEFAULT_COLORS[index % DEFAULT_COLORS.length]}

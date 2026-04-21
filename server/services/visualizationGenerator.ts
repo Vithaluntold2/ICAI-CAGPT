@@ -260,7 +260,13 @@ export class VisualizationGenerator {
     const config = this.buildChartConfig(chartType, headers, query);
     const title = this.generateTitle(query, chartType);
     
-    // For pie charts, add color to each data point
+    // For pie charts, coerce the header-keyed rows into the {name, value}
+    // shape that FinancialPieChart expects. Rows coming out of the table
+    // parser look like {Category: "Monthly", Percentage: 17.4} — the chart
+    // can't compute slice angles from that because it reads `value`, not
+    // `Percentage`. Pick the first non-numeric column as the label, the
+    // first numeric column as the value, and drop slices that have no
+    // usable value (would render as invisible 0-angle slices).
     if (chartType === 'pie') {
       const colors = [
         'hsl(var(--chart-1))',
@@ -269,16 +275,49 @@ export class VisualizationGenerator {
         'hsl(var(--chart-4))',
         'hsl(var(--chart-5))'
       ];
-      
-      const coloredData = data.map((item, index) => ({
-        ...item,
-        fill: colors[index % colors.length]
-      }));
-      
+
+      // Pick label + value columns by scanning headers in order. First
+      // header with text values → label column. First header with numeric
+      // values → value column.
+      let labelKey = headers[0];
+      let valueKey = headers[1];
+      for (const h of headers) {
+        if (data.some(r => typeof r[h] === 'number')) {
+          valueKey = h;
+          break;
+        }
+      }
+      for (const h of headers) {
+        if (h !== valueKey && data.some(r => typeof r[h] === 'string' && r[h].length > 0)) {
+          labelKey = h;
+          break;
+        }
+      }
+
+      const normalised = data
+        .map((row, index) => {
+          const rawValue = row[valueKey];
+          const value = typeof rawValue === 'number' ? rawValue : this.parseNumber(String(rawValue ?? ''));
+          const name = typeof row[labelKey] === 'string' && row[labelKey].length > 0
+            ? row[labelKey]
+            : `Slice ${index + 1}`;
+          return value !== null && value > 0
+            ? { name, value, fill: colors[index % colors.length] }
+            : null;
+        })
+        .filter((x): x is { name: string; value: number; fill: string } => x !== null);
+
+      // Bail out with null if nothing usable came through — the caller
+      // treats null as "no viable visualization" and falls back to prose.
+      if (normalised.length === 0) {
+        console.warn('[visualizationGenerator] Pie chart skipped — no slices had usable numeric values');
+        return null;
+      }
+
       return {
         type: chartType,
         title,
-        data: coloredData,
+        data: normalised,
         config
       };
     }
@@ -490,7 +529,7 @@ export class VisualizationGenerator {
   private createVisualizationFromData(
     data: Array<Record<string, any>>,
     query: string
-  ): VisualizationData {
+  ): VisualizationData | null {
     const colors = [
       'hsl(var(--chart-1))',
       'hsl(var(--chart-2))',
@@ -498,13 +537,33 @@ export class VisualizationGenerator {
       'hsl(var(--chart-4))',
       'hsl(var(--chart-5))'
     ];
-    
-    // Add colors to each data point for pie chart
-    const coloredData = data.map((item, index) => ({
-      ...item,
-      fill: colors[index % colors.length]
-    }));
-    
+
+    // Narrative-extracted rows may already be in {name, value} shape OR in
+    // ad-hoc {label, count} / {category, amount} shape. Normalise to
+    // {name, value} and drop entries with no usable value — same rules as
+    // the table path above.
+    const coloredData = data
+      .map((item, index) => {
+        const name = typeof item.name === 'string' && item.name.length > 0
+          ? item.name
+          : typeof item.label === 'string' && item.label.length > 0
+          ? item.label
+          : typeof item.category === 'string' && item.category.length > 0
+          ? item.category
+          : `Slice ${index + 1}`;
+        const rawValue = item.value ?? item.count ?? item.amount ?? item.percentage;
+        const value = typeof rawValue === 'number' ? rawValue : this.parseNumber(String(rawValue ?? ''));
+        return value !== null && value > 0
+          ? { name, value, fill: colors[index % colors.length] }
+          : null;
+      })
+      .filter((x): x is { name: string; value: number; fill: string } => x !== null);
+
+    if (coloredData.length === 0) {
+      console.warn('[visualizationGenerator] Narrative pie skipped — no slices had usable numeric values');
+      return null;
+    }
+
     return {
       type: 'pie',
       title: this.generateTitle(query, 'pie'),

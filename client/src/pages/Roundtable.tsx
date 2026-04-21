@@ -26,6 +26,7 @@ import {
   AlertCircle,
   Send,
   RefreshCw,
+  History,
 } from "lucide-react";
 
 interface ModeStatus {
@@ -61,6 +62,65 @@ export default function Roundtable() {
   const [finalResults, setFinalResults] = useState<any>(null);
   const [activeTab, setActiveTab] = useState("workflows");
   const eventSourceRef = useRef<EventSource | null>(null);
+
+  // Past-session history — fetched from /api/roundtable/sessions. The
+  // backend has always been persisting each run; the page just wasn't
+  // rendering anything, so 15 prior roundtables were "lost" from the
+  // user's perspective. Loading + reload handled here.
+  interface PastSession {
+    sessionId: string;
+    query: string;
+    workflowId: string;
+    status: string;
+    startedAt?: string;
+    finalResult?: any;
+  }
+  const [history, setHistory] = useState<PastSession[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+
+  const loadHistory = useCallback(async () => {
+    setLoadingHistory(true);
+    try {
+      const res = await fetch('/api/roundtable/sessions', { credentials: 'include' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      // Server merges in-memory + DB sessions under `sessions`. Sort by
+      // startedAt desc so newest bubbles to top.
+      const list: PastSession[] = (data.sessions || []).slice().sort(
+        (a: any, b: any) =>
+          new Date(b.startedAt || 0).getTime() - new Date(a.startedAt || 0).getTime(),
+      );
+      setHistory(list);
+    } catch (err) {
+      console.error('[Roundtable] Failed to load history', err);
+    } finally {
+      setLoadingHistory(false);
+    }
+  }, []);
+
+  // Initial fetch + refetch after every successful run so a new entry
+  // appears in the History tab without a manual refresh.
+  useEffect(() => {
+    if (user) loadHistory();
+  }, [user, loadHistory]);
+  useEffect(() => {
+    if (finalResults && !isExecuting) {
+      // Give the server a moment to persist the final status update.
+      const t = setTimeout(() => loadHistory(), 400);
+      return () => clearTimeout(t);
+    }
+  }, [finalResults, isExecuting, loadHistory]);
+
+  // Replay a past session: restore query + final result from history
+  // and jump to the Results tab. Doesn't re-run the agents.
+  const loadPastSession = useCallback((s: PastSession) => {
+    setQuery(s.query);
+    setSessionId(s.sessionId);
+    setActiveWorkflow(s.workflowId);
+    setFinalResults(s.finalResult ?? null);
+    setWorkflowError(null);
+    setActiveTab(s.finalResult ? 'results' : 'workflows');
+  }, []);
 
   // Redirect unauthenticated users to auth page
   useEffect(() => {
@@ -528,7 +588,92 @@ export default function Roundtable() {
           <TabsTrigger value="results" disabled={!finalResults}>
             Results
           </TabsTrigger>
+          <TabsTrigger value="history" data-testid="roundtable-history-tab">
+            <History className="h-3.5 w-3.5 mr-1.5" />
+            History{history.length > 0 ? ` (${history.length})` : ''}
+          </TabsTrigger>
         </TabsList>
+
+        <TabsContent value="history" className="space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-lg font-semibold">Past Roundtables</h3>
+              <p className="text-sm text-muted-foreground">
+                Your previous queries and their expert-panel results.
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={loadHistory}
+              disabled={loadingHistory}
+              data-testid="roundtable-history-refresh"
+            >
+              {loadingHistory ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />
+              ) : (
+                <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+              )}
+              Refresh
+            </Button>
+          </div>
+
+          {loadingHistory && history.length === 0 ? (
+            <Card>
+              <CardContent className="py-10 flex items-center justify-center">
+                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+              </CardContent>
+            </Card>
+          ) : history.length === 0 ? (
+            <Card>
+              <CardContent className="py-10 text-center text-sm text-muted-foreground">
+                No past roundtables yet. Run a workflow above and it'll show up here.
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="space-y-2">
+              {history.map((s) => {
+                const workflow = workflows.find((w) => w.id === s.workflowId);
+                const isDone = s.status === 'completed' || !!s.finalResult;
+                return (
+                  <Card
+                    key={s.sessionId}
+                    className="hover:shadow-md transition-shadow cursor-pointer"
+                    onClick={() => loadPastSession(s)}
+                    data-testid={`roundtable-history-item-${s.sessionId}`}
+                  >
+                    <CardContent className="py-4">
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2 mb-1 flex-wrap">
+                            <Badge variant="secondary" className="text-[10px]">
+                              {workflow?.name || s.workflowId}
+                            </Badge>
+                            <Badge
+                              variant={isDone ? 'default' : s.status === 'failed' ? 'destructive' : 'outline'}
+                              className="text-[10px]"
+                            >
+                              {s.status}
+                            </Badge>
+                            {s.startedAt && (
+                              <span className="text-[11px] text-muted-foreground">
+                                {new Date(s.startedAt).toLocaleString()}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-sm text-foreground line-clamp-2 leading-snug">
+                            {s.query}
+                          </p>
+                        </div>
+                        <ArrowRight className="h-4 w-4 text-muted-foreground shrink-0 mt-1" />
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          )}
+        </TabsContent>
 
         <TabsContent value="workflows" className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

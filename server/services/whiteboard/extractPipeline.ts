@@ -94,13 +94,20 @@ export function buildArtifactsForMessage(input: BuildArtifactsInput): BuildArtif
     const FORMULAS_PX = (payload?.metadata?.calculations?.length ?? 0) > 0 ? 180 : 0;
     const BOTTOM_PAD_PX = 12;
     const MIN_W = 900, MAX_W = 2000;
-    const MIN_H = 320, MAX_H = 1600;    // was 500; let short sheets be short
+    const MIN_H = 220, MAX_H = 1600;    // was 320 — 4-row sheets were getting
+                                        // 320px cards with 100px of empty
+                                        // tail. Let tiny sheets be tiny.
 
+    // Only ONE sheet is ever visible at a time (the viewer shows tabs, not
+    // a vertical stack). Earlier this summed rows across every sheet which
+    // over-allocated height by a lot for multi-sheet workbooks where the
+    // biggest sheet is short. Take the max per-sheet row count instead.
     let maxCols = 0;
-    let dataRows = 0;
+    let maxSheetRows = 0;
     for (const sheet of sheets) {
       const rows: any[][] = sheet.data ?? [];
-      dataRows += Math.max(rows.length - 1, 0); // exclude header
+      const sheetDataRows = Math.max(rows.length - 1, 0); // exclude header
+      if (sheetDataRows > maxSheetRows) maxSheetRows = sheetDataRows;
       for (const row of rows) {
         if (Array.isArray(row) && row.length > maxCols) maxCols = row.length;
       }
@@ -108,7 +115,7 @@ export function buildArtifactsForMessage(input: BuildArtifactsInput): BuildArtif
 
     const width  = Math.max(MIN_W, Math.min(MAX_W, maxCols * COL_PX + 40));
     const height = Math.max(MIN_H, Math.min(MAX_H,
-      CHROME_PX + TAB_PX + HEADER_ROW_PX + dataRows * ROW_PX + FORMULAS_PX + BOTTOM_PAD_PX));
+      CHROME_PX + TAB_PX + HEADER_ROW_PX + maxSheetRows * ROW_PX + FORMULAS_PX + BOTTOM_PAD_PX));
     return { width, height };
   }
 

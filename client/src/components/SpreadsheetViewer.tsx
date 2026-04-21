@@ -173,7 +173,7 @@ export default function SpreadsheetViewer({
   return (
     <div 
       ref={containerRef}
-      className={`flex flex-col ${isFullscreen ? 'fixed inset-0 z-50 h-screen bg-background' : 'w-full'}`}
+      className={`flex flex-col min-h-0 ${isFullscreen ? 'fixed inset-0 z-50 h-screen bg-background' : 'w-full h-full'}`}
     >
       {/* Spreadsheet Header — wrap-friendly so toolbar stays visible in narrow panels */}
       <div className="flex flex-wrap items-start justify-between gap-3 px-4 py-3 border-b bg-muted/30 sticky top-0 z-10">
@@ -270,9 +270,14 @@ export default function SpreadsheetViewer({
         </div>
       )}
 
-      {/* Spreadsheet Container — proper horizontal scroll + Excel-style grid */}
+      {/* Spreadsheet Container — proper horizontal scroll + Excel-style grid.
+          Grow into whatever height the parent gives us (whiteboard card has
+          a fixed height; standalone chat has none). `flex-1 min-h-0` lets
+          this region absorb the remaining space below chrome/tabs; the
+          60vh cap still protects the standalone chat path from a giant
+          workbook taking over the page. */}
       <div
-        className={`bg-background ${isFullscreen ? 'flex-1 overflow-auto min-h-0' : 'max-w-full overflow-auto'}`}
+        className={`bg-background flex-1 min-h-0 overflow-auto ${isFullscreen ? '' : 'max-w-full'}`}
         style={{ maxHeight: isFullscreen ? undefined : '60vh' }}
       >
         <div

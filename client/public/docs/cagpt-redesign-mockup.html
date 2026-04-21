@@ -103,6 +103,86 @@
     .screen { display: none; position: fixed; top: 48px; left: 0; right: 0; bottom: 0; }
     .screen.active { display: flex; }
 
+    /* ══ LANDING SCREEN ══ */
+    #screen-landing .main-area {
+      background:
+        radial-gradient(70% 110% at 50% 0%, rgba(0, 122, 216, 0.22) 0%, rgba(0,122,216,0) 55%),
+        radial-gradient(60% 80% at 80% 100%, rgba(240, 176, 42, 0.18) 0%, rgba(240,176,42,0) 60%),
+        linear-gradient(180deg, hsl(219, 38%, 10%) 0%, hsl(218, 40%, 7%) 100%);
+      position: relative;
+      overflow: hidden;
+    }
+    #screen-landing .main-area::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background:
+        linear-gradient(90deg, rgba(103, 149, 255, .10) 1px, transparent 1px),
+        linear-gradient(180deg, rgba(103, 149, 255, .08) 1px, transparent 1px);
+      background-size: 40px 40px;
+      opacity: .22;
+      pointer-events: none;
+    }
+    .landing-wrap {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 32px;
+      gap: 18px;
+      position: relative;
+      z-index: 1;
+    }
+    .landing-kicker {
+      color: hsl(209, 86%, 82%);
+      font-size: 11px;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+      font-weight: 700;
+    }
+    .landing-title {
+      font-family: var(--font-display);
+      font-size: 42px;
+      line-height: 1.05;
+      letter-spacing: -.02em;
+      color: #f2f8ff;
+      max-width: 760px;
+      text-shadow: 0 10px 30px rgba(0, 96, 180, .35);
+    }
+    .landing-title span { color: hsl(41, 95%, 67%); }
+    .landing-sub {
+      color: hsl(214, 36%, 74%);
+      font-size: 16px;
+      max-width: 720px;
+      line-height: 1.65;
+    }
+    .landing-cta-row { display: flex; gap: 10px; margin-top: 6px; flex-wrap: wrap; justify-content: center; }
+    .landing-btn {
+      height: 42px;
+      border-radius: 11px;
+      padding: 0 16px;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      font-weight: 700;
+      transition: all .14s;
+    }
+    .landing-btn.primary {
+      background: linear-gradient(135deg, rgba(0, 127, 212, .95) 0%, rgba(49, 88, 255, .95) 100%);
+      color: #fff;
+      box-shadow: 0 10px 30px rgba(0, 92, 186, .42);
+    }
+    .landing-btn.primary:hover { transform: translateY(-1px); }
+    .landing-btn.ghost {
+      color: hsl(211, 94%, 88%);
+      border: 1px solid rgba(134, 174, 255, .42);
+      background: rgba(10, 25, 47, .75);
+    }
+    .landing-btn.ghost:hover { border-color: rgba(170, 210, 255, .68); }
+
     /* ═══════════════════════════════════════════════════════
        SHARED SHELL — Sidebar + Main
     ═══════════════════════════════════════════════════════ */
@@ -143,6 +223,34 @@
       justify-content: center;
       flex-shrink: 0;
     }
+    .vidhi-sigil {
+      width: 70px;
+      height: 70px;
+      border-radius: 22px;
+      background: linear-gradient(180deg, hsl(204, 100%, 42%) 0%, hsl(214, 100%, 35%) 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      box-shadow: 0 16px 38px rgba(0, 91, 171, .42), inset 0 0 0 1px rgba(180, 220, 255, .22);
+      animation: sigilBreath 3.6s ease-in-out infinite;
+    }
+    .vidhi-sigil .sigil-ring {
+      position: absolute;
+      inset: -10px;
+      border-radius: 28px;
+      border: 1px solid rgba(146, 202, 255, .35);
+      box-shadow: 0 0 0 8px rgba(84, 162, 255, .08);
+      animation: sigilRingRotate 9s linear infinite;
+    }
+    @keyframes sigilBreath {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.05); }
+    }
+    @keyframes sigilRingRotate {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
     .logo-text {
       font-family: var(--font-display);
       font-size: 15px;
@@ -166,6 +274,25 @@
       transition: background .15s;
     }
     .new-chat-btn:hover { background: var(--ca-navy-light); }
+    .sidebar-search {
+      margin: 10px 8px 2px;
+      height: 34px;
+      border-radius: 8px;
+      border: 1px solid rgba(135,168,216,.22);
+      background: rgba(255,255,255,.04);
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 0 10px;
+      color: hsl(214, 26%, 76%);
+    }
+    .sidebar-search:focus-within { border-color: rgba(153,206,255,.5); box-shadow: 0 0 0 3px rgba(74,144,226,.14); }
+    .sidebar-search input {
+      flex: 1;
+      color: hsl(214, 30%, 84%);
+      font-size: 12px;
+    }
+    .sidebar-search input::placeholder { color: hsl(215, 18%, 54%); }
     .sidebar-section-label {
       padding: 14px 16px 6px;
       font-size: 10px;
@@ -306,12 +433,48 @@
       gap: 12px;
       margin-bottom: 20px;
       animation: msgIn .22s ease-out both;
+      position: relative;
     }
     @keyframes msgIn {
       from { opacity: 0; transform: translateY(8px); }
       to   { opacity: 1; transform: translateY(0); }
     }
     .msg-group.user { flex-direction: row-reverse; }
+    .msg-actions {
+      position: absolute;
+      bottom: -14px;
+      left: 44px;
+      opacity: 0;
+      transform: translateY(3px);
+      transition: all .14s;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(11, 22, 42, .92);
+      border: 1px solid rgba(125, 171, 255, .32);
+      border-radius: 999px;
+      padding: 3px 8px;
+      font-size: 10px;
+      color: hsl(214, 72%, 84%);
+      pointer-events: none;
+      z-index: 5;
+    }
+    .msg-group.user .msg-actions { left: auto; right: 44px; }
+    .msg-group:hover .msg-actions { opacity: 1; transform: translateY(0); pointer-events: auto; }
+    .msg-action-btn {
+      height: 20px;
+      min-width: 20px;
+      border-radius: 99px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: inherit;
+      background: transparent;
+      padding: 0 6px;
+      font-size: 10px;
+      border: 1px solid transparent;
+    }
+    .msg-action-btn:hover { border-color: rgba(149, 191, 255, .42); background: rgba(149, 191, 255, .12); }
     .msg-avatar {
       width: 32px; height: 32px;
       border-radius: 10px;
@@ -823,7 +986,7 @@
       color: var(--violet);
     }
     .thinking-label span {
-      background: linear-gradient(90deg, var(--violet) 0%, hsl(202,80%,55%) 50%, var(--violet) 100%);
+      background: linear-gradient(90deg, var(--ca-navy) 0%, hsl(38, 92%, 58%) 50%, var(--ca-navy-light) 100%);
       background-size: 200% 100%;
       -webkit-background-clip: text;
       background-clip: text;
@@ -871,7 +1034,7 @@
       margin-top: 1px;
     }
     .step-dot.active ~ .step-text-wrap .step-phase {
-      background: linear-gradient(90deg, var(--violet) 0%, hsl(202,80%,50%) 60%, var(--violet) 100%);
+      background: linear-gradient(90deg, var(--ca-navy) 0%, hsl(38, 92%, 58%) 60%, var(--ca-navy-light) 100%);
       background-size: 200% 100%;
       -webkit-background-clip: text;
       background-clip: text;
@@ -986,6 +1149,65 @@
       border: 1px solid hsl(351,30%,90%);
       line-height: 1.8;
     }
+    #screen-error .error-bubble {
+      border-color: hsl(41, 74%, 75%);
+      background: linear-gradient(180deg, hsl(41, 82%, 97%) 0%, hsl(35, 80%, 96%) 100%);
+      box-shadow: 0 10px 28px rgba(129, 90, 13, .14);
+    }
+    #screen-error .error-header { gap: 12px; }
+    #screen-error .error-icon-wrap {
+      width: 48px;
+      height: 48px;
+      border-radius: 12px;
+      background: linear-gradient(180deg, hsl(43, 92%, 86%) 0%, hsl(38, 95%, 78%) 100%);
+      border: 1px solid hsl(39, 88%, 66%);
+      box-shadow: 0 6px 16px rgba(156, 105, 8, .18);
+      font-size: 0;
+    }
+    #screen-error .error-action.primary {
+      background: linear-gradient(135deg, hsl(41, 90%, 53%) 0%, hsl(36, 93%, 47%) 100%);
+      color: hsl(29, 67%, 14%);
+      border: 1px solid hsl(37, 80%, 44%);
+    }
+    #screen-error .error-action.primary:hover { background: linear-gradient(135deg, hsl(41, 90%, 57%) 0%, hsl(36, 93%, 50%) 100%); }
+
+    /* ══ ARTIFACT DRAWER ══ */
+    .artifact-drawer {
+      position: fixed;
+      top: 48px;
+      right: -380px;
+      width: 360px;
+      bottom: 0;
+      background: linear-gradient(180deg, rgba(8, 18, 35, .98) 0%, rgba(6, 14, 28, .98) 100%);
+      border-left: 1px solid rgba(118, 157, 255, .35);
+      box-shadow: -24px 0 36px rgba(0,0,0,.45);
+      z-index: 9998;
+      transition: right .22s ease;
+      display: flex;
+      flex-direction: column;
+    }
+    .artifact-drawer.open { right: 0; }
+    .artifact-drawer-head {
+      height: 52px;
+      border-bottom: 1px solid rgba(118, 157, 255, .28);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 12px 0 14px;
+      color: hsl(209, 85%, 90%);
+    }
+    .artifact-drawer-title { font-size: 12px; letter-spacing: .07em; text-transform: uppercase; font-weight: 700; }
+    .artifact-drawer-list { padding: 10px; overflow: auto; }
+    .drawer-card {
+      border: 1px solid rgba(118, 157, 255, .28);
+      border-radius: 10px;
+      background: rgba(13, 28, 52, .76);
+      padding: 10px;
+      margin-bottom: 8px;
+      color: hsl(213, 66%, 86%);
+    }
+    .drawer-card h4 { font-size: 12px; margin-bottom: 4px; color: #eff7ff; }
+    .drawer-card p { font-size: 11px; color: hsl(214, 45%, 74%); }
 
     /* ══ EMPTY / WELCOME STATE ══ */
     .welcome-wrap {
@@ -1671,7 +1893,8 @@
 ════════════════════════════════════════════════ -->
 <div id="proto-chrome">
   <span class="proto-label">CA GPT · Design Prototype</span>
-  <button class="screen-tab active" onclick="showScreen('welcome')">① Welcome</button>
+  <button class="screen-tab active" onclick="showScreen('landing')">⓪ Landing</button>
+  <button class="screen-tab" onclick="showScreen('welcome')">① Welcome</button>
   <button class="screen-tab" onclick="showScreen('chat')">② Active Chat</button>
   <button class="screen-tab" onclick="showScreen('spreadsheet')">③ Spreadsheet</button>
   <button class="screen-tab" onclick="showScreen('thinking')">④ Thinking</button>
@@ -1681,9 +1904,68 @@
 </div>
 
 <!-- ═══════════════════════════════════════════════
+     SCREEN 0 — LANDING
+════════════════════════════════════════════════ -->
+<div id="screen-landing" class="screen active">
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="sidebar-head">
+        <a class="sidebar-logo" href="#">
+          <div class="logo-mark">
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+              <path d="M9 1L11.2 6.8L17 9L11.2 11.2L9 17L6.8 11.2L1 9L6.8 6.8Z" fill="white"/>
+            </svg>
+          </div>
+          <span class="logo-text">CA <span>GPT</span></span>
+        </a>
+        <button class="new-chat-btn" style="margin-top:10px;">
+          <i class="ph ph-plus" style="font-size:13px;"></i>
+          New Chat
+        </button>
+      </div>
+      <div class="sidebar-search">
+        <i class="ph ph-magnifying-glass" style="font-size:13px;"></i>
+        <input type="text" placeholder="Search chats and workspaces" oninput="filterSidebar(this)">
+      </div>
+      <div class="sidebar-section-label">Recent</div>
+      <div class="conv-item"><div class="conv-dot" style="background:var(--ca-navy);opacity:.5"></div><span class="conv-text">GST reconciliation for Q3</span></div>
+      <div class="conv-item"><div class="conv-dot" style="background:var(--emerald);opacity:.5"></div><span class="conv-text">Section 80C deduction analysis</span></div>
+      <div class="conv-item"><div class="conv-dot" style="background:var(--gold);opacity:.5"></div><span class="conv-text">Working capital ratio review</span></div>
+      <div class="sidebar-footer">
+        <div class="user-avatar-sm">RK</div>
+        <span class="user-name-sm">Rajesh Kumar</span>
+        <span class="user-tier-badge">Pro</span>
+      </div>
+    </aside>
+
+    <div class="main-area">
+      <header class="chat-header">
+        <span class="font-display" style="font-size:15px;font-weight:700;color:var(--text-primary);letter-spacing:-.01em;">CA GPT</span>
+        <span class="mode-badge navy"><i class="ph ph-sparkle" style="font-size:9px;"></i> Intelligent Workspace</span>
+      </header>
+      <div class="landing-wrap">
+        <div class="vidhi-sigil">
+          <div class="sigil-ring"></div>
+          <svg width="38" height="38" viewBox="0 0 36 36" fill="none">
+            <path d="M18 3L21.8 12.8L31.5 18L21.8 23.2L18 33L14.2 23.2L4.5 18L14.2 12.8Z" fill="white"/>
+          </svg>
+        </div>
+        <span class="landing-kicker">FUTURISTIC CA COPILOT</span>
+        <h1 class="landing-title">Navigate Tax, Audit, and Advisory with <span>Vidhi Intelligence</span></h1>
+        <p class="landing-sub">A dashboard-native AI workspace for Chartered Accountants with real-time analysis, traceable evidence, and spreadsheet-first output flow.</p>
+        <div class="landing-cta-row">
+          <button class="landing-btn primary" onclick="showScreen('welcome')"><i class="ph ph-rocket-launch"></i> Enter Workspace</button>
+          <button class="landing-btn ghost" onclick="showScreen('chat')"><i class="ph ph-layout"></i> Open Command Dashboard</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════
      SCREEN 1 — WELCOME / EMPTY STATE
 ════════════════════════════════════════════════ -->
-<div id="screen-welcome" class="screen active">
+<div id="screen-welcome" class="screen">
   <div class="shell">
     <!-- Sidebar -->
     <aside class="sidebar">
@@ -1702,6 +1984,10 @@
           <i class="ph ph-plus" style="font-size:13px;"></i>
           New Chat
         </button>
+      </div>
+      <div class="sidebar-search">
+        <i class="ph ph-magnifying-glass" style="font-size:13px;"></i>
+        <input type="text" placeholder="Search chats and workspaces" oninput="filterSidebar(this)">
       </div>
       <div class="sidebar-section-label">Recent</div>
       <div class="conv-item"><div class="conv-dot" style="background:var(--ca-navy);opacity:.5"></div><span class="conv-text">GST reconciliation for Q3</span></div>
@@ -1739,7 +2025,8 @@
 
       <!-- Welcome State -->
       <div class="welcome-wrap">
-        <div class="welcome-avatar">
+        <div class="vidhi-sigil" style="width:64px;height:64px;border-radius:20px;">
+          <div class="sigil-ring" style="inset:-8px;border-radius:24px;"></div>
           <svg width="36" height="36" viewBox="0 0 36 36" fill="none">
             <path d="M18 3L21.8 12.8L31.5 18L21.8 23.2L18 33L14.2 23.2L4.5 18L14.2 12.8Z" fill="white"/>
             <path d="M18 9L20.5 15.5L27 18L20.5 20.5L18 27L15.5 20.5L9 18L15.5 15.5Z" fill="rgba(255,255,255,0.25)"/>
@@ -1843,6 +2130,10 @@
           New Chat
         </button>
       </div>
+      <div class="sidebar-search">
+        <i class="ph ph-magnifying-glass" style="font-size:13px;"></i>
+        <input type="text" placeholder="Search chats and workspaces" oninput="filterSidebar(this)">
+      </div>
       <div class="sidebar-section-label">Recent</div>
       <div class="conv-item active-conv"><div class="conv-dot" style="background:hsl(202,60%,70%)"></div><span class="conv-text">NPV calculation — Solar plant</span></div>
       <div class="conv-item"><div class="conv-dot" style="background:var(--ca-navy);opacity:.5"></div><span class="conv-text">GST reconciliation for Q3</span></div>
@@ -1860,6 +2151,9 @@
         <span class="font-display" style="font-size:14px;font-weight:600;color:var(--text-primary);">NPV calculation — Solar plant</span>
         <span class="mode-badge gold"><i class="ph ph-calculator" style="font-size:10px;"></i> Calculate Mode</span>
         <div class="header-actions">
+          <button class="icon-btn" title="Artifacts" onclick="toggleArtifactDrawer()">
+            <i class="ph ph-sidebar-simple" style="font-size:15px;"></i>
+          </button>
           <button class="icon-btn" title="Export conversation">
             <i class="ph ph-export" style="font-size:15px;"></i>
           </button>
@@ -2149,6 +2443,10 @@
           New Chat
         </button>
       </div>
+      <div class="sidebar-search">
+        <i class="ph ph-magnifying-glass" style="font-size:13px;"></i>
+        <input type="text" placeholder="Search chats and workspaces" oninput="filterSidebar(this)">
+      </div>
       <div class="sidebar-section-label">Recent</div>
       <div class="conv-item active-conv"><div class="conv-dot" style="background:hsl(262,60%,65%)"></div><span class="conv-text">ICDS — Ind AS comparison</span></div>
       <div class="conv-item"><div class="conv-dot" style="background:var(--ca-navy);opacity:.5"></div><span class="conv-text">NPV calculation — Solar plant</span></div>
@@ -2285,6 +2583,10 @@
           New Chat
         </button>
       </div>
+      <div class="sidebar-search">
+        <i class="ph ph-magnifying-glass" style="font-size:13px;"></i>
+        <input type="text" placeholder="Search chats and workspaces" oninput="filterSidebar(this)">
+      </div>
       <div class="sidebar-section-label">Recent</div>
       <div class="conv-item active-conv"><div class="conv-dot" style="background:var(--rose);opacity:.7"></div><span class="conv-text">Transfer pricing analysis</span></div>
       <div class="conv-item"><div class="conv-dot" style="background:var(--ca-navy);opacity:.4"></div><span class="conv-text">NPV calculation — Solar plant</span></div>
@@ -2325,7 +2627,16 @@
               <!-- ✦ PROFESSIONAL CUTE ERROR BUBBLE ✦ -->
               <div class="error-bubble" style="margin-top:10px;" id="error-bubble">
                 <div class="error-header">
-                  <div class="error-icon-wrap">🫤</div>
+                  <div class="error-icon-wrap">
+                    <svg width="30" height="30" viewBox="0 0 48 48" fill="none">
+                      <circle cx="24" cy="24" r="14" fill="hsl(42,94%,58%)"/>
+                      <circle cx="18" cy="21" r="2" fill="hsl(29,64%,20%)"/>
+                      <circle cx="30" cy="21" r="2" fill="hsl(29,64%,20%)"/>
+                      <path d="M18 30C19.5 27.5 21.5 26.5 24 26.5C26.5 26.5 28.5 27.5 30 30" stroke="hsl(29,64%,20%)" stroke-width="2.5" stroke-linecap="round"/>
+                      <path d="M33.5 14.5L36.5 11.5" stroke="hsl(43,95%,66%)" stroke-width="2" stroke-linecap="round"/>
+                      <path d="M12 11L14.5 13.5" stroke="hsl(43,95%,66%)" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                  </div>
                   <div>
                     <div class="error-title">Hit a snag retrieving the comparables data</div>
                     <div class="error-subtitle">The benchmarking database timed out — not a reflection on your query, which is perfectly formed.</div>
@@ -2731,6 +3042,29 @@
   </div><!-- /shell -->
 </div><!-- /screen-spreadsheet -->
 
+<aside class="artifact-drawer" id="artifact-drawer">
+  <div class="artifact-drawer-head">
+    <span class="artifact-drawer-title">Artifact Drawer</span>
+    <button class="icon-btn" onclick="closeArtifactDrawer()" title="Close">
+      <i class="ph ph-x" style="font-size:14px;"></i>
+    </button>
+  </div>
+  <div class="artifact-drawer-list">
+    <div class="drawer-card">
+      <h4>NPV_Solar_Analysis_FY2025.xlsx</h4>
+      <p>Spreadsheet · Live formulas · Updated 2m ago</p>
+    </div>
+    <div class="drawer-card">
+      <h4>Pre-Presentation Checklist</h4>
+      <p>Checklist · 7 items · 3 completed</p>
+    </div>
+    <div class="drawer-card">
+      <h4>Source Trace Pack</h4>
+      <p>CBDT + case law references linked to output cells</p>
+    </div>
+  </div>
+</aside>
+
 <!-- ═══════════════════════════════════════════════
      JAVASCRIPT — INTERACTIONS
 ════════════════════════════════════════════════ -->
@@ -2742,7 +3076,7 @@
     const screen = document.getElementById('screen-' + name);
     if (screen) screen.classList.add('active');
     const tabs = document.querySelectorAll('.screen-tab');
-    const tabMap = { welcome: 0, chat: 1, spreadsheet: 2, thinking: 3, error: 4, onboarding: 5 };
+    const tabMap = { landing: 0, welcome: 1, chat: 2, spreadsheet: 3, thinking: 4, error: 5, onboarding: 6 };
     if (tabMap[name] !== undefined) tabs[tabMap[name]].classList.add('active');
     if (name === 'onboarding') initOnboarding();
     if (name === 'thinking') startThinkingAnimation();
@@ -2770,6 +3104,69 @@
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
     }
+  }
+
+  /* ── SIDEBAR SEARCH FILTER ── */
+  function filterSidebar(input) {
+    const query = (input.value || '').toLowerCase().trim();
+    const sidebar = input.closest('.sidebar');
+    if (!sidebar) return;
+    sidebar.querySelectorAll('.conv-item').forEach(item => {
+      const txt = (item.textContent || '').toLowerCase();
+      item.style.display = !query || txt.includes(query) ? '' : 'none';
+    });
+  }
+
+  /* ── ARTIFACT DRAWER ── */
+  function openArtifactDrawer() {
+    const drawer = document.getElementById('artifact-drawer');
+    if (drawer) drawer.classList.add('open');
+  }
+  function closeArtifactDrawer() {
+    const drawer = document.getElementById('artifact-drawer');
+    if (drawer) drawer.classList.remove('open');
+  }
+  function toggleArtifactDrawer() {
+    const drawer = document.getElementById('artifact-drawer');
+    if (drawer) drawer.classList.toggle('open');
+  }
+
+  /* ── MESSAGE ACTION ROWS (MOCK) ── */
+  function injectMessageActions() {
+    document.querySelectorAll('.msg-group').forEach(group => {
+      if (group.querySelector('.msg-actions')) return;
+      const wrap = group.querySelector('.msg-content-wrap');
+      if (!wrap) return;
+      const row = document.createElement('div');
+      row.className = 'msg-actions';
+      row.innerHTML = `
+        <button class="msg-action-btn" title="Copy" onclick="copyMessage(this)"><i class="ph ph-copy"></i></button>
+        <button class="msg-action-btn" title="Helpful" onclick="reactMessage(this, 'up')"><i class="ph ph-thumbs-up"></i></button>
+        <button class="msg-action-btn" title="Not helpful" onclick="reactMessage(this, 'down')"><i class="ph ph-thumbs-down"></i></button>
+        <span style="opacity:.78;">2m ago</span>
+      `;
+      group.appendChild(row);
+    });
+  }
+
+  function copyMessage(btn) {
+    const group = btn.closest('.msg-group');
+    const bubble = group ? group.querySelector('.msg-bubble') : null;
+    const text = bubble ? (bubble.textContent || '').trim() : '';
+    if (!text) return;
+    try {
+      navigator.clipboard.writeText(text);
+      btn.innerHTML = '<i class="ph ph-check"></i>';
+      setTimeout(() => { btn.innerHTML = '<i class="ph ph-copy"></i>'; }, 900);
+    } catch (_) {
+      btn.innerHTML = '<i class="ph ph-warning"></i>';
+      setTimeout(() => { btn.innerHTML = '<i class="ph ph-copy"></i>'; }, 900);
+    }
+  }
+
+  function reactMessage(btn, dir) {
+    btn.style.borderColor = dir === 'up' ? 'rgba(60,205,138,.6)' : 'rgba(255,130,130,.6)';
+    btn.style.background = dir === 'up' ? 'rgba(60,205,138,.15)' : 'rgba(255,130,130,.15)';
   }
 
   /* ── CHECKLIST TOGGLE ── */
@@ -3063,6 +3460,7 @@
   // Init
   document.addEventListener('DOMContentLoaded', () => {
     renderObStep();
+    injectMessageActions();
   });
 </script>
 </body>

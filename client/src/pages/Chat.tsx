@@ -121,21 +121,26 @@ import { EmptyModeState } from "@/components/chat/EmptyModeState";
 import { ChatMessageBody } from "@/components/chat/ChatMessageBody";
 import { getMode, MODE_IDS, type ChatMode } from "@/lib/mode-registry";
 
-// Helper function to get appropriate status message based on chat mode
+// Kickoff status shown BEFORE the agent has decided whether it's going to
+// ask a clarifying question or start producing the deliverable. We used to
+// say "Composing document…" / "Designing workflow…" here, which misled the
+// user when the agent's first act was actually to ask a question back.
+// Keep this label generic and let onThinking (server-driven phase labels)
+// and onChunk (classifier below) refine it once the intent is known.
 const getStatusForMode = (mode: string): string => {
   const statusMessages: Record<string, string> = {
-    'standard': 'Thinking...',
-    'deep-research': 'Researching sources...',
-    'checklist': 'Creating checklist...',
-    'workflow': 'Designing workflow...',
-    'audit-plan': 'Planning audit approach...',
-    'calculation': 'Calculating...',
-    'scenario-simulator': 'Simulating scenarios...',
-    'deliverable-composer': 'Composing document...',
-    'forensic-intelligence': 'Analyzing patterns...',
-    'roundtable': 'Coordinating experts...',
+    'standard': 'Thinking…',
+    'deep-research': 'Reading your request…',
+    'checklist': 'Thinking…',
+    'workflow': 'Thinking…',
+    'audit-plan': 'Thinking…',
+    'calculation': 'Thinking…',
+    'scenario-simulator': 'Thinking…',
+    'deliverable-composer': 'Thinking…',
+    'forensic-intelligence': 'Thinking…',
+    'roundtable': 'Coordinating experts…',
   };
-  return statusMessages[mode] || 'Processing...';
+  return statusMessages[mode] || 'Thinking…';
 };
 
 interface MessageMetadata {
@@ -649,18 +654,36 @@ export default function Chat() {
           setThinkingSteps(prev => [...prev, { phase, detail }]);
         },
         onChunk: (chunk) => {
-          // Update status based on content being streamed
-          if (chunk.includes('```') || chunk.includes('mermaid')) {
-            setCagptStatus('Generating visualization...');
-          } else if (chunk.includes('##') || chunk.includes('###')) {
-            setCagptStatus('Structuring response...');
-          }
-          
-          setMessages(prev => prev.map(msg => 
-            msg.id === streamingId 
-              ? { ...msg, content: msg.content + chunk }
-              : msg
-          ));
+          setMessages(prev => prev.map(msg => {
+            if (msg.id !== streamingId) return msg;
+            const nextContent = msg.content + chunk;
+
+            // Classify based on the cumulative stream so far rather than
+            // the single chunk — the first chunk alone is too short to
+            // distinguish "Could you clarify…" from a real answer.
+            // Priority order: clarifying question → visualization →
+            // structured answer → generic answer. Once we've detected a
+            // clarifying question we stick with it even if later chunks
+            // introduce punctuation that could look structured, because
+            // CA users specifically wanted the "asking you" state to be
+            // distinct from "answering you".
+            const head = nextContent.slice(0, 240).trim();
+            const looksLikeClarification =
+              /^(could you|can you|would you|what |which |when |where |who |how |do you |to help|to better (help|assist)|before (i|we)|please (clarify|share|confirm|provide)|just to (confirm|clarify))/i.test(head)
+              || (head.length < 220 && head.includes('?') && !/\n##|\n\*\s|\n-\s|\n\d+\./.test(nextContent));
+
+            if (looksLikeClarification) {
+              setCagptStatus('Asking a clarifying question…');
+            } else if (nextContent.includes('```') || nextContent.includes('mermaid')) {
+              setCagptStatus('Generating visualization…');
+            } else if (/^|\n(##|###)\s|\n-\s|\n\*\s|\n\d+\.\s/.test(nextContent)) {
+              setCagptStatus('Writing your response…');
+            } else if (nextContent.length > 40) {
+              setCagptStatus('Answering…');
+            }
+
+            return { ...msg, content: nextContent };
+          }));
         },
         onEnd: (metadata, messageId) => {
           // Set flag BEFORE changing isStreaming to prevent race condition

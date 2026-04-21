@@ -1,6 +1,6 @@
 // client/src/components/chat/Composer.tsx
 import { useRef, useEffect, type KeyboardEvent, type ReactNode } from 'react';
-import { Paperclip, AtSign, Mic, X, FileText } from 'lucide-react';
+import { Paperclip, Mic, X, FileText } from 'lucide-react';
 import { Kbd } from '@/components/ui/Kbd';
 import { cn } from '@/lib/utils';
 
@@ -29,7 +29,6 @@ interface ComposerProps {
   onSend: () => void;
   onAttach?: () => void;
   onVoice?: () => void;
-  onMention?: () => void;
   placeholder?: string;
   disabled?: boolean;
   variant?: ComposerVariant;
@@ -49,7 +48,6 @@ export function Composer({
   onSend,
   onAttach,
   onVoice,
-  onMention,
   placeholder = 'Ask CA-GPT…',
   disabled = false,
   variant = 'main',
@@ -150,9 +148,6 @@ export function Composer({
         <div className="flex gap-0.5">
           <ToolButton title="Attach" onClick={onAttach}>
             <Paperclip className="w-[15px] h-[15px]" strokeWidth={1.75} />
-          </ToolButton>
-          <ToolButton title="Mention" onClick={onMention}>
-            <AtSign className="w-[15px] h-[15px]" strokeWidth={1.75} />
           </ToolButton>
           <ToolButton title="Voice" onClick={onVoice} active={voiceActive}>
             <Mic className="w-[15px] h-[15px]" strokeWidth={1.75} />

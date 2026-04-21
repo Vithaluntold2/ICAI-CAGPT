@@ -4945,68 +4945,75 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
         // If not cached, call the orchestrator
         if (!fromCache) {
           // Send thinking updates based on chat mode
+          // NB: each script's LAST line is shown to the user right before
+          // the first response chunk arrives. Keep it neutral — don't
+          // commit to an output shape (e.g. "comprehensive response",
+          // "final checklist") because the LLM may instead decide to ask
+          // a clarifying question. The client-side chunk classifier in
+          // Chat.tsx takes over and relabels ("Asking a clarifying
+          // question…" / "Writing your response…" / "Answering…") once
+          // the actual output starts streaming.
           const modeThinkingMessages: Record<string, string[]> = {
             'deep-research': [
-              'Analyzing your research query...',
-              'Searching relevant IRC sections and Treasury Regulations...',
-              'Reviewing case law and IRS guidance...',
-              'Cross-referencing authoritative sources...',
-              'Structuring comprehensive analysis...',
-              'Preparing citations and references...'
+              'Analyzing your research query…',
+              'Searching relevant IRC sections and Treasury Regulations…',
+              'Reviewing case law and IRS guidance…',
+              'Cross-referencing authoritative sources…',
+              'Collating findings…'
             ],
             'calculation': [
-              'Parsing numerical inputs...',
-              'Validating calculation parameters...',
-              'Applying tax formulas and rates...',
-              'Preparing Excel workbook generation...'
+              'Parsing numerical inputs…',
+              'Validating calculation parameters…',
+              'Applying tax formulas and rates…',
+              'Putting it together…'
             ],
             'audit-plan': [
-              'Assessing inherent and control risks...',
-              'Determining materiality thresholds...',
-              'Designing substantive procedures...',
-              'Planning audit timeline and resources...'
+              'Assessing inherent and control risks…',
+              'Determining materiality thresholds…',
+              'Designing substantive procedures…',
+              'Putting it together…'
             ],
             'checklist': [
-              'Identifying required compliance items...',
-              'Prioritizing by deadline and risk...',
-              'Adding regulatory references...',
-              'Building comprehensive checklist...'
+              'Identifying required compliance items…',
+              'Prioritizing by deadline and risk…',
+              'Adding regulatory references…',
+              'Putting it together…'
             ],
             'workflow': [
-              'Mapping process steps...',
-              'Identifying decision points...',
-              'Designing workflow diagram...'
+              'Mapping process steps…',
+              'Identifying decision points…',
+              'Putting it together…'
             ],
             'scenario-simulator': [
-              'Setting up scenario parameters...',
-              'Activating 12-agent simulation pipeline...',
-              'Modeling tax impacts and financial projections...',
-              'Running sensitivity analysis...',
-              'Comparing scenarios and generating recommendations...'
+              'Setting up scenario parameters…',
+              'Activating 12-agent simulation pipeline…',
+              'Modeling tax impacts and financial projections…',
+              'Running sensitivity analysis…',
+              'Putting it together…'
             ],
             'deliverable-composer': [
-              'Analyzing document requirements...',
-              'Engaging multi-agent advisory workflow...',
-              'Generating professional content with citations...',
-              'Formatting deliverable structure...'
+              'Analyzing document requirements…',
+              'Engaging multi-agent advisory workflow…',
+              'Collating citations and references…',
+              'Putting it together…'
             ],
             'forensic-intelligence': [
-              'Initializing forensic analysis agents...',
-              'Detecting patterns and anomalies...',
-              'Running statistical analysis...',
-              'Classifying findings by severity...',
-              'Compiling investigation report...'
+              'Initializing forensic analysis agents…',
+              'Detecting patterns and anomalies…',
+              'Running statistical analysis…',
+              'Classifying findings by severity…',
+              'Putting it together…'
             ],
             'roundtable': [
-              'Assembling expert panel...',
-              'Each expert analyzing the problem...',
-              'Facilitating multi-perspective discussion...',
-              'Synthesizing consensus and recommendations...'
+              'Assembling expert panel…',
+              'Each expert analyzing the problem…',
+              'Facilitating multi-perspective discussion…',
+              'Putting it together…'
             ],
             'standard': [
-              'Understanding your question...',
-              'Gathering relevant information...',
-              'Formulating comprehensive response...'
+              'Understanding your question…',
+              'Gathering relevant information…',
+              'Putting it together…'
             ]
           };
           
@@ -5072,8 +5079,11 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
             await new Promise(resolve => setTimeout(resolve, 150));
           }
           
-          // Signal that thinking is complete, now generating response
-          sendThinking('generating', 'Generating response...');
+          // Thinking complete — first response chunk is imminent. Neutral
+          // phrasing (the client's onChunk classifier will refine this
+          // into "Asking a clarifying question…" / "Writing your
+          // response…" / "Answering…" as soon as content arrives).
+          sendThinking('generating', 'Almost there…');
           await new Promise(resolve => setTimeout(resolve, 100));
           
           // Cache the response for future use — BUT only when the response is

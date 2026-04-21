@@ -1,8 +1,15 @@
 // client/src/components/chat/Composer.tsx
 import { useRef, useEffect, type KeyboardEvent, type ReactNode } from 'react';
-import { Paperclip, AtSign, Mic, X } from 'lucide-react';
+import { Paperclip, AtSign, Mic, X, FileText } from 'lucide-react';
 import { Kbd } from '@/components/ui/Kbd';
 import { cn } from '@/lib/utils';
+
+function formatFileSize(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 export type ComposerVariant = 'main' | 'pip';
 
@@ -29,6 +36,11 @@ interface ComposerProps {
   /** Shown above the textarea as removable chips. */
   selectionChips?: Array<{ id: string; label: string; icon?: ReactNode }>;
   onRemoveSelection?: (id: string) => void;
+  /** Currently-attached file, shown as a chip above the textarea. */
+  attachedFile?: { name: string; size?: number } | null;
+  onRemoveAttachment?: () => void;
+  /** Pulsing red dot on the mic button when active. */
+  voiceActive?: boolean;
 }
 
 export function Composer({
@@ -43,6 +55,9 @@ export function Composer({
   variant = 'main',
   selectionChips,
   onRemoveSelection,
+  attachedFile,
+  onRemoveAttachment,
+  voiceActive,
 }: ComposerProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -72,6 +87,30 @@ export function Composer({
 
   return (
     <div className={frameClass}>
+      {attachedFile && (
+        <div className="flex flex-wrap gap-1.5 pb-2 mb-2 border-b border-border">
+          <span
+            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-aurora-teal/12 border border-aurora-teal/30 text-aurora-teal-soft text-[11px] font-medium max-w-full"
+          >
+            <FileText className="w-3 h-3 shrink-0" />
+            <span className="truncate max-w-[240px]">{attachedFile.name}</span>
+            {attachedFile.size !== undefined && attachedFile.size > 0 && (
+              <span className="opacity-70 shrink-0">{formatFileSize(attachedFile.size)}</span>
+            )}
+            {onRemoveAttachment && (
+              <button
+                type="button"
+                className="opacity-60 hover:opacity-100 shrink-0"
+                onClick={onRemoveAttachment}
+                aria-label="Remove attachment"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            )}
+          </span>
+        </div>
+      )}
+
       {selectionChips && selectionChips.length > 0 && (
         <div className="flex flex-wrap gap-1.5 pb-2 mb-2 border-b border-border">
           {selectionChips.map((chip) => (
@@ -115,8 +154,11 @@ export function Composer({
           <ToolButton title="Mention" onClick={onMention}>
             <AtSign className="w-[15px] h-[15px]" strokeWidth={1.75} />
           </ToolButton>
-          <ToolButton title="Voice" onClick={onVoice}>
+          <ToolButton title="Voice" onClick={onVoice} active={voiceActive}>
             <Mic className="w-[15px] h-[15px]" strokeWidth={1.75} />
+            {voiceActive && (
+              <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+            )}
           </ToolButton>
         </div>
         {variant === 'main' ? (
@@ -139,17 +181,24 @@ function ToolButton({
   title,
   onClick,
   children,
+  active,
 }: {
   title: string;
   onClick?: () => void;
   children: React.ReactNode;
+  active?: boolean;
 }) {
   return (
     <button
       type="button"
       title={title}
       onClick={onClick}
-      className="w-7 h-7 rounded flex items-center justify-center text-muted-foreground hover:bg-foreground/5 hover:text-aurora-teal-soft transition-colors"
+      className={cn(
+        'relative w-7 h-7 rounded flex items-center justify-center transition-colors',
+        active
+          ? 'bg-aurora-teal/15 text-aurora-teal-soft'
+          : 'text-muted-foreground hover:bg-foreground/5 hover:text-aurora-teal-soft'
+      )}
     >
       {children}
     </button>

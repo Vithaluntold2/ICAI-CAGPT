@@ -835,17 +835,27 @@ export default function Chat() {
   const handleSend = (text: string, selection?: ComposerSelection) => {
     if (!user) return;
     const trimmed = text.trim();
-    if (!trimmed) return;
+    if (!trimmed && !selectedFile) return;
+
+    const fileToSend = selectedFile;
+    const messageContent = trimmed
+      ? (fileToSend ? `${trimmed} [Attached: ${fileToSend.name}]` : trimmed)
+      : (fileToSend ? `[Attached: ${fileToSend.name}]` : '');
 
     const userMessage: Message = {
       id: Date.now().toString(),
       role: 'user',
-      content: trimmed,
+      content: messageContent,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     };
     setMessages(prev => [...prev, userMessage]);
-    sendMessageMutation.mutate({ content: trimmed, file: null, selection });
+    sendMessageMutation.mutate({ content: messageContent, file: fileToSend, selection });
+    setSelectedFile(null);
   };
+
+  // Hidden file input ref for composer attach.
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const openFilePicker = () => fileInputRef.current?.click();
 
   const handleNewChat = () => {
     setActiveConversation(undefined);
@@ -1237,10 +1247,24 @@ export default function Chat() {
                     setInput('');
                     handleSend(text);
                   }}
+                  onAttach={openFilePicker}
+                  attachedFile={selectedFile ? { name: selectedFile.name, size: selectedFile.size } : null}
+                  onRemoveAttachment={handleRemoveFile}
                   placeholder={`Ask CA-GPT anything in ${
                     getMode(currentMode)?.label ?? 'Standard'
                   } mode…`}
                   disabled={isStreaming || sendMessageMutation.isPending}
+                />
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  className="hidden"
+                  accept=".pdf,.jpg,.jpeg,.png,.tif,.tiff,.xlsx,.xls,.csv,.txt"
+                  onChange={(e) => {
+                    handleFileSelect(e);
+                    // Reset input so picking the same file twice re-fires onChange.
+                    if (e.target) e.target.value = '';
+                  }}
                 />
               </div>
             </div>

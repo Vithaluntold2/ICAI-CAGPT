@@ -1,4 +1,5 @@
 // client/src/components/chat/AssistantTurn.tsx
+import type { ReactNode } from 'react';
 import { Sparkle, Square } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -7,6 +8,8 @@ interface AssistantTurnProps {
   timestamp?: string;
   streaming?: boolean;
   onStop?: () => void;
+  reasoning?: ReactNode;
+  feedback?: ReactNode;
   children: React.ReactNode;
 }
 
@@ -15,6 +18,8 @@ export function AssistantTurn({
   timestamp,
   streaming,
   onStop,
+  reasoning,
+  feedback,
   children,
 }: AssistantTurnProps) {
   return (
@@ -41,6 +46,7 @@ export function AssistantTurn({
             </button>
           )}
         </div>
+        {reasoning && <div className="mb-2">{reasoning}</div>}
         <div
           className={cn(
             'text-[14px] leading-[1.58] text-foreground/90',
@@ -49,6 +55,7 @@ export function AssistantTurn({
         >
           {children}
         </div>
+        {feedback && <div className="mt-2">{feedback}</div>}
       </div>
     </div>
   );

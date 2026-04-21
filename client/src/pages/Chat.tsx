@@ -1228,6 +1228,24 @@ export default function Chat() {
                         isStreaming && message.id.startsWith('streaming-')
                       }
                       onStop={handleStop}
+                      reasoning={
+                        message.metadata?.reasoningContent ? (
+                          <ReasoningFeedback
+                            messageContent={message.metadata.reasoningContent}
+                            messageId={message.id}
+                          />
+                        ) : undefined
+                      }
+                      feedback={
+                        !message.id.startsWith('streaming-') &&
+                        !message.id.startsWith('uploading-') &&
+                        activeConversation ? (
+                          <MessageFeedback
+                            messageId={message.id}
+                            conversationId={activeConversation}
+                          />
+                        ) : undefined
+                      }
                     >
                       {message.content ? (
                         <ChatMessageBody

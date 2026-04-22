@@ -123,6 +123,28 @@ export default function WorkflowRendererX6({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const graphRef = useRef<Graph | null>(null);
 
+  // Safari bug: when x6 wraps each node in `<g transform="translate(x,y)">
+  // <foreignObject>…</foreignObject></g>`, WebKit paints the foreignObject
+  // HTML at the SVG origin (0,0) instead of the translated position. Edges
+  // (native SVG paths) route correctly; nodes stack at top-left. The fix is
+  // to force Safari to invalidate its layout cache after every stage
+  // transform change (zoomToFit, resize, pan) by briefly toggling the
+  // SVG's display property — that retriggers the ancestor-transform
+  // inheritance path that Safari otherwise caches with stale (0,0)
+  // positions for foreignObject children. Cheap no-op on Chrome/Firefox.
+  const forceSafariReflow = useCallback(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    // x6 renders into the first <svg> child of our container div.
+    const svg = container.querySelector('svg') as SVGElement | null;
+    if (!svg) return;
+    const prev = svg.style.display;
+    svg.style.display = 'none';
+    // Read offsetHeight to flush pending layout — `void` keeps TS quiet.
+    void (svg as unknown as HTMLElement).offsetHeight;
+    svg.style.display = prev;
+  }, []);
+
   // Safari sometimes settles the parent's layout *after* our first render,
   // so the initial zoomToFit fits against a collapsed container and the
   // graph stays at 1:1 with only the top-left visible. We retry on rAF
@@ -145,6 +167,7 @@ export default function WorkflowRendererX6({
       }
       try {
         graph.zoomToFit({ padding: 24, maxScale: 1.6 });
+        forceSafariReflow();
       } catch {
         /* graph disposed mid-fit */
       }
@@ -157,15 +180,21 @@ export default function WorkflowRendererX6({
     requestAnimationFrame(() =>
       requestAnimationFrame(() => {
         if (cancelled) return;
-        try { graphRef.current?.zoomToFit({ padding: 24, maxScale: 1.6 }); } catch {}
+        try {
+          graphRef.current?.zoomToFit({ padding: 24, maxScale: 1.6 });
+          forceSafariReflow();
+        } catch {}
       }),
     );
     const t = window.setTimeout(() => {
       if (cancelled) return;
-      try { graphRef.current?.zoomToFit({ padding: 24, maxScale: 1.6 }); } catch {}
+      try {
+        graphRef.current?.zoomToFit({ padding: 24, maxScale: 1.6 });
+        forceSafariReflow();
+      } catch {}
     }, 160);
     return () => { cancelled = true; window.clearTimeout(t); };
-  }, []);
+  }, [forceSafariReflow]);
 
   const [detailNode, setDetailNode] = useState<WorkflowNode | null>(null);
   const [isDark, setIsDark] = useState<boolean>(() =>

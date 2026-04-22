@@ -123,6 +123,50 @@ export default function WorkflowRendererX6({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const graphRef = useRef<Graph | null>(null);
 
+  // Safari sometimes settles the parent's layout *after* our first render,
+  // so the initial zoomToFit fits against a collapsed container and the
+  // graph stays at 1:1 with only the top-left visible. We retry on rAF
+  // until the container is meaningfully sized (≥120×120) before fitting,
+  // then do one extra settle-fit a couple frames later in case the
+  // foreignObject-based nodes reflowed after their CSS vars resolved.
+  const fitWhenReady = useCallback(() => {
+    const container = containerRef.current;
+    const graph = graphRef.current;
+    if (!container || !graph) return;
+    let cancelled = false;
+    let attempt = 0;
+    const run = () => {
+      if (cancelled) return;
+      if (!graphRef.current) return;
+      const { clientWidth, clientHeight } = container;
+      if (clientWidth < 120 || clientHeight < 120) {
+        if (attempt++ < 10) requestAnimationFrame(run);
+        return;
+      }
+      try {
+        graph.zoomToFit({ padding: 24, maxScale: 1.6 });
+      } catch {
+        /* graph disposed mid-fit */
+      }
+    };
+    run();
+    // Second settle pass — Safari paints foreignObject content one frame
+    // late, which can shift reported cell bounds. Fit again after two
+    // rAFs and also after a short timeout for the slowest case (fonts
+    // loading, theme var cascade).
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        if (cancelled) return;
+        try { graphRef.current?.zoomToFit({ padding: 24, maxScale: 1.6 }); } catch {}
+      }),
+    );
+    const t = window.setTimeout(() => {
+      if (cancelled) return;
+      try { graphRef.current?.zoomToFit({ padding: 24, maxScale: 1.6 }); } catch {}
+    }, 160);
+    return () => { cancelled = true; window.clearTimeout(t); };
+  }, []);
+
   const [detailNode, setDetailNode] = useState<WorkflowNode | null>(null);
   const [isDark, setIsDark] = useState<boolean>(() =>
     typeof document !== 'undefined' &&
@@ -203,11 +247,7 @@ export default function WorkflowRendererX6({
         graph.resize(clientWidth, clientHeight);
         if (rafId) cancelAnimationFrame(rafId);
         rafId = requestAnimationFrame(() => {
-          try {
-            graph.zoomToFit({ padding: 24, maxScale: 1.6 });
-          } catch {
-            /* graph may be disposed mid-animation */
-          }
+          fitWhenReady();
         });
       }
     });
@@ -339,11 +379,13 @@ export default function WorkflowRendererX6({
       });
     });
 
-    // Fit view after layout settles.
+    // Fit view after layout settles. Uses a Safari-safe retry: if the
+    // container isn't sized yet (e.g. parent flex layout still resolving),
+    // defer the fit on rAF instead of fitting against 0×0 bounds.
     requestAnimationFrame(() => {
-      graph.zoomToFit({ padding: 24, maxScale: 1.6 });
+      fitWhenReady();
     });
-  }, [nodes, edges, compactMode]);
+  }, [nodes, edges, compactMode, fitWhenReady]);
 
   // Fullscreen is now handled by the parent (a dedicated
   // WorkflowFullscreenModal that mounts a *fresh* graph instance in a

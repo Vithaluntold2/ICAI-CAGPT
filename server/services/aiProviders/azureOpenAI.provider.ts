@@ -122,6 +122,27 @@ export class AzureOpenAIProvider extends AIProvider {
       if (request.tools && request.tools.length > 0) {
         apiRequest.tools = request.tools;
       }
+      // Pass through structured-output + deterministic-sampling flags.
+      // Supported on gpt-4o / gpt-4o-mini / gpt-5.x Azure deployments.
+      // Skipped silently for provider responses that don't recognise
+      // the field (Azure returns 400 if the deployment doesn't
+      // support the feature — wrapped in try/catch upstream).
+      if (request.responseFormat === 'json') {
+        apiRequest.response_format = { type: 'json_object' };
+      } else if (request.responseFormat === 'json_schema' && request.jsonSchema) {
+        apiRequest.response_format = {
+          type: 'json_schema',
+          json_schema: {
+            name: request.jsonSchema.name,
+            schema: request.jsonSchema.schema,
+            strict: request.jsonSchema.strict ?? true,
+            ...(request.jsonSchema.description ? { description: request.jsonSchema.description } : {}),
+          },
+        };
+      }
+      if (typeof request.seed === 'number') {
+        apiRequest.seed = request.seed;
+      }
       const completion = await this.client.chat.completions.create(apiRequest) as any;
 
       const choice = completion.choices?.[0];

@@ -33,6 +33,8 @@ import {
 import { formulaPatternLibrary } from './formulaPatternLibrary';
 import { excelSpecValidator, SafeJSONParser, ValidationResult } from './excelSpecValidator';
 import { formulaSanitizer, commonFormulas, FormulaBuilder } from './fallbackFormulaGenerator';
+import { EXCEL_WORKBOOK_SPEC_SCHEMA, EXCEL_GENERATION_SEED } from './excelSpecSchema';
+import { workbookSmokeTest, formatErrorsForLLMRetry, type SmokeTestResult } from './workbookSmokeTest';
 
 // =============================================================================
 // TYPES
@@ -66,6 +68,10 @@ export interface GenerationOptions {
   validateOutput?: boolean;
   includeRawSpec?: boolean;
   strictValidation?: boolean; // Fail on warnings
+  /** Skip the whole-workbook smoke-test + self-heal loop. Only set
+   *  true when the caller has already run the smoke-test (e.g. the
+   *  agent-emitted spec path). Default false — smoke-test runs. */
+  skipSmokeTest?: boolean;
 }
 
 interface AIStageResult {
@@ -137,9 +143,67 @@ export class ExcelModelGenerator {
         const sanitizeResult = this.sanitizeFormulas(spec);
         spec = sanitizeResult.sanitized;
         sanitizedCount = sanitizeResult.sanitizedCount;
-        
+
         if (sanitizeResult.warnings.length > 0) {
           console.warn('[ExcelModelGenerator] Formula sanitization warnings:', sanitizeResult.warnings);
+        }
+      }
+
+      // Whole-workbook smoke-test + bounded self-heal retry.
+      // The validator + sanitizer above catch SOME structural
+      // issues but not all — label-in-range, forward refs, wrong
+      // arity, and #CYCLE! only surface when formulas are
+      // actually evaluated. Run the smoke-test, and if anything
+      // fails, give the LLM ONE focused chance to fix it before
+      // shipping (or rejecting) the workbook.
+      if (options.validateOutput !== false && options.skipSmokeTest !== true) {
+        const smoke = await workbookSmokeTest(spec);
+        if (!smoke.ok) {
+          console.warn(
+            `[ExcelModelGenerator] Smoke-test found ${smoke.errors.length} issue(s); attempting self-heal…`,
+          );
+          const healed = await this.selfHealSpec(request, spec, smoke, options);
+          if (healed) {
+            spec = healed.spec;
+            const recheck = healed.recheck;
+            if (!recheck.ok) {
+              // Still broken after retry — block the download with a
+              // descriptive error rather than ship a workbook we know
+              // is wrong.
+              console.error(
+                `[ExcelModelGenerator] Self-heal retry did not fix all issues. Blocking download.`,
+              );
+              return {
+                success: false,
+                errors: [
+                  'Workbook failed consistency check after self-heal retry.',
+                  ...recheck.errors.slice(0, 8).map(
+                    (e) =>
+                      `${e.sheet}!${e.cell} [${e.code}] ${e.message}`,
+                  ),
+                ],
+                warnings: [
+                  `Initial errors: ${smoke.errors.length}; after retry: ${recheck.errors.length}.`,
+                ],
+                validationResult,
+              };
+            }
+            console.log('[ExcelModelGenerator] Self-heal retry succeeded; all formulas evaluate cleanly.');
+          } else {
+            // Patch request itself failed (LLM unreachable /
+            // non-JSON response / etc.). Block rather than ship.
+            console.error('[ExcelModelGenerator] Self-heal retry unavailable. Blocking download.');
+            return {
+              success: false,
+              errors: [
+                'Workbook has structural issues and the self-heal retry could not run.',
+                ...smoke.errors.slice(0, 5).map(
+                  (e) => `${e.sheet}!${e.cell} [${e.code}] ${e.message}`,
+                ),
+              ],
+              validationResult,
+            };
+          }
         }
       }
 
@@ -200,11 +264,21 @@ export class ExcelModelGenerator {
 
     const { systemPrompt, userPrompt } = excelModelPromptBuilder.buildSinglePrompt(request);
 
+    // Single-stage call emits the full workbook spec. Apply
+    // schema-constrained output + seed so the decoder is forced to
+    // produce a valid ExcelWorkbookSpec shape and failing runs are
+    // reproducible for debugging. `temperature: 0` pairs with the
+    // seed for deterministic sampling.
     const response = await this.callAI(
       systemPrompt,
       userPrompt,
-      0.15, // Low temperature for precise output
-      options.preferredProvider
+      0, // deterministic with seed
+      options.preferredProvider,
+      {
+        schema: EXCEL_WORKBOOK_SPEC_SCHEMA as unknown as Record<string, any>,
+        schemaName: 'ExcelWorkbookSpec',
+        seed: EXCEL_GENERATION_SEED,
+      },
     );
 
     if (!response.success) {
@@ -239,11 +313,27 @@ export class ExcelModelGenerator {
         userPrompt = userPrompt.replace('{structureFromStage2}', JSON.stringify(stageResults[2], null, 2));
       }
 
+      // Stage 1 (requirements extraction) and Stage 3 (final
+      // workbook spec) benefit most from deterministic output and
+      // structured decoding. Stage 2 (structure design) is left at
+      // its original temperature since some exploration helps.
+      const isStage3 = stage.stage === stages.length;
+      const isStage1 = stage.stage === 1;
+      const effectiveTemp = isStage1 || isStage3 ? 0 : stage.temperature;
+      const structured = isStage3
+        ? {
+            schema: EXCEL_WORKBOOK_SPEC_SCHEMA as unknown as Record<string, any>,
+            schemaName: 'ExcelWorkbookSpec',
+            seed: EXCEL_GENERATION_SEED,
+          }
+        : undefined;
+
       const response = await this.callAI(
         stage.systemPrompt,
         userPrompt,
-        stage.temperature,
-        options.preferredProvider
+        effectiveTemp,
+        options.preferredProvider,
+        structured,
       );
 
       if (!response.success) {
@@ -278,7 +368,15 @@ export class ExcelModelGenerator {
     systemPrompt: string,
     userPrompt: string,
     temperature: number,
-    preferredProvider?: AIProviderName
+    preferredProvider?: AIProviderName,
+    /** When set, emit via Azure/OpenAI strict JSON-schema output so
+     *  the decoder is constrained to valid ExcelWorkbookSpec shape.
+     *  No-op for providers that don't implement structured output. */
+    structuredOutput?: {
+      schema: Record<string, any>;
+      schemaName: string;
+      seed?: number;
+    },
   ): Promise<AIStageResult> {
     // Try providers in order of preference. AZURE_OPENAI added to the
     // fallback list because in most deployments it IS the only available
@@ -302,20 +400,62 @@ export class ExcelModelGenerator {
         const provider = aiProviderRegistry.getProvider(providerName);
         if (!provider) continue;
 
-        const response = await provider.generateCompletion({
+        const request: any = {
           messages: [
             { role: 'system', content: systemPrompt },
-            { role: 'user', content: userPrompt }
+            { role: 'user', content: userPrompt },
           ],
           temperature,
-          maxTokens: 8000 // Excel specs can be large
-        });
+          maxTokens: 8000, // Excel specs can be large
+        };
+        if (structuredOutput) {
+          request.responseFormat = 'json_schema';
+          request.jsonSchema = {
+            name: structuredOutput.schemaName,
+            schema: structuredOutput.schema,
+            strict: true,
+          };
+          if (typeof structuredOutput.seed === 'number') {
+            request.seed = structuredOutput.seed;
+          }
+        }
+        const response = await provider.generateCompletion(request);
 
         if (response.content) {
           return { success: true, content: response.content };
         }
       } catch (error: any) {
         console.warn(`[ExcelModelGenerator] Provider ${providerName} failed:`, error.message);
+        // If the failure is because the provider rejected the strict
+        // schema (older deployments), retry once without the schema
+        // so the pipeline degrades gracefully. Detect via Azure's
+        // typical "response_format"/"json_schema" error keywords.
+        if (
+          structuredOutput &&
+          /response_format|json_schema|Unknown parameter/i.test(String(error?.message ?? ''))
+        ) {
+          console.warn(
+            `[ExcelModelGenerator] Retrying ${providerName} without strict schema — deployment likely doesn't support it`,
+          );
+          try {
+            const provider2 = aiProviderRegistry.getProvider(providerName);
+            if (!provider2) continue;
+            const fallbackResp = await provider2.generateCompletion({
+              messages: [
+                { role: 'system', content: systemPrompt },
+                { role: 'user', content: userPrompt },
+              ],
+              temperature,
+              maxTokens: 8000,
+              responseFormat: 'json',
+            });
+            if (fallbackResp.content) {
+              return { success: true, content: fallbackResp.content };
+            }
+          } catch (err2: any) {
+            console.warn(`[ExcelModelGenerator] Schema-less retry on ${providerName} also failed:`, err2.message);
+          }
+        }
         continue;
       }
     }
@@ -669,6 +809,132 @@ export class ExcelModelGenerator {
    */
   getModelType(query: string): ExcelModelType {
     return excelModelPromptBuilder.detectModelType(query);
+  }
+
+  /**
+   * Self-heal retry — one shot at fixing structural errors found by
+   * `workbookSmokeTest`. Asks the LLM for a minimal JSON patch that
+   * addresses each error by cell address, applies it, re-smoke-tests,
+   * and returns the result. Returns `null` when the patch call
+   * itself failed (LLM unreachable / non-JSON response) so the caller
+   * can distinguish "we tried and it's still broken" from "we
+   * couldn't try".
+   */
+  private async selfHealSpec(
+    request: ExcelModelRequest,
+    spec: ExcelWorkbookSpec,
+    smoke: SmokeTestResult,
+    options: GenerationOptions,
+  ): Promise<{ spec: ExcelWorkbookSpec; recheck: SmokeTestResult } | null> {
+    const feedback = formatErrorsForLLMRetry(smoke.errors);
+    const systemPrompt = `You are an Excel formula debugger. You will be given:
+  • The user's original request.
+  • The current ExcelWorkbookSpec JSON that has structural errors.
+  • A list of errors, each keyed by cell address.
+
+Your job: produce a MINIMAL JSON patch that fixes each error. Return
+ONLY the patch — no prose, no explanation, no commentary.
+
+Patch format (strict):
+[
+  { "sheet": "<sheet-name>", "cell": "<A1>", "action": "set",
+    "type": "<label|input|formula|value|header|subheader|total>",
+    "value": <string|number|boolean|null>,        // optional
+    "formula": "=...",                             // optional
+    "format": { ... }                              // optional
+  },
+  { "sheet": "<sheet-name>", "cell": "<A1>", "action": "delete" }
+]
+
+RULES:
+  • Follow the same MANDATORY LAYOUT CONVENTION: col A labels, col B
+    inputs (numbers only), col C formulas referencing same-or-earlier-
+    row col-B cells, col D notes.
+  • For FUNCTION_WRONG_ARITY on IRR/XIRR, fix by restructuring the
+    sheet so the cash-flow stream is contiguous in one column.
+  • For SELF_REF, change the formula to reference the INPUT cell (same-
+    row col B), not the formula's own address.
+  • For LABEL_IN_NUMERIC_RANGE, either narrow the range to skip the
+    label row, or move the label out of the numeric column.
+  • For FORWARD_REFERENCE, emit cells in the correct row order.
+  • For SHEET_NOT_FOUND, correct the sheet name to match one that
+    exists in the spec (see suggestion in the error message).
+
+Output MUST be a JSON array. No wrapper object. No code fences.`;
+
+    const userPrompt = `ORIGINAL REQUEST:
+"${request.userQuery}"
+
+CURRENT SPEC:
+${JSON.stringify(spec, null, 2)}
+
+ERRORS (${smoke.errors.length} total):
+${feedback}
+
+Return the minimal JSON patch that fixes every error above.`;
+
+    let patchResp: AIStageResult;
+    try {
+      patchResp = await this.callAI(
+        systemPrompt,
+        userPrompt,
+        0,
+        options.preferredProvider,
+      );
+    } catch (err) {
+      console.warn('[ExcelModelGenerator] Self-heal LLM call threw:', err);
+      return null;
+    }
+    if (!patchResp.success || !patchResp.content) return null;
+
+    let patches: Array<{
+      sheet: string;
+      cell: string;
+      action: 'set' | 'delete';
+      type?: CellSpec['type'];
+      value?: CellSpec['value'];
+      formula?: string;
+      format?: CellSpec['format'];
+    }> = [];
+    try {
+      const parsed = SafeJSONParser.parse(patchResp.content);
+      if (!Array.isArray(parsed)) {
+        console.warn('[ExcelModelGenerator] Self-heal patch was not an array; skipping.');
+        return null;
+      }
+      patches = parsed as any;
+    } catch (err) {
+      console.warn('[ExcelModelGenerator] Self-heal patch JSON parse failed:', err);
+      return null;
+    }
+
+    // Apply the patch to a deep-cloned spec.
+    const patched: ExcelWorkbookSpec = JSON.parse(JSON.stringify(spec));
+    for (const p of patches) {
+      const sheet = patched.sheets.find((s) => s.name === p.sheet);
+      if (!sheet) continue;
+      const idx = sheet.cells.findIndex((c) => c.cell === p.cell);
+      if (p.action === 'delete') {
+        if (idx !== -1) sheet.cells.splice(idx, 1);
+        continue;
+      }
+      // action === 'set'
+      const next: CellSpec = {
+        cell: p.cell,
+        type: p.type ?? (idx !== -1 ? sheet.cells[idx].type : 'formula'),
+        value: p.value,
+        formula: p.formula,
+        format: p.format,
+      } as CellSpec;
+      if (idx !== -1) sheet.cells[idx] = next;
+      else sheet.cells.push(next);
+    }
+
+    console.log(
+      `[ExcelModelGenerator] Self-heal applied ${patches.length} patch entries; re-running smoke-test.`,
+    );
+    const recheck = await workbookSmokeTest(patched);
+    return { spec: patched, recheck };
   }
 }
 

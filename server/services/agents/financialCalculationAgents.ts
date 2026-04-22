@@ -1,10 +1,36 @@
 /**
  * Financial Calculation Mode Agents
  * Specialized agents for tax calculations, NPV, IRR, depreciation, and financial modeling
+ *
+ * Each agent returns:
+ *   - `data.<metrics>` — the computed numbers (unchanged from prior shape)
+ *   - `data.excelSpec`  — a ready-to-build `ExcelWorkbookSpec` that the
+ *                         Excel orchestrator can render without going
+ *                         through the three-stage LLM generator. This
+ *                         kills Flaws 1 & 2 from the correctness plan:
+ *                         the agent owns the formulas + layout, the
+ *                         LLM no longer reinvents them.
+ *
+ * Layout convention (enforced via `buildCalcSheet`):
+ *   Row 1        = title
+ *   Row 2/3      = column headers LABEL | VALUE | FORMULA / RESULT | NOTES
+ *   Column A     = labels
+ *   Column B     = literal numeric inputs (named where helpful)
+ *   Column C     = formulas that only reference column-B addresses
+ *   Column D     = notes / units
+ *
+ * All formulas reference earlier or same-row column-B cells — no
+ * forward references.
  */
 
 import { EventEmitter } from 'events';
 import type { AgentDefinition, AgentInput, AgentOutput } from '@shared/types/agentTypes';
+import {
+  buildCalcSheet,
+  singleSheetWorkbook,
+  colRange,
+  type CalcRow,
+} from './calcAgentHelpers';
 
 /**
  * NPV Calculator Agent
@@ -24,11 +50,99 @@ export class NPVCalculator extends EventEmitter implements AgentDefinition {
     const discountRate = (input.data.discountRate as number) || 0;
     const initialInvestment = (input.data.initialInvestment as number) || 0;
 
-    // Calculate NPV
     const npv = this.calculateNPV(cashFlows, discountRate, initialInvestment);
-
-    // Calculate IRR for additional insight
     const irr = this.calculateIRR([...cashFlows], initialInvestment);
+    const breakEvenYear = this.findBreakEvenYear(cashFlows, initialInvestment);
+
+    // Build the Excel spec. Layout is designed so the cash-flow
+    // stream (Year 0 outflow + Year 1..N inflows) lives in a SINGLE
+    // contiguous column-B range — `IRR` then reduces to `=IRR(Bn:Bm)`
+    // with no array tricks. `NPV` still uses Excel's convention of
+    // discounting years 1..N and adding back Year 0 separately.
+    //
+    // Row layout (no description — headers on row 2):
+    //   Row 3 subheader  "Inputs"
+    //   Row 4 Discount Rate
+    //   Row 5 subheader  "Cash Flow Stream"
+    //   Row 6 Year 0 / Initial Investment (negative)
+    //   Row 7 Year 1 Cash Flow
+    //   …
+    //   Row 6+N Year N Cash Flow
+    //   Row 7+N subheader "Outputs"
+    //   Row 8+N NPV    = NPV(DiscountRate, Y1..YN) + Y0
+    //   Row 9+N IRR    = IRR(Y0..YN)      ← contiguous range
+    //   Row 10+N Break-even Year (literal)
+    const rows: CalcRow[] = [];
+    rows.push({ label: 'Inputs', kind: 'subheader' });
+    rows.push({
+      label: 'Discount Rate',
+      value: discountRate,
+      format: { type: 'percentage', decimals: 2 },
+      name: 'DiscountRate',
+      note: 'Cost of capital / required return',
+    });
+
+    rows.push({ label: 'Cash Flow Stream', kind: 'subheader' });
+    // Year 0 — the initial investment, as a negative.
+    rows.push({
+      label: 'Year 0 (Initial Investment)',
+      value: -Math.abs(initialInvestment),
+      format: { type: 'currency', decimals: 2, negativeRed: true },
+      note: 'Cash outflow (negative)',
+    });
+    cashFlows.forEach((cf, i) => {
+      rows.push({
+        label: `Year ${i + 1} Cash Flow`,
+        value: cf,
+        format: { type: 'currency', decimals: 2, negativeRed: true },
+      });
+    });
+
+    // Absolute Excel rows (no description, so headers occupy rows 1-2):
+    //   Row 3 "Inputs" subheader, Row 4 discount rate,
+    //   Row 5 "Cash Flow Stream" subheader, Row 6 Year 0, Row 7..6+N Year N.
+    const discountRateRow = 4;
+    const year0Row = 6;
+    const lastCashFlowRow = year0Row + cashFlows.length; // Y0 + N operating flows
+    const firstOperatingCashFlowRow = year0Row + 1; // Y1
+
+    rows.push({ label: 'Outputs', kind: 'subheader' });
+
+    if (cashFlows.length > 0) {
+      rows.push({
+        label: 'Net Present Value (NPV)',
+        formula: `=NPV(B${discountRateRow},${colRange('B', firstOperatingCashFlowRow, lastCashFlowRow)})+B${year0Row}`,
+        format: { type: 'currency', decimals: 2, negativeRed: true },
+        kind: 'total',
+        note: npv > 0 ? 'Accept project' : 'Reject project',
+      });
+
+      rows.push({
+        label: 'Internal Rate of Return (IRR)',
+        formula: `=IRR(${colRange('B', year0Row, lastCashFlowRow)})`,
+        format: { type: 'percentage', decimals: 2 },
+        kind: 'total',
+      });
+
+      rows.push({
+        label: 'Break-even Year',
+        value: breakEvenYear > 0 ? breakEvenYear : 'N/A',
+        format: { type: 'number', decimals: 0 },
+        note: breakEvenYear > 0 ? `Payback in year ${breakEvenYear}` : 'No break-even within horizon',
+      });
+    }
+
+    const sheet = buildCalcSheet({
+      sheetName: 'NPV Analysis',
+      title: 'Net Present Value Analysis',
+      description: `Post-tax cash flow NPV/IRR at ${(discountRate * 100).toFixed(2)}% discount rate`,
+      rows,
+    });
+    const excelSpec = singleSheetWorkbook(
+      'NPV / IRR Analysis',
+      sheet,
+      'Generated from NPV Calculator agent',
+    );
 
     return {
       success: true,
@@ -39,8 +153,9 @@ export class NPVCalculator extends EventEmitter implements AgentDefinition {
         initialInvestment,
         cashFlows,
         recommendation: npv > 0 ? 'Accept project' : 'Reject project',
-        breakEvenYear: this.findBreakEvenYear(cashFlows, initialInvestment),
+        breakEvenYear,
         timestamp: new Date().toISOString(),
+        excelSpec,
       },
       metadata: {
         agentId: this.id,
@@ -52,53 +167,41 @@ export class NPVCalculator extends EventEmitter implements AgentDefinition {
 
   private calculateNPV(cashFlows: number[], discountRate: number, initialInvestment: number): number {
     let npv = -initialInvestment;
-
     for (let i = 0; i < cashFlows.length; i++) {
       npv += cashFlows[i] / Math.pow(1 + discountRate, i + 1);
     }
-
     return Math.round(npv * 100) / 100;
   }
 
   private calculateIRR(cashFlows: number[], initialInvestment: number): number {
-    // Newton-Raphson method for IRR calculation
-    let irr = 0.1; // Initial guess
+    let irr = 0.1;
     const maxIterations = 100;
     const tolerance = 0.0001;
 
     for (let i = 0; i < maxIterations; i++) {
       let npv = -initialInvestment;
       let derivative = 0;
-
       for (let j = 0; j < cashFlows.length; j++) {
         const power = j + 1;
         npv += cashFlows[j] / Math.pow(1 + irr, power);
         derivative -= (power * cashFlows[j]) / Math.pow(1 + irr, power + 1);
       }
-
       const newIrr = irr - npv / derivative;
-
       if (Math.abs(newIrr - irr) < tolerance) {
-        return Math.round(newIrr * 10000) / 100; // Return as percentage
+        return Math.round(newIrr * 10000) / 100;
       }
-
       irr = newIrr;
     }
-
     return Math.round(irr * 10000) / 100;
   }
 
   private findBreakEvenYear(cashFlows: number[], initialInvestment: number): number {
     let cumulative = -initialInvestment;
-
     for (let i = 0; i < cashFlows.length; i++) {
       cumulative += cashFlows[i];
-      if (cumulative >= 0) {
-        return i + 1;
-      }
+      if (cumulative >= 0) return i + 1;
     }
-
-    return -1; // No break-even within period
+    return -1;
   }
 }
 
@@ -123,9 +226,16 @@ export class TaxLiabilityCalculator extends EventEmitter implements AgentDefinit
 
     const taxCalculation = this.calculateTax(income, jurisdiction, regime, deductions);
 
+    // Build Excel spec only for Indian tax for now — other jurisdictions
+    // return an error payload, so we skip the spec.
+    const excelSpec =
+      jurisdiction === 'India'
+        ? this.buildIndianTaxSpec(income, regime, deductions, taxCalculation)
+        : undefined;
+
     return {
       success: true,
-      data: taxCalculation,
+      data: { ...taxCalculation, excelSpec },
       metadata: {
         agentId: this.id,
         executionTime: Date.now() - input.timestamp,
@@ -134,31 +244,155 @@ export class TaxLiabilityCalculator extends EventEmitter implements AgentDefinit
     };
   }
 
+  private buildIndianTaxSpec(
+    income: number,
+    regime: string,
+    deductions: number,
+    calc: any,
+  ) {
+    // Layout math: row 1 title, row 2 desc, row 3 col-headers
+    // (we pass a description, so headers shift to row 3).
+    const headerRowsBeforeData = 3;
+    const firstDataRow = headerRowsBeforeData + 1; // row 4
+
+    // We'll lay out slabs below. Rows:
+    //   4 Inputs subheader
+    //   5 Total Income (B5)
+    //   6 Deductions (B6) — only for old regime
+    //   7 Taxable Income (C7 formula = B5 - B6)
+    //   8 Slabs subheader
+    //   9-14 Per-slab taxes (B9:B14 literals, C9:C14 formulas)
+    //  15 Total Tax (C15 formula = SUM of slab column C)
+    //  16 Cess @ 4% (C16 formula = C15 * 0.04)
+    //  17 Total Liability (C17 formula = C15 + C16)
+    //  18 Effective Rate (C18 formula = C17 / B5)
+    const rows: CalcRow[] = [];
+
+    const slabs = this.getSlabs(regime);
+
+    rows.push({ label: 'Inputs', kind: 'subheader' });
+
+    const totalIncomeRow = firstDataRow + 1; // row after the "Inputs" subheader
+    rows.push({
+      label: 'Total Income',
+      value: income,
+      format: { type: 'currency', decimals: 0, currencySymbol: '₹' },
+      name: 'TotalIncome',
+    });
+
+    const deductionsRow = totalIncomeRow + 1;
+    rows.push({
+      label: regime === 'old' ? 'Deductions (80C / HRA / etc.)' : 'Deductions (not applicable in new regime)',
+      value: regime === 'old' ? deductions : 0,
+      format: { type: 'currency', decimals: 0, currencySymbol: '₹' },
+      name: 'Deductions',
+    });
+
+    const taxableIncomeRow = deductionsRow + 1;
+    rows.push({
+      label: 'Taxable Income',
+      formula: `=B${totalIncomeRow}-B${deductionsRow}`,
+      format: { type: 'currency', decimals: 0, currencySymbol: '₹' },
+      note: `Under ${regime} regime`,
+    });
+
+    rows.push({ label: `${regime === 'old' ? 'Old' : 'New'} Regime Slabs`, kind: 'subheader' });
+
+    const slabFirstRow = taxableIncomeRow + 2; // +1 for subheader, +1 for first slab row
+    slabs.forEach((slab, i) => {
+      const slabRow = slabFirstRow + i;
+      // Per-slab tax = MAX(0, MIN(Taxable, upper) - lower) * rate
+      // Slab upper can be Infinity (last bracket); encode as 1e12
+      // which is effectively unbounded for personal income.
+      const upper = slab.upper === Infinity ? 1_000_000_000_000 : slab.upper;
+      rows.push({
+        label: `Slab: ${this.formatLakh(slab.lower)} – ${slab.upper === Infinity ? 'above' : this.formatLakh(slab.upper)} @ ${(slab.rate * 100).toFixed(0)}%`,
+        value: slab.rate,
+        format: { type: 'percentage', decimals: 2 },
+        formula: `=MAX(0,MIN(C${taxableIncomeRow},${upper})-${slab.lower})*B${slabRow}`,
+        note: slab.rate === 0 ? 'Exempt' : undefined,
+      });
+    });
+
+    const totalTaxRow = slabFirstRow + slabs.length;
+    rows.push({
+      label: 'Total Tax Before Cess',
+      formula: `=SUM(${colRange('C', slabFirstRow, totalTaxRow - 1)})`,
+      format: { type: 'currency', decimals: 0, currencySymbol: '₹' },
+      kind: 'total',
+    });
+
+    const cessRow = totalTaxRow + 1;
+    rows.push({
+      label: 'Health & Education Cess @ 4%',
+      formula: `=C${totalTaxRow}*0.04`,
+      format: { type: 'currency', decimals: 0, currencySymbol: '₹' },
+    });
+
+    const finalTaxRow = cessRow + 1;
+    rows.push({
+      label: 'Total Tax Liability',
+      formula: `=C${totalTaxRow}+C${cessRow}`,
+      format: { type: 'currency', decimals: 0, currencySymbol: '₹' },
+      kind: 'total',
+    });
+
+    rows.push({
+      label: 'Effective Tax Rate',
+      formula: `=IFERROR(C${finalTaxRow}/B${totalIncomeRow},0)`,
+      format: { type: 'percentage', decimals: 2 },
+      note: `Verified calc: ${calc.effectiveRate}%`,
+    });
+
+    const sheet = buildCalcSheet({
+      sheetName: `Tax (${regime === 'old' ? 'Old' : 'New'} Regime)`,
+      title: `Indian Personal Income Tax — ${regime === 'old' ? 'Old' : 'New'} Regime`,
+      description: `FY 2024-25 slab-wise computation with cess. Edit B${totalIncomeRow} / B${deductionsRow} to recalculate.`,
+      rows,
+    });
+    return singleSheetWorkbook('Income Tax Calculation', sheet, 'Generated from Tax Liability agent');
+  }
+
+  private getSlabs(regime: string) {
+    if (regime === 'old') {
+      return [
+        { lower: 0, upper: 250_000, rate: 0 },
+        { lower: 250_000, upper: 500_000, rate: 0.05 },
+        { lower: 500_000, upper: 1_000_000, rate: 0.2 },
+        { lower: 1_000_000, upper: Infinity, rate: 0.3 },
+      ];
+    }
+    return [
+      { lower: 0, upper: 300_000, rate: 0 },
+      { lower: 300_000, upper: 600_000, rate: 0.05 },
+      { lower: 600_000, upper: 900_000, rate: 0.1 },
+      { lower: 900_000, upper: 1_200_000, rate: 0.15 },
+      { lower: 1_200_000, upper: 1_500_000, rate: 0.2 },
+      { lower: 1_500_000, upper: Infinity, rate: 0.3 },
+    ];
+  }
+
+  private formatLakh(n: number): string {
+    if (n >= 100_000) return `₹${(n / 100_000).toFixed(1)}L`;
+    return `₹${n.toLocaleString('en-IN')}`;
+  }
+
   private calculateTax(income: number, jurisdiction: string, regime: string, deductions: number) {
     if (jurisdiction === 'India') {
       return this.calculateIndianTax(income, regime, deductions);
     }
-
-    return {
-      error: 'Jurisdiction not supported',
-      income,
-      jurisdiction,
-    };
+    return { error: 'Jurisdiction not supported', income, jurisdiction };
   }
 
   private calculateIndianTax(income: number, regime: string, deductions: number) {
     const taxableIncome = regime === 'old' ? income - deductions : income;
-
     let tax = 0;
-
     if (regime === 'old') {
-      // Old regime slabs (2024-25)
       if (taxableIncome <= 250000) tax = 0;
       else if (taxableIncome <= 500000) tax = (taxableIncome - 250000) * 0.05;
       else if (taxableIncome <= 1000000) tax = 12500 + (taxableIncome - 500000) * 0.2;
       else tax = 112500 + (taxableIncome - 1000000) * 0.3;
     } else {
-      // New regime slabs (2024-25)
       if (taxableIncome <= 300000) tax = 0;
       else if (taxableIncome <= 600000) tax = (taxableIncome - 300000) * 0.05;
       else if (taxableIncome <= 900000) tax = 15000 + (taxableIncome - 600000) * 0.1;
@@ -166,11 +400,8 @@ export class TaxLiabilityCalculator extends EventEmitter implements AgentDefinit
       else if (taxableIncome <= 1500000) tax = 90000 + (taxableIncome - 1200000) * 0.2;
       else tax = 150000 + (taxableIncome - 1500000) * 0.3;
     }
-
-    // Add cess (4%)
     const cess = tax * 0.04;
     const totalTax = tax + cess;
-
     return {
       income,
       regime,
@@ -179,7 +410,7 @@ export class TaxLiabilityCalculator extends EventEmitter implements AgentDefinit
       tax: Math.round(tax),
       cess: Math.round(cess),
       totalTax: Math.round(totalTax),
-      effectiveRate: Math.round((totalTax / income) * 10000) / 100,
+      effectiveRate: Math.round((totalTax / (income || 1)) * 10000) / 100,
       timestamp: new Date().toISOString(),
     };
   }
@@ -205,6 +436,7 @@ export class DepreciationScheduler extends EventEmitter implements AgentDefiniti
     const method = (input.data.method as string) || 'straight-line';
 
     const schedule = this.generateSchedule(assetCost, salvageValue, usefulLife, method);
+    const excelSpec = this.buildSpec(assetCost, salvageValue, usefulLife, method, schedule);
 
     return {
       success: true,
@@ -216,6 +448,7 @@ export class DepreciationScheduler extends EventEmitter implements AgentDefiniti
         schedule,
         totalDepreciation: assetCost - salvageValue,
         timestamp: new Date().toISOString(),
+        excelSpec,
       },
       metadata: {
         agentId: this.id,
@@ -225,26 +458,119 @@ export class DepreciationScheduler extends EventEmitter implements AgentDefiniti
     };
   }
 
+  private buildSpec(
+    assetCost: number,
+    salvageValue: number,
+    usefulLife: number,
+    method: string,
+    schedule: Array<{ year: number; depreciation: number; accumulatedDepreciation: number; bookValue: number }>,
+  ) {
+    // Layout: row 1 title, row 2 desc, row 3 col headers, row 4+ data.
+    const headerRowsBeforeData = 3;
+    const firstDataRow = headerRowsBeforeData + 1;
+
+    const rows: CalcRow[] = [];
+    rows.push({ label: 'Inputs', kind: 'subheader' });
+    const costRow = firstDataRow + 1;
+    const salvageRow = costRow + 1;
+    const lifeRow = salvageRow + 1;
+    rows.push({
+      label: 'Asset Cost',
+      value: assetCost,
+      format: { type: 'currency', decimals: 2 },
+      name: 'AssetCost',
+    });
+    rows.push({
+      label: 'Salvage Value',
+      value: salvageValue,
+      format: { type: 'currency', decimals: 2 },
+      name: 'SalvageValue',
+    });
+    rows.push({
+      label: 'Useful Life (Years)',
+      value: usefulLife,
+      format: { type: 'number', decimals: 0 },
+      name: 'UsefulLife',
+    });
+
+    rows.push({ label: 'Annual Schedule', kind: 'subheader' });
+
+    if (method === 'straight-line') {
+      // Straight-line: depreciation = (Cost - Salvage) / Life, constant.
+      // Per-year row formulas reference cost/salvage/life inputs.
+      // Accumulated = SUM of prior depreciation values (column C).
+      // Book value = Cost - Accumulated.
+      const scheduleFirstRow = lifeRow + 2; // +1 subheader, +1 first year
+      schedule.forEach((_, i) => {
+        const yearRow = scheduleFirstRow + i;
+        rows.push({
+          label: `Year ${i + 1} Depreciation`,
+          formula: `=(B${costRow}-B${salvageRow})/B${lifeRow}`,
+          format: { type: 'currency', decimals: 2 },
+        });
+      });
+    } else {
+      // Declining-balance — the formula at year n depends on prior
+      // book value. We reference the PRIOR ROW's column-C value.
+      const scheduleFirstRow = lifeRow + 2;
+      schedule.forEach((entry, i) => {
+        const yearRow = scheduleFirstRow + i;
+        const priorRow = i === 0 ? costRow : yearRow - 1;
+        const priorRef = i === 0 ? `B${priorRow}` : `C${priorRow}`;
+        // Double-declining rate = 2/life; cap depreciation so book
+        // value never drops below salvage.
+        rows.push({
+          label: `Year ${i + 1} Depreciation`,
+          formula: `=MIN(${priorRef}*2/B${lifeRow},${priorRef}-B${salvageRow})`,
+          format: { type: 'currency', decimals: 2 },
+          note: i === 0 ? 'Based on original cost' : 'Based on prior-year book value',
+        });
+      });
+    }
+
+    const scheduleFirstRow = lifeRow + 2;
+    const scheduleLastRow = scheduleFirstRow + schedule.length - 1;
+
+    rows.push({
+      label: 'Total Accumulated Depreciation',
+      formula: `=SUM(${colRange('C', scheduleFirstRow, scheduleLastRow)})`,
+      format: { type: 'currency', decimals: 2 },
+      kind: 'total',
+    });
+
+    rows.push({
+      label: 'Ending Book Value',
+      formula: `=B${costRow}-SUM(${colRange('C', scheduleFirstRow, scheduleLastRow)})`,
+      format: { type: 'currency', decimals: 2 },
+      kind: 'total',
+      note: 'Should equal salvage value',
+    });
+
+    const sheet = buildCalcSheet({
+      sheetName: `Depreciation (${method === 'straight-line' ? 'SLM' : 'DBM'})`,
+      title: `Depreciation Schedule — ${method === 'straight-line' ? 'Straight Line' : 'Declining Balance'}`,
+      description: `Asset over ${usefulLife} years. Edit inputs to recalc.`,
+      rows,
+    });
+    return singleSheetWorkbook('Depreciation Schedule', sheet, 'Generated from Depreciation agent');
+  }
+
   private generateSchedule(assetCost: number, salvageValue: number, usefulLife: number, method: string) {
     if (method === 'straight-line') {
       return this.straightLineSchedule(assetCost, salvageValue, usefulLife);
     } else if (method === 'declining-balance') {
       return this.decliningBalanceSchedule(assetCost, salvageValue, usefulLife);
     }
-
     return [];
   }
 
   private straightLineSchedule(assetCost: number, salvageValue: number, usefulLife: number) {
     const annualDepreciation = (assetCost - salvageValue) / usefulLife;
     const schedule = [];
-
     let bookValue = assetCost;
-
     for (let year = 1; year <= usefulLife; year++) {
       const depreciation = year === usefulLife ? bookValue - salvageValue : annualDepreciation;
       bookValue -= depreciation;
-
       schedule.push({
         year,
         depreciation: Math.round(depreciation),
@@ -252,30 +578,24 @@ export class DepreciationScheduler extends EventEmitter implements AgentDefiniti
         bookValue: Math.round(bookValue),
       });
     }
-
     return schedule;
   }
 
   private decliningBalanceSchedule(assetCost: number, salvageValue: number, usefulLife: number) {
-    const rate = 2 / usefulLife; // Double declining balance
+    const rate = 2 / usefulLife;
     const schedule = [];
-
     let bookValue = assetCost;
-
     for (let year = 1; year <= usefulLife; year++) {
       const depreciation = Math.min(bookValue * rate, bookValue - salvageValue);
       bookValue -= depreciation;
-
       schedule.push({
         year,
         depreciation: Math.round(depreciation),
         accumulatedDepreciation: Math.round(assetCost - bookValue),
         bookValue: Math.round(bookValue),
       });
-
       if (bookValue <= salvageValue) break;
     }
-
     return schedule;
   }
 }
@@ -296,10 +616,69 @@ export class ROICalculator extends EventEmitter implements AgentDefinition {
 
     const initialInvestment = (input.data.initialInvestment as number) || 0;
     const finalValue = (input.data.finalValue as number) || 0;
-    const period = (input.data.period as number) || 1; // in years
+    const period = (input.data.period as number) || 1;
 
-    const roi = ((finalValue - initialInvestment) / initialInvestment) * 100;
-    const annualizedROI = (Math.pow(finalValue / initialInvestment, 1 / period) - 1) * 100;
+    const roi = initialInvestment > 0 ? ((finalValue - initialInvestment) / initialInvestment) * 100 : 0;
+    const annualizedROI =
+      initialInvestment > 0 && period > 0
+        ? (Math.pow(finalValue / initialInvestment, 1 / period) - 1) * 100
+        : 0;
+
+    const headerRowsBeforeData = 3;
+    const firstDataRow = headerRowsBeforeData + 1;
+
+    const rows: CalcRow[] = [
+      { label: 'Inputs', kind: 'subheader' },
+      {
+        label: 'Initial Investment',
+        value: initialInvestment,
+        format: { type: 'currency', decimals: 2 },
+        name: 'InitialInvestment',
+      },
+      {
+        label: 'Final Value',
+        value: finalValue,
+        format: { type: 'currency', decimals: 2 },
+        name: 'FinalValue',
+      },
+      {
+        label: 'Holding Period (Years)',
+        value: period,
+        format: { type: 'number', decimals: 2 },
+        name: 'Period',
+      },
+      { label: 'Outputs', kind: 'subheader' },
+    ];
+
+    const initRow = firstDataRow + 1;
+    const finalRow = initRow + 1;
+    const periodRow = finalRow + 1;
+
+    rows.push({
+      label: 'Total Gain',
+      formula: `=B${finalRow}-B${initRow}`,
+      format: { type: 'currency', decimals: 2, negativeRed: true },
+    });
+    rows.push({
+      label: 'Simple ROI',
+      formula: `=IFERROR((B${finalRow}-B${initRow})/B${initRow},0)`,
+      format: { type: 'percentage', decimals: 2 },
+      kind: 'total',
+    });
+    rows.push({
+      label: 'Annualised ROI (CAGR)',
+      formula: `=IFERROR((B${finalRow}/B${initRow})^(1/B${periodRow})-1,0)`,
+      format: { type: 'percentage', decimals: 2 },
+      kind: 'total',
+    });
+
+    const sheet = buildCalcSheet({
+      sheetName: 'ROI',
+      title: 'Return on Investment',
+      description: 'Simple and annualised (CAGR) ROI. Edit inputs to recalc.',
+      rows,
+    });
+    const excelSpec = singleSheetWorkbook('ROI Analysis', sheet, 'Generated from ROI agent');
 
     return {
       success: true,
@@ -311,6 +690,7 @@ export class ROICalculator extends EventEmitter implements AgentDefinition {
         annualizedROI: Math.round(annualizedROI * 100) / 100,
         totalGain: finalValue - initialInvestment,
         timestamp: new Date().toISOString(),
+        excelSpec,
       },
       metadata: {
         agentId: this.id,
@@ -339,8 +719,70 @@ export class BreakEvenAnalyzer extends EventEmitter implements AgentDefinition {
     const variableCostPerUnit = (input.data.variableCostPerUnit as number) || 0;
     const pricePerUnit = (input.data.pricePerUnit as number) || 1;
 
-    const breakEvenUnits = fixedCosts / (pricePerUnit - variableCostPerUnit);
+    const contribMargin = pricePerUnit - variableCostPerUnit;
+    const breakEvenUnits = contribMargin > 0 ? fixedCosts / contribMargin : 0;
     const breakEvenRevenue = breakEvenUnits * pricePerUnit;
+
+    const headerRowsBeforeData = 3;
+    const firstDataRow = headerRowsBeforeData + 1;
+
+    const rows: CalcRow[] = [
+      { label: 'Inputs', kind: 'subheader' },
+      {
+        label: 'Fixed Costs',
+        value: fixedCosts,
+        format: { type: 'currency', decimals: 2 },
+        name: 'FixedCosts',
+      },
+      {
+        label: 'Variable Cost / Unit',
+        value: variableCostPerUnit,
+        format: { type: 'currency', decimals: 2 },
+        name: 'VariableCost',
+      },
+      {
+        label: 'Price / Unit',
+        value: pricePerUnit,
+        format: { type: 'currency', decimals: 2 },
+        name: 'Price',
+      },
+      { label: 'Outputs', kind: 'subheader' },
+    ];
+
+    const fcRow = firstDataRow + 1;
+    const vcRow = fcRow + 1;
+    const priceRow = vcRow + 1;
+
+    rows.push({
+      label: 'Contribution Margin / Unit',
+      formula: `=B${priceRow}-B${vcRow}`,
+      format: { type: 'currency', decimals: 2 },
+    });
+    rows.push({
+      label: 'Contribution Margin Ratio',
+      formula: `=IFERROR((B${priceRow}-B${vcRow})/B${priceRow},0)`,
+      format: { type: 'percentage', decimals: 2 },
+    });
+    rows.push({
+      label: 'Break-even Units',
+      formula: `=IFERROR(B${fcRow}/(B${priceRow}-B${vcRow}),0)`,
+      format: { type: 'number', decimals: 0 },
+      kind: 'total',
+    });
+    rows.push({
+      label: 'Break-even Revenue',
+      formula: `=IFERROR(B${fcRow}/(B${priceRow}-B${vcRow})*B${priceRow},0)`,
+      format: { type: 'currency', decimals: 2 },
+      kind: 'total',
+    });
+
+    const sheet = buildCalcSheet({
+      sheetName: 'Break-even',
+      title: 'Break-even Analysis',
+      description: 'Units and revenue required to cover fixed costs. Edit inputs to recalc.',
+      rows,
+    });
+    const excelSpec = singleSheetWorkbook('Break-even Analysis', sheet, 'Generated from Break-even agent');
 
     return {
       success: true,
@@ -348,11 +790,12 @@ export class BreakEvenAnalyzer extends EventEmitter implements AgentDefinition {
         fixedCosts,
         variableCostPerUnit,
         pricePerUnit,
-        contributionMargin: pricePerUnit - variableCostPerUnit,
-        contributionMarginRatio: ((pricePerUnit - variableCostPerUnit) / pricePerUnit) * 100,
+        contributionMargin: contribMargin,
+        contributionMarginRatio: pricePerUnit > 0 ? (contribMargin / pricePerUnit) * 100 : 0,
         breakEvenUnits: Math.ceil(breakEvenUnits),
         breakEvenRevenue: Math.round(breakEvenRevenue),
         timestamp: new Date().toISOString(),
+        excelSpec,
       },
       metadata: {
         agentId: this.id,

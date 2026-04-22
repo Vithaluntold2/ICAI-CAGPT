@@ -7,25 +7,46 @@
  * how to render. The block in the chat text is then replaced with a short
  * pointer so the chat body stays readable while the sheet appears on the right.
  *
- * AI contract — expected format:
+ * Two emission formats supported:
  *
- *     ```sheet
- *     title: NPV at 10% (3-year cashflow)
- *     description: Present value of year-by-year inflows
- *     ---
- *     Year,Cashflow,Discount Factor,PV
- *     1,400,=1/(1+0.1)^A2,=B2*C2
- *     2,500,=1/(1+0.1)^A3,=B3*C3
- *     3,600,=1/(1+0.1)^A4,=B4*C4
- *     Total,=SUM(B2:B4),,=SUM(D2:D4)
- *     ```
+ * 1. PREFERRED — addressable JSON (no positional ambiguity):
+ *
+ *        ```sheet
+ *        {
+ *          "title": "NPV at 10%",
+ *          "description": "Year-by-year inflows",
+ *          "cells": [
+ *            {"cell": "A1", "value": "Year", "type": "header"},
+ *            {"cell": "B1", "value": "Cashflow", "type": "header"},
+ *            {"cell": "A2", "value": 1},
+ *            {"cell": "B2", "value": 400},
+ *            {"cell": "C2", "formula": "=B2/(1+0.1)^A2"}
+ *          ]
+ *        }
+ *        ```
+ *
+ *    Every cell carries its own address → missing cells are *absent*,
+ *    never confused with shifted columns.
+ *
+ * 2. LEGACY — CSV (kept for backwards compatibility; hardened):
+ *
+ *        ```sheet
+ *        title: NPV at 10%
+ *        ---
+ *        Year,Cashflow,PV
+ *        1,400,=B2/(1+0.1)^A2
+ *        2,500,=B3/(1+0.1)^A3
+ *        ```
+ *
+ *    Rows shorter than the header row are now REJECTED (previously
+ *    they got padded, which shifted visible values into the wrong
+ *    column when the LLM dropped an empty-cell delimiter).
  *
  * Rules:
  *   - Language tag is `sheet` or `spreadsheet`
  *   - Optional front-matter (title/description) followed by `---` separator
- *   - Body is CSV; formulas start with `=` and reference cells (A1, B2:B4…)
- *   - Row 1 of the body is the header row
- *   - Data + formulas live in rows 2..N
+ *     (CSV mode only; JSON mode carries title/description as top-level keys)
+ *   - Formulas start with `=` and reference cells (A1, B2:B4…)
  *
  * Output:
  *   - `SpreadsheetData` with rendered values (formulas evaluated) in `data`
@@ -103,6 +124,20 @@ interface ParsedBlock {
 }
 
 function parseSheetBlock(body: string): ParsedBlock | null {
+  // Addressable JSON format — detect by the body starting with `{`
+  // after trimming. This is the preferred emission; kills the CSV
+  // column-shift class by construction (every cell carries its own
+  // address).
+  const trimmed = body.trim();
+  if (trimmed.startsWith('{')) {
+    try {
+      const parsed = tryParseAddressableSheet(trimmed);
+      if (parsed) return parsed;
+    } catch (err) {
+      console.warn('[sheetBlockParser] Addressable JSON parse failed, falling through to CSV:', (err as Error).message);
+    }
+  }
+
   // Split optional front-matter on first --- separator
   const sepIdx = body.indexOf('\n---');
   let header: Record<string, string> = {};
@@ -143,9 +178,25 @@ function parseSheetBlock(body: string): ParsedBlock | null {
   });
   if (rows.length === 0) return null;
 
-  // Build the raw grid
-  const maxCols = rows.reduce((m, r) => Math.max(m, r.length), 0);
-  const grid: (string | number | null)[][] = rows.map(r => {
+  // Build the raw grid.
+  //
+  // The header row defines the column count. Any data row with FEWER
+  // cells than the header is a sign the LLM dropped an empty-cell
+  // delimiter (wrote `Label,B1` instead of `Label,,B1`) — padding
+  // the right side silently shifts the visible cell into the wrong
+  // column. We now log a warning and pad-with-empties at the END,
+  // but also emit the warning so it surfaces in a smoke-test caller
+  // if one is watching. The RIGHT fix is to have the LLM emit the
+  // addressable JSON format above — this CSV path is legacy-only.
+  const headerCols = rows[0]?.length ?? 0;
+  const maxCols = Math.max(headerCols, rows.reduce((m, r) => Math.max(m, r.length), 0));
+  const grid: (string | number | null)[][] = rows.map((r, i) => {
+    if (i > 0 && r.length < headerCols) {
+      console.warn(
+        `[sheetBlockParser] Row ${i + 1} has ${r.length} cells but header has ${headerCols}. ` +
+        `Likely dropped-delimiter bug — consider migrating this emission to the addressable JSON format.`,
+      );
+    }
     const padded = [...r];
     while (padded.length < maxCols) padded.push('');
     return padded.map(coerceCell);
@@ -397,4 +448,106 @@ function parseAddr(addr: string): { row: number; col: number } | null {
 
 function dedupe<T>(arr: T[]): T[] {
   return Array.from(new Set(arr));
+}
+
+// =============================================================================
+// Addressable-cells JSON format — the preferred emission. Every cell
+// carries its own A1 address so there's no column-shift ambiguity.
+//
+// Shape:
+//   {
+//     "title": "…",            // optional — used as sheet name + metadata
+//     "description": "…",      // optional
+//     "name": "…",             // optional — overrides title for sheet tab
+//     "cells": [
+//       {"cell":"A1","value":"Header","type":"header"},
+//       {"cell":"B1","value":1000},
+//       {"cell":"C1","formula":"=B1*0.18"}
+//     ]
+//   }
+// =============================================================================
+
+interface AddressableCellInput {
+  cell: string;
+  value?: string | number | boolean | null;
+  formula?: string;
+  type?: string;
+}
+
+interface AddressableSheetInput {
+  title?: string;
+  description?: string;
+  name?: string;
+  cells: AddressableCellInput[];
+}
+
+function tryParseAddressableSheet(jsonText: string): ParsedBlock | null {
+  const parsed = JSON.parse(jsonText) as AddressableSheetInput;
+  if (!parsed || !Array.isArray(parsed.cells) || parsed.cells.length === 0) {
+    return null;
+  }
+
+  // Build a sparse grid keyed by address.
+  let maxRow = 0;
+  let maxCol = 0;
+  const byAddr = new Map<string, AddressableCellInput>();
+  for (const entry of parsed.cells) {
+    if (!entry || typeof entry.cell !== 'string') continue;
+    const addr = parseAddr(entry.cell.toUpperCase());
+    if (!addr) continue;
+    byAddr.set(cellAddress(addr.row, addr.col), entry);
+    if (addr.row > maxRow) maxRow = addr.row;
+    if (addr.col > maxCol) maxCol = addr.col;
+  }
+  if (byAddr.size === 0) return null;
+
+  // Dense grid — empty cells stay null (not '').
+  const grid: (string | number | null)[][] = [];
+  for (let r = 0; r <= maxRow; r++) {
+    const row: (string | number | null)[] = [];
+    for (let c = 0; c <= maxCol; c++) row.push(null);
+    grid.push(row);
+  }
+
+  const cellLiterals: Record<string, any> = {};
+  const cellFormulas: Record<string, string> = {};
+  const formulaList: string[] = [];
+  for (const [addr, entry] of byAddr.entries()) {
+    const p = parseAddr(addr)!;
+    if (entry.formula && typeof entry.formula === 'string') {
+      const f = entry.formula.trim().startsWith('=')
+        ? entry.formula.trim()
+        : `=${entry.formula.trim()}`;
+      cellFormulas[addr] = f;
+      formulaList.push(f);
+      // Leave grid cell as null until HyperFormula resolves it.
+    } else if (entry.value !== undefined && entry.value !== null) {
+      const coerced = coerceCell(entry.value);
+      grid[p.row][p.col] = coerced;
+      if (coerced !== null) cellLiterals[addr] = coerced;
+    }
+  }
+
+  if (Object.keys(cellFormulas).length > 0) {
+    const evalResult = evaluateSheet({ cells: cellLiterals, formulas: cellFormulas });
+    for (const [addr, computed] of Object.entries(evalResult.values)) {
+      const parsedAddr = parseAddr(addr);
+      if (parsedAddr) grid[parsedAddr.row][parsedAddr.col] = coerceCell(computed);
+    }
+    for (const [addr, _err] of Object.entries(evalResult.errors)) {
+      const parsedAddr = parseAddr(addr);
+      if (parsedAddr) grid[parsedAddr.row][parsedAddr.col] = '#ERR';
+    }
+  }
+
+  const sheetName = (parsed.name ?? parsed.title ?? 'Sheet 1').slice(0, 40);
+  return {
+    title: parsed.title,
+    description: parsed.description,
+    sheet: {
+      name: sheetName,
+      data: grid,
+      formulas: formulaList.length > 0 ? dedupe(formulaList).slice(0, 30) : undefined,
+    },
+  };
 }

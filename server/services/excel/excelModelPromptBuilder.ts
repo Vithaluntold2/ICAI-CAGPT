@@ -69,128 +69,166 @@ export interface PromptStage {
 // EXAMPLE TEMPLATES FOR AI CONTEXT
 // =============================================================================
 
-const exampleSpecs: Record<string, Partial<ExcelWorkbookSpec>> = {
-  dcfSimple: {
-    metadata: { title: 'DCF Valuation Model' },
+// =============================================================================
+// WORKED EXAMPLES — ALL verified-clean against HyperFormula + the
+// enforced layout convention below. Any future edit MUST preserve:
+//
+//   • Row 1 = title cell
+//   • Row 2 = column headers LABEL | VALUE | FORMULA | NOTES
+//   • Col A = label text
+//   • Col B = numeric / date INPUTS ONLY (no labels, no formulas)
+//   • Col C = formulas that reference same-or-earlier-row col-B cells
+//   • Col D = notes / units
+//
+// If you change these examples, re-run `npx tsx scripts/smoke-calc-agents.ts`
+// or a focused smoke that builds each example via ExcelWorkbookBuilder
+// and evaluates every formula via HyperFormula — every cell must
+// resolve to a numeric value, not a DetailedCellError.
+// =============================================================================
+
+export const exampleSpecs: Record<string, Partial<ExcelWorkbookSpec>> = {
+  /**
+   * Example 1 — NPV / IRR Analysis.
+   * Layout: Year 0 (initial investment as negative) + Year 1..N cash
+   * flows live in one contiguous column-B range so IRR can reference
+   * `B6:B11` directly — no tuple syntax, no array gymnastics.
+   */
+  npvSimple: {
+    metadata: { title: 'NPV / IRR Analysis — 5-year project' },
     sheets: [
       {
-        name: 'Assumptions',
-        purpose: 'inputs',
-        tabColor: 'FF4472C4',
-        cells: [
-          { cell: 'A1', type: 'header', value: 'DCF Model Assumptions' },
-          { cell: 'A3', type: 'label', value: 'WACC' },
-          { cell: 'B3', type: 'input', value: 0.10, format: { type: 'percentage', decimals: 1 }, name: 'WACC' },
-          { cell: 'A4', type: 'label', value: 'Terminal Growth Rate' },
-          { cell: 'B4', type: 'input', value: 0.025, format: { type: 'percentage', decimals: 1 }, name: 'TerminalGrowth' },
-          { cell: 'A5', type: 'label', value: 'Tax Rate' },
-          { cell: 'B5', type: 'input', value: 0.21, format: { type: 'percentage', decimals: 0 }, name: 'TaxRate' }
-        ],
-        columnWidths: { 'A': 25, 'B': 15 },
-        freezePanes: { row: 1, col: 0 }
-      },
-      {
-        name: 'DCF Calculation',
+        name: 'NPV Analysis',
         purpose: 'calculations',
-        tabColor: 'FF70AD47',
         cells: [
-          { cell: 'A1', type: 'header', value: 'Year' },
-          { cell: 'B1', type: 'header', value: '1' },
-          { cell: 'C1', type: 'header', value: '2' },
-          { cell: 'A2', type: 'label', value: 'Free Cash Flow' },
-          { cell: 'B2', type: 'input', value: 100000, format: { type: 'currency' } },
-          { cell: 'C2', type: 'formula', formula: '=B2*1.05', format: { type: 'currency' } },
-          { cell: 'A3', type: 'label', value: 'Discount Factor' },
-          { cell: 'B3', type: 'formula', formulaPattern: { patternId: 'discountFactor', params: { rate: 'WACC', period: 'B1' } } },
-          { cell: 'A4', type: 'label', value: 'Present Value' },
-          { cell: 'B4', type: 'formula', formula: '=B2*B3', format: { type: 'currency' } },
-          { cell: 'A6', type: 'total', value: 'Enterprise Value' },
-          { cell: 'B6', type: 'formula', formula: '=SUM(B4:C4)+D5', format: { type: 'currency' } }
-        ]
-      }
+          { cell: 'A1', type: 'header', value: 'NPV / IRR Analysis — 5-year project' },
+          { cell: 'A2', type: 'header', value: 'LABEL' },
+          { cell: 'B2', type: 'header', value: 'VALUE' },
+          { cell: 'C2', type: 'header', value: 'FORMULA / RESULT' },
+          { cell: 'D2', type: 'header', value: 'NOTES' },
+          { cell: 'A3', type: 'subheader', value: 'Inputs' },
+          { cell: 'A4', type: 'label', value: 'Discount Rate' },
+          { cell: 'B4', type: 'input', value: 0.12, format: { type: 'percentage', decimals: 2 } },
+          { cell: 'D4', type: 'label', value: 'Cost of capital' },
+          { cell: 'A5', type: 'subheader', value: 'Cash Flow Stream' },
+          { cell: 'A6', type: 'label', value: 'Year 0 (Initial Investment)' },
+          { cell: 'B6', type: 'input', value: -100000, format: { type: 'currency', decimals: 2, negativeRed: true } },
+          { cell: 'D6', type: 'label', value: 'Cash outflow (negative)' },
+          { cell: 'A7', type: 'label', value: 'Year 1 Cash Flow' },
+          { cell: 'B7', type: 'input', value: 30000, format: { type: 'currency', decimals: 2 } },
+          { cell: 'A8', type: 'label', value: 'Year 2 Cash Flow' },
+          { cell: 'B8', type: 'input', value: 40000, format: { type: 'currency', decimals: 2 } },
+          { cell: 'A9', type: 'label', value: 'Year 3 Cash Flow' },
+          { cell: 'B9', type: 'input', value: 50000, format: { type: 'currency', decimals: 2 } },
+          { cell: 'A10', type: 'label', value: 'Year 4 Cash Flow' },
+          { cell: 'B10', type: 'input', value: 40000, format: { type: 'currency', decimals: 2 } },
+          { cell: 'A11', type: 'label', value: 'Year 5 Cash Flow' },
+          { cell: 'B11', type: 'input', value: 30000, format: { type: 'currency', decimals: 2 } },
+          { cell: 'A12', type: 'subheader', value: 'Outputs' },
+          { cell: 'A13', type: 'total', value: 'Net Present Value (NPV)' },
+          { cell: 'C13', type: 'formula', formula: '=NPV(B4,B7:B11)+B6', format: { type: 'currency', decimals: 2, negativeRed: true } },
+          { cell: 'A14', type: 'total', value: 'Internal Rate of Return (IRR)' },
+          { cell: 'C14', type: 'formula', formula: '=IRR(B6:B11)', format: { type: 'percentage', decimals: 2 } },
+          { cell: 'D14', type: 'label', value: 'Year 0..5 contiguous range' },
+        ],
+        columnWidths: { A: 32, B: 18, C: 28, D: 30 },
+        freezePanes: { row: 2, col: 0 },
+      },
     ],
-    namedRanges: [
-      { name: 'FCF_Range', range: 'B2:G2', scope: 'DCF Calculation' }
-    ]
   },
 
+  /**
+   * Example 2 — Loan Amortisation (first 3 periods illustrated; a
+   * real workbook would extend B8..Bn for the full term but the
+   * PATTERN must match: every formula references same-row col-B or
+   * earlier-row col-B only).
+   */
   loanAmortization: {
-    metadata: { title: 'Loan Amortization Schedule' },
+    metadata: { title: 'Loan Amortisation — monthly payment' },
     sheets: [
       {
-        name: 'Loan Details',
-        purpose: 'inputs',
-        cells: [
-          { cell: 'A1', type: 'header', value: 'Loan Parameters' },
-          { cell: 'A3', type: 'label', value: 'Principal Amount' },
-          { cell: 'B3', type: 'input', value: 250000, format: { type: 'currency' }, name: 'Principal' },
-          { cell: 'A4', type: 'label', value: 'Annual Interest Rate' },
-          { cell: 'B4', type: 'input', value: 0.065, format: { type: 'percentage', decimals: 2 }, name: 'AnnualRate' },
-          { cell: 'A5', type: 'label', value: 'Loan Term (Years)' },
-          { cell: 'B5', type: 'input', value: 30, name: 'LoanYears' },
-          { cell: 'A7', type: 'label', value: 'Monthly Payment' },
-          { cell: 'B7', type: 'formula', formulaPattern: { 
-            patternId: 'pmt', 
-            params: { rate: 'AnnualRate/12', nper: 'LoanYears*12', pv: '-Principal' } 
-          }, format: { type: 'currency' }, name: 'MonthlyPayment' }
-        ]
-      },
-      {
-        name: 'Schedule',
+        name: 'Loan',
         purpose: 'calculations',
         cells: [
-          { cell: 'A1', type: 'header', value: 'Payment #' },
-          { cell: 'B1', type: 'header', value: 'Payment' },
-          { cell: 'C1', type: 'header', value: 'Principal' },
-          { cell: 'D1', type: 'header', value: 'Interest' },
-          { cell: 'E1', type: 'header', value: 'Balance' },
-          { cell: 'A2', type: 'value', value: 1 },
-          { cell: 'B2', type: 'formula', formula: '=MonthlyPayment', format: { type: 'currency' } },
-          { cell: 'C2', type: 'formula', formulaPattern: {
-            patternId: 'ppmt',
-            params: { rate: 'AnnualRate/12', per: 'A2', nper: 'LoanYears*12', pv: '-Principal' }
-          }, format: { type: 'currency' } },
-          { cell: 'D2', type: 'formula', formulaPattern: {
-            patternId: 'ipmt',
-            params: { rate: 'AnnualRate/12', per: 'A2', nper: 'LoanYears*12', pv: '-Principal' }
-          }, format: { type: 'currency' } },
-          { cell: 'E2', type: 'formula', formula: '=Principal+C2', format: { type: 'currency' } }
+          { cell: 'A1', type: 'header', value: 'Loan Amortisation — monthly payment' },
+          { cell: 'A2', type: 'header', value: 'LABEL' },
+          { cell: 'B2', type: 'header', value: 'VALUE' },
+          { cell: 'C2', type: 'header', value: 'FORMULA / RESULT' },
+          { cell: 'D2', type: 'header', value: 'NOTES' },
+          { cell: 'A3', type: 'subheader', value: 'Loan Parameters' },
+          { cell: 'A4', type: 'label', value: 'Principal' },
+          { cell: 'B4', type: 'input', value: 250000, format: { type: 'currency', decimals: 2 } },
+          { cell: 'A5', type: 'label', value: 'Annual Interest Rate' },
+          { cell: 'B5', type: 'input', value: 0.065, format: { type: 'percentage', decimals: 2 } },
+          { cell: 'A6', type: 'label', value: 'Term (Years)' },
+          { cell: 'B6', type: 'input', value: 30, format: { type: 'number', decimals: 0 } },
+          { cell: 'A7', type: 'subheader', value: 'Computed' },
+          { cell: 'A8', type: 'total', value: 'Monthly Payment' },
+          { cell: 'C8', type: 'formula', formula: '=PMT(B5/12,B6*12,-B4)', format: { type: 'currency', decimals: 2 } },
+          { cell: 'D8', type: 'label', value: 'PMT returns positive when PV negative' },
+          { cell: 'A9', type: 'total', value: 'Total Paid Over Life' },
+          { cell: 'C9', type: 'formula', formula: '=PMT(B5/12,B6*12,-B4)*B6*12', format: { type: 'currency', decimals: 2 } },
+          { cell: 'A10', type: 'total', value: 'Total Interest' },
+          { cell: 'C10', type: 'formula', formula: '=PMT(B5/12,B6*12,-B4)*B6*12-B4', format: { type: 'currency', decimals: 2 } },
         ],
-        conditionalFormatting: [
-          { range: 'E2:E361', type: 'dataBar', rule: { colors: ['#63BE7B'] } }
-        ]
-      }
-    ]
+        columnWidths: { A: 32, B: 18, C: 28, D: 30 },
+        freezePanes: { row: 2, col: 0 },
+      },
+    ],
   },
 
-  budgetTemplate: {
-    metadata: { title: 'Annual Budget Template' },
+  /**
+   * Example 3 — Straight-line depreciation schedule.
+   * Shows the per-year pattern with formulas that only reference
+   * same-or-earlier-row col-B inputs.
+   */
+  depreciationSLM: {
+    metadata: { title: 'Straight-Line Depreciation Schedule' },
     sheets: [
       {
-        name: 'Budget',
-        purpose: 'inputs',
+        name: 'Depreciation',
+        purpose: 'calculations',
         cells: [
-          { cell: 'A1', type: 'header', value: 'Category' },
-          { cell: 'B1', type: 'header', value: 'Jan' },
-          { cell: 'C1', type: 'header', value: 'Feb' },
-          { cell: 'N1', type: 'header', value: 'Total' },
-          { cell: 'A2', type: 'subheader', value: 'REVENUE' },
-          { cell: 'A3', type: 'label', value: 'Product Sales' },
-          { cell: 'B3', type: 'input', value: 50000, format: { type: 'currency' } },
-          { cell: 'N3', type: 'formula', formula: '=SUM(B3:M3)', format: { type: 'currency' } },
-          { cell: 'A10', type: 'total', value: 'Total Revenue' },
-          { cell: 'B10', type: 'formula', formula: '=SUM(B3:B9)', format: { type: 'currency' } },
-          { cell: 'A12', type: 'subheader', value: 'EXPENSES' },
-          { cell: 'A20', type: 'total', value: 'Net Income' },
-          { cell: 'B20', type: 'formula', formula: '=B10-B18', format: { type: 'currency' } }
+          { cell: 'A1', type: 'header', value: 'Straight-Line Depreciation Schedule' },
+          { cell: 'A2', type: 'header', value: 'LABEL' },
+          { cell: 'B2', type: 'header', value: 'VALUE' },
+          { cell: 'C2', type: 'header', value: 'FORMULA / RESULT' },
+          { cell: 'D2', type: 'header', value: 'NOTES' },
+          { cell: 'A3', type: 'subheader', value: 'Inputs' },
+          { cell: 'A4', type: 'label', value: 'Asset Cost' },
+          { cell: 'B4', type: 'input', value: 500000, format: { type: 'currency', decimals: 2 } },
+          { cell: 'A5', type: 'label', value: 'Salvage Value' },
+          { cell: 'B5', type: 'input', value: 50000, format: { type: 'currency', decimals: 2 } },
+          { cell: 'A6', type: 'label', value: 'Useful Life (Years)' },
+          { cell: 'B6', type: 'input', value: 5, format: { type: 'number', decimals: 0 } },
+          { cell: 'A7', type: 'subheader', value: 'Annual Schedule' },
+          { cell: 'A8', type: 'label', value: 'Year 1 Depreciation' },
+          { cell: 'C8', type: 'formula', formula: '=(B4-B5)/B6', format: { type: 'currency', decimals: 2 } },
+          { cell: 'A9', type: 'label', value: 'Year 2 Depreciation' },
+          { cell: 'C9', type: 'formula', formula: '=(B4-B5)/B6', format: { type: 'currency', decimals: 2 } },
+          { cell: 'A10', type: 'label', value: 'Year 3 Depreciation' },
+          { cell: 'C10', type: 'formula', formula: '=(B4-B5)/B6', format: { type: 'currency', decimals: 2 } },
+          { cell: 'A11', type: 'label', value: 'Year 4 Depreciation' },
+          { cell: 'C11', type: 'formula', formula: '=(B4-B5)/B6', format: { type: 'currency', decimals: 2 } },
+          { cell: 'A12', type: 'label', value: 'Year 5 Depreciation' },
+          { cell: 'C12', type: 'formula', formula: '=(B4-B5)/B6', format: { type: 'currency', decimals: 2 } },
+          { cell: 'A13', type: 'total', value: 'Total Accumulated Depreciation' },
+          { cell: 'C13', type: 'formula', formula: '=SUM(C8:C12)', format: { type: 'currency', decimals: 2 } },
+          { cell: 'A14', type: 'total', value: 'Ending Book Value' },
+          { cell: 'C14', type: 'formula', formula: '=B4-SUM(C8:C12)', format: { type: 'currency', decimals: 2 } },
+          { cell: 'D14', type: 'label', value: 'Should equal salvage value' },
         ],
-        dataValidation: [
-          { range: 'B3:M9', type: 'decimal', operator: 'greaterThan', min: 0, errorMessage: 'Please enter a positive number' }
-        ]
-      }
-    ]
-  }
+        columnWidths: { A: 32, B: 18, C: 28, D: 30 },
+        freezePanes: { row: 2, col: 0 },
+      },
+    ],
+  },
 };
+
+// Retained names so `selectExamples` can keep routing by modelType
+// without churn. Older keys (`dcfSimple`, `budgetTemplate`) are
+// aliased to the closest new verified example.
+(exampleSpecs as any).dcfSimple = exampleSpecs.npvSimple;
+(exampleSpecs as any).budgetTemplate = exampleSpecs.depreciationSLM;
 
 // =============================================================================
 // PROMPT BUILDER CLASS
@@ -340,25 +378,82 @@ Design a professional, well-organized workbook structure. Output as JSON.`
 AVAILABLE FORMULA PATTERNS (use these for complex formulas):
 ${formulaContext}
 
-CRITICAL RULES:
-1. ALL calculations MUST use Excel formulas - NEVER hardcode computed values
-2. Use the formula patterns provided - they are tested and validated
-3. Use named ranges in formulas for readability: "=Revenue*GrossMargin" not "=B5*C12"
-4. For formula patterns, specify the patternId and params
-5. For simple formulas, write the formula directly
-6. Include proper number formatting for each cell
+# LAYOUT CONVENTION — MANDATORY, NON-NEGOTIABLE
 
-CELL SPECIFICATION FORMAT:
+Every sheet MUST follow this exact layout. Workbooks that break it
+will fail the downstream smoke-test and the generation will be
+rejected. This is not a suggestion.
+
+  Row 1          Sheet title cell (type=header)
+  Row 2          Column headers — exactly these four, in this order:
+                 A2 "LABEL", B2 "VALUE", C2 "FORMULA / RESULT", D2 "NOTES"
+  Row 3+         Data rows, optionally broken up by subheader rows
+                 spanning A..D.
+
+Column discipline:
+  • Column A — label text ONLY. type: 'label' | 'subheader' | 'total' | 'header'.
+  • Column B — numeric or date INPUTS ONLY. type: 'input'. Never a
+    label. Never a formula. Never empty in a row that has a value.
+  • Column C — formulas ONLY. type: 'formula'. Every formula must
+    reference cells in column B on the SAME row or an EARLIER row.
+    FORWARD REFERENCES ARE FORBIDDEN: a formula in C5 may not
+    reference B9. Cross-sheet refs are allowed only to column B of an
+    existing sheet in this spec.
+  • Column D — notes / units / audit comments. type: 'label' only.
+
+# CRITICAL RULES
+
+1. ALL calculations MUST be Excel formulas. NEVER hardcode a computed
+   value in column B. If a cell is the result of a calculation, it
+   belongs in column C with a formula.
+2. Every formula must reference concrete, defined col-B cells. If a
+   formula references cell Bn, there MUST be a type='input' cell at
+   Bn with a numeric value. Reference a label or empty cell → #VALUE!.
+3. Functions that take ONE range argument (NPV, IRR, XIRR, SUM,
+   AVERAGE, PRODUCT, STDEV, VAR, SUMPRODUCT) must get ONE contiguous
+   range. \`=IRR(B2, B5:B10)\` is INVALID. Use \`=IRR(B2:B10)\` by
+   laying out the stream contiguously.
+4. Cell addresses must be unique. Never emit two cell entries with
+   the same 'cell' field. Later entries will NOT overwrite earlier
+   ones — they will be rejected.
+5. For percentage inputs, use the decimal form (e.g. 0.12 for 12%)
+   and format: { type: 'percentage' }.
+
+# ANTI-PATTERNS — DO NOT DO THESE
+
+Each of these has broken real workbooks. Reject any impulse to emit:
+
+  ❌ \`{cell:'C3', value:'Year 1 Cash Flow'}\` followed by
+     \`{cell:'C3', value:30000}\`.
+     (duplicate cell — second is dropped or errors)
+
+  ❌ \`{cell:'B5', type:'label', value:'Input'}\` with
+     \`{cell:'B6', type:'formula', formula:'=SUM(B5:B10)'}\`.
+     (formula range includes a label → #VALUE!)
+
+  ❌ \`=IRR(B2, C3:C7)\` or \`=IRR((B2, C3:C7))\`.
+     (IRR takes ONE range — rearrange so the stream is contiguous)
+
+  ❌ \`{cell:'C5', formula:'=B8+B9'}\` when B8/B9 are defined LATER.
+     (forward reference — move the inputs above the formula)
+
+  ❌ \`=Sheet2!A1\` when no sheet named 'Sheet2' exists in the spec.
+     (cross-sheet ref to missing sheet → #REF!)
+
+  ❌ \`{cell:'B3', formula:'=B3*0.05'}\`.
+     (self-reference — #CYCLE!)
+
+# CELL SPECIFICATION FORMAT
 {
   "cell": "A1",
   "type": "label|input|formula|value|header|subheader|total",
-  "value": "Static value (for label/value/header types)",
-  "formula": "=Direct Excel formula",
+  "value": "Static value (for label/value/header types) or literal number (for input)",
+  "formula": "=Direct Excel formula (column C cells ONLY)",
   "formulaPattern": {
     "patternId": "npv|irr|pmt|...",
-    "params": { "rate": "B2", "cashFlowRange": "C5:C10" }
+    "params": { "rate": "B2", "cashFlowRange": "B5:B10" }
   },
-  "name": "NamedRangeName (if this cell should be named)",
+  "name": "NamedRangeName (if this col-B cell should be named)",
   "format": {
     "type": "number|currency|percentage|date|text|accounting",
     "decimals": 2,
@@ -368,7 +463,13 @@ CELL SPECIFICATION FORMAT:
   "comment": "Tooltip/comment for user guidance"
 }
 
-EXAMPLE WORKBOOK SPECS:
+# VERIFIED WORKED EXAMPLES
+
+Each of the specs below has been smoke-tested end-to-end: built via
+ExcelWorkbookBuilder and every formula evaluated via HyperFormula
+with zero errors. Use them as your template — match the layout, the
+type assignments, and the formula styles exactly.
+
 ${JSON.stringify(examples, null, 2)}`,
       userPrompt: `Generate the complete cell specifications for this workbook.
 
@@ -401,81 +502,81 @@ Output as complete ExcelWorkbookSpec JSON matching this schema:
     examples: Partial<ExcelWorkbookSpec>[], 
     uniqueContext: UniqueContext
   ): string {
-    return `You are an expert Excel financial modeler and formula engineer. Your task is to generate complete, professional Excel workbook specifications as JSON.
+    return `You are an expert Excel financial modeler. Emit a complete Excel workbook specification as strict JSON.
 
-# REQUEST ID: ${uniqueContext.requestId}
-# TIMESTAMP: ${uniqueContext.timestamp}
+REQUEST ID: ${uniqueContext.requestId}
+TIMESTAMP: ${uniqueContext.timestamp}
 
-## CRITICAL RULES - FOLLOW EXACTLY
+# LAYOUT CONVENTION — MANDATORY, NON-NEGOTIABLE
 
-### 1. ALL CALCULATIONS MUST USE EXCEL FORMULAS
-- NEVER hardcode calculated values. The user needs a dynamic model.
-- Every number that depends on another number MUST be a formula.
-- Example: If Revenue is $100,000 and Growth is 5%, Year 2 Revenue is NOT $105,000
-  It is: formula: "=B5*(1+B6)" or "=Revenue*(1+GrowthRate)"
+Every sheet MUST follow this exact layout. Workbooks that break it
+will be rejected by the downstream smoke-test.
 
-### 2. USE THE FORMULA PATTERN LIBRARY
-For complex financial formulas, use the validated patterns:
+  Row 1          Title (type='header')
+  Row 2          A2 "LABEL", B2 "VALUE", C2 "FORMULA / RESULT", D2 "NOTES"
+  Row 3+         Data rows. Subheader rows may span A..D.
+
+  Column A       Label text ONLY.
+  Column B       Numeric / date INPUTS ONLY. Never a label, never a formula.
+  Column C       Formulas ONLY. Must reference same-or-earlier-row col-B
+                 cells. FORWARD REFERENCES ARE FORBIDDEN.
+  Column D       Notes / units ONLY.
+
+# CRITICAL RULES
+
+1. ALL calculations MUST be Excel formulas. NEVER hardcode a computed
+   value.
+2. Every formula must reference concrete, defined col-B cells. If it
+   references Bn, there MUST be an input cell at Bn with a numeric
+   value. Referencing a label or empty cell → #VALUE!.
+3. Single-range functions (NPV, IRR, XIRR, SUM, AVERAGE, PRODUCT,
+   STDEV, VAR, SUMPRODUCT) need ONE contiguous range. Lay out cash
+   flows contiguously so \`=IRR(B6:B11)\` works; never
+   \`=IRR(B4, B6:B11)\`.
+4. Every cell address must be unique. Duplicate entries are rejected.
+5. Percentages are decimals with format.type='percentage' (0.12 for 12%).
+6. Division formulas wrapped in IFERROR: "=IFERROR(A/B,0)".
+7. Only reference a named range if you also define it in namedRanges
+   pointing at a real col-B cell.
+
+# ANTI-PATTERNS — THESE HAVE BROKEN REAL WORKBOOKS
+
+  ❌ Same cell emitted twice (one label, one value) — dropped or errors.
+  ❌ Formula range includes a label/header cell — #VALUE!.
+  ❌ IRR or NPV with two arguments separated by comma — wrong arity.
+  ❌ Formula references a col-B cell defined LATER in the sheet.
+  ❌ Cross-sheet reference to a sheet name that isn't in this spec.
+  ❌ Self-reference (\`=B3*0.05\` at B3) — #CYCLE!.
+
+# FORMULA PATTERN LIBRARY
+
+For complex formulas, prefer validated patterns:
 ${formulaContext}
 
-To use a pattern, specify:
-"formulaPattern": {
-  "patternId": "npv",
-  "params": { "rate": "WACC", "cashFlowRange": "B5:G5", "initialInvestment": "B4" }
-}
+Use: "formulaPattern": { "patternId": "npv", "params": { "rate": "B4", "cashFlowRange": "B7:B11", "initialInvestment": "B6" } }
 
-### 3. NAME EVERYTHING
-- Create named ranges for ALL inputs: Revenue, GrowthRate, WACC, TaxRate, etc.
-- Use names in formulas: "=EBITDA*EBITDAMargin" not "=B10*B11"
-- This makes the model readable and maintainable
+# OUTPUT SCHEMA
 
-### 4. PROFESSIONAL STRUCTURE
-- Sheet 1: Inputs/Assumptions (yellow input cells)
-- Sheet 2: Calculations (intermediate calcs)
-- Sheet 3: Outputs/Summary (results, dashboards)
-- Use proper headers, sections, and formatting
-
-### 5. FORMATTING
-- Currency cells: { "type": "currency", "decimals": 0 }
-- Percentages: { "type": "percentage", "decimals": 1 }
-- Input cells: type: "input" (will be yellow, unlocked)
-- Formula cells: type: "formula" (will be protected)
-
-### 6. ERROR HANDLING
-- Wrap division formulas in IFERROR: "=IFERROR(A1/B1,0)"
-- Use named ranges to avoid #REF! errors
-
-## OUTPUT FORMAT
-Return a valid JSON object matching ExcelWorkbookSpec schema:
 {
-  "metadata": {
-    "title": "Model name",
-    "description": "What this model does",
-    "author": "ICAI CAGPT",
-    "keywords": ["financial", "model", "dcf"]
-  },
+  "metadata": { "title": "...", "description": "...", "author": "ICAI CAGPT" },
   "sheets": [
     {
       "name": "Sheet Name",
       "purpose": "inputs|calculations|outputs|dashboard",
-      "tabColor": "FF4472C4",
-      "cells": [
-        { "cell": "A1", "type": "header", "value": "Header Text" },
-        { "cell": "B3", "type": "input", "value": 0.10, "format": {"type": "percentage"}, "name": "WACC" },
-        { "cell": "C5", "type": "formula", "formula": "=NPV(WACC,B10:B15)+B9", "format": {"type": "currency"} }
-      ],
-      "columnWidths": { "A": 30, "B": 15 },
-      "freezePanes": { "row": 1, "col": 1 },
-      "dataValidation": [],
-      "conditionalFormatting": []
+      "cells": [ /* CellSpec array per layout convention */ ],
+      "columnWidths": { "A": 32, "B": 18, "C": 28, "D": 30 },
+      "freezePanes": { "row": 2, "col": 0 }
     }
   ],
-  "namedRanges": [
-    { "name": "WACC", "range": "Assumptions!B3", "comment": "Weighted Average Cost of Capital" }
-  ]
+  "namedRanges": [ /* optional — each must point at a col-B cell of an existing sheet */ ]
 }
 
-## EXAMPLE SPECIFICATIONS
+# VERIFIED WORKED EXAMPLES
+
+Each example has been smoke-tested — built via ExcelWorkbookBuilder
+and every formula evaluated via HyperFormula with zero errors. Use
+these as your template.
+
 ${JSON.stringify(examples, null, 2)}
 
 DO NOT explain or comment. Return ONLY the JSON specification.`;

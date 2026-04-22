@@ -3,6 +3,7 @@ import { createServer } from "http";
 import session from 'express-session';
 import { storage } from "./pgStorage";
 import { aiOrchestrator } from "./services/aiOrchestrator";
+import { requirementClarificationAIService } from "./services/requirementClarificationAI";
 import { excelOrchestrator } from "./services/excelOrchestrator";
 import { excelModelGenerator } from "./services/excel/excelModelGenerator";
 import { AnalyticsProcessor } from "./services/analyticsProcessor";
@@ -5056,11 +5057,55 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
           };
           const preamblePromise = runPreamble();
 
-          // Execute agent workflow if this mode requires it
+          // Preemptive clarification check + agent workflow execution.
+          //
+          // The orchestrator (`processQuery`, below) already does its
+          // own clarification analysis, but that runs AFTER the agent
+          // workflow. When the query needs clarification, the workflow
+          // output is thrown away and the user just sees a clarifying
+          // question — wasting 10-30s and showing a sequence of
+          // scripted "synthesizing results" labels that read like the
+          // agent is about to answer. Doing the analysis here first
+          // lets us (a) pin the `clarify` thinking phase EARLY so the
+          // user sees the right label throughout, (b) skip the
+          // workflow entirely when we already know we'll clarify.
           let agentWorkflowResult: any = null;
+          let skipAgentWorkflow = false;
           if (isAgentWorkflowMode(chatMode)) {
             try {
-              sendThinking('agents', `Activating ${chatMode} agent workflow...`);
+              const prelim = await requirementClarificationAIService.analyzeQueryAsync(
+                query,
+                conversationHistory,
+                conversation.id,
+                { chatMode, hasAttachment: !!attachmentBuffer },
+              );
+              const isProfessionalMode = chatMode !== 'standard';
+              const willClarify =
+                prelim?.needsClarification &&
+                prelim?.recommendedApproach === 'clarify' &&
+                (prelim.missingContext ?? []).some((m: any) =>
+                  isProfessionalMode
+                    ? m.importance === 'critical' || m.importance === 'high' || m.importance === 'medium'
+                    : m.importance === 'critical' || m.importance === 'high',
+                );
+              if (willClarify) {
+                console.log(
+                  `[SSE][AgentWorkflow] Preemptive clarification detected for '${chatMode}' — skipping agent workflow, will ask user instead.`,
+                );
+                sendThinking('clarify', 'Preparing a clarifying question…');
+                skipAgentWorkflow = true;
+              }
+            } catch (err) {
+              console.warn(
+                `[SSE][AgentWorkflow] Preemptive clarification check failed — proceeding with workflow:`,
+                err,
+              );
+            }
+          }
+
+          if (isAgentWorkflowMode(chatMode) && !skipAgentWorkflow) {
+            try {
+              sendThinking('agents', `Coordinating ${chatMode} agent pipeline…`);
               console.log(`[SSE][AgentWorkflow] Mode '${chatMode}' requires agent execution`);
               agentWorkflowResult = await executeWorkflow(
                 chatMode,
@@ -5076,11 +5121,17 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
                 },
                 userId
               );
-              sendThinking('agents', 'Agent workflow completed, synthesizing results...');
+              // DELIBERATELY no "Agent workflow completed, synthesizing
+              // results..." label here — that scripted line pre-committed
+              // to "the agent is about to answer" even when the downstream
+              // orchestrator went on to clarify. The real phase (clarify
+              // or generating) is emitted after `processQuery` returns.
               console.log(`[SSE][AgentWorkflow] Workflow completed for mode '${chatMode}'`);
             } catch (error) {
               console.error(`[SSE][AgentWorkflow] Error executing workflow for mode '${chatMode}':`, error);
-              sendThinking('agents', 'Agent workflow encountered an issue, falling back to direct analysis...');
+              // Neutral label — the fallback path produces an answer OR
+              // a clarification depending on orchestrator decision.
+              sendThinking('agents', 'Agent workflow unavailable, continuing…');
               // Continue to regular processing as fallback
             }
           }
@@ -5121,8 +5172,12 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
           // client latches on this phase and keeps the status pinned to
           // "Asking a clarifying question…" through the entire stream,
           // so it never flips to "Answering…" just because a chunk
-          // heuristic didn't recognise the wording.
-          if (result.needsClarification) {
+          // heuristic didn't recognise the wording. (If the preemptive
+          // agent-workflow check already emitted `clarify`, re-emit it
+          // here anyway — idempotent on the client side, and it
+          // anchors the latch if the preemptive event somehow got lost
+          // in the stream.)
+          if (result.needsClarification || skipAgentWorkflow) {
             sendThinking('clarify', 'Preparing a clarifying question…');
             await new Promise(resolve => setTimeout(resolve, 100));
           } else {

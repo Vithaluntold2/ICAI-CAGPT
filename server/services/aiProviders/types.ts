@@ -39,7 +39,30 @@ export interface CompletionRequest {
   maxTokens?: number;
   stream?: boolean;
   tools?: any[];
-  responseFormat?: 'text' | 'json';
+  /**
+   * Response format hint.
+   *   'text'        — free-form output (default).
+   *   'json'        — Azure/OpenAI JSON mode. Model must emit valid
+   *                   JSON; no schema enforcement.
+   *   'json_schema' — strict schema-constrained JSON. Requires
+   *                   `jsonSchema` to be set. Azure/OpenAI decodes
+   *                   into valid JSON that matches the schema, or
+   *                   raises — kills whole classes of generation
+   *                   drift at the decoder. Preferred for ExcelSpec
+   *                   and similarly-strict formats.
+   */
+  responseFormat?: 'text' | 'json' | 'json_schema';
+  /** JSON schema required when responseFormat === 'json_schema'.
+   *  Passed through to Azure/OpenAI's `response_format.json_schema`. */
+  jsonSchema?: {
+    name: string;
+    schema: Record<string, any>;
+    strict?: boolean;
+    description?: string;
+  };
+  /** Deterministic-sampling seed. Azure/OpenAI uses this to make
+   *  outputs reproducible when paired with temperature 0. */
+  seed?: number;
   attachment?: {
     buffer: Buffer;
     filename: string;

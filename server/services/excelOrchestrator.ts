@@ -10,6 +10,10 @@ import { aiFormulaGenerator, FormulaGenerationRequest } from './excel/aiFormulaG
 import { vbaGenerator, VBAGenerationRequest } from './excel/vbaGenerator';
 import { financialModelTemplates } from './excel/financialModelTemplates';
 import { adHocTemplateGenerator, AdHocTemplateRequest } from './excel/adHocTemplateGenerator';
+import {
+  ExcelWorkbookBuilder,
+  type ExcelWorkbookSpec,
+} from './excel/excelWorkbookBuilder';
 
 export interface SpreadsheetRequest {
   operation: 'create' | 'modify' | 'calculate' | 'analyze';
@@ -374,6 +378,43 @@ ${macro.code}
       summary: this.generateSummary(formulasUsed, tablesCreated, request),
       formulasUsed,
       tablesCreated
+    };
+  }
+
+  /**
+   * Render a canonical `ExcelWorkbookSpec` directly to a workbook via
+   * `ExcelWorkbookBuilder`. This is the path used for calculation-mode
+   * queries where the financial-calculation agents have already emitted
+   * a verified layout + formulas (Step A of the correctness plan). The
+   * LLM is bypassed entirely — the spec goes straight to ExcelJS.
+   *
+   * Returned `formulasUsed` is intentionally empty (the builder tracks
+   * formulas internally via `stats.formulasApplied`; the legacy-shaped
+   * list is only used for chat-side "formulas used" callouts which
+   * don't fire on the spec path).
+   */
+  async createWorkbookFromSpec(spec: ExcelWorkbookSpec): Promise<ExcelOperationResult> {
+    // Calc-agent-emitted specs are smoke-tested by the calling code
+    // (`scripts/smoke-calc-agents.ts` verifies the agent outputs).
+    // ExcelWorkbookBuilder.build is the canonical renderer.
+    const builder = new ExcelWorkbookBuilder();
+    const result = await builder.build(spec);
+
+    if (!result.success || !result.workbook || !result.buffer) {
+      throw new Error(
+        `Workbook build failed: ${(result.errors ?? ['unknown']).join('; ')}`,
+      );
+    }
+
+    const sheetCount = spec.sheets.length;
+    const formulaCount = result.stats?.formulasApplied ?? 0;
+
+    return {
+      workbook: result.workbook,
+      buffer: result.buffer,
+      summary: `${spec.metadata.title}: ${sheetCount} sheet${sheetCount === 1 ? '' : 's'}, ${formulaCount} formula${formulaCount === 1 ? '' : 's'} (generated from calculation agents)`,
+      formulasUsed: [],
+      tablesCreated: spec.sheets.map((s) => s.name),
     };
   }
 

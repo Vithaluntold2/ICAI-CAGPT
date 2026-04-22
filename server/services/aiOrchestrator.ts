@@ -18,6 +18,7 @@ import { aiProviderRegistry, AIProviderName, ProviderError, providerHealthMonito
 // Using AI-driven clarification service (no hardcoded patterns)
 import { requirementClarificationAIService, type ClarificationAnalysis } from './requirementClarificationAI';
 import { documentAnalyzerAgent } from './agents/documentAnalyzer';
+import { runCalculationAgents, type CalcExecutorResult } from './agents/calcExecutor';
 import { visualizationGenerator } from './visualizationGenerator';
 import { promptBuilder } from './promptBuilder';
 import type { VisualizationData } from '../../shared/types/visualization';
@@ -188,16 +189,15 @@ export class AIOrchestrator {
       );
     }
 
-    // Calculation mode emits sheet blocks with formula cell-refs. gpt-4o-mini
-    // drifts on cell indexing (self-refs, off-by-one across rows) which lands
-    // as #ERR in the rendered spreadsheet. Force gpt-4o for these requests.
-    if (chatMode === 'calculation' || classification.requiresCalculation) {
-      if (routingDecision.primaryModel === 'gpt-4o-mini') {
-        console.log('[Orchestrator] Upgrading model gpt-4o-mini → gpt-4o for calculation/sheet generation');
-        routingDecision.primaryModel = 'gpt-4o';
-        routingDecision.fallbackModels = ['gpt-4o-mini', ...routingDecision.fallbackModels];
-      }
-    }
+    // Historical note: this used to upgrade `gpt-4o-mini` → `gpt-4o` for
+    // calculation mode because the mini model drifted on cell indexing.
+    // That upgrade is now a no-op against Azure because the Azure
+    // provider pins its deployment server-side (see
+    // azureOpenAI.provider.ts:112-116) and ignores `request.model`. The
+    // routing-decision label is kept for logging + cost-tracking but
+    // doesn't influence the Azure deployment that actually serves the
+    // request. If/when we wire in direct OpenAI or Claude, revive the
+    // upgrade here for those paths.
 
     // Step 2.5: ADVANCED REASONING - Enhance routing decision with reasoning profile
     // CRITICAL: CoT for Research/Calculate runs independently of full governor
@@ -510,61 +510,17 @@ export class AIOrchestrator {
         // Don't fail the request if Excel generation fails
       }
     } 
-    // Legacy calculation mode Excel generation
+    // Calculation mode Excel generation.
     // FIX: Allow Excel generation if triage detected calculation needs, even if chat mode wasn't explicitly set
     else if ((chatMode === 'calculation' || classification.requiresCalculation) && calculationResults && Object.keys(calculationResults).length > 0) {
       try {
-        console.log('[Orchestrator] Generating Excel workbook for calculation mode...');
-        const spreadsheetRequest = await excelOrchestrator.parseUserRequest(enrichedQuery, undefined);
-        
-        // Add detected calculations to the request
-        if (calculationResults.taxCalculation) {
-          spreadsheetRequest.calculations?.push({
-            type: 'tax',
-            inputs: calculationResults.taxCalculation,
-            outputLocation: 'B2'
-          });
-        }
-        if (calculationResults.npv !== undefined) {
-          spreadsheetRequest.calculations?.push({
-            type: 'npv',
-            inputs: calculationResults,
-            outputLocation: 'B20'
-          });
-        }
-        if (calculationResults.irr !== undefined) {
-          spreadsheetRequest.calculations?.push({
-            type: 'irr',
-            inputs: calculationResults,
-            outputLocation: 'B35'
-          });
-        }
-        if (calculationResults.depreciation) {
-          spreadsheetRequest.calculations?.push({
-            type: 'depreciation',
-            inputs: calculationResults.depreciation,
-            outputLocation: 'B50'
-          });
-        }
-        if (calculationResults.amortization) {
-          spreadsheetRequest.calculations?.push({
-            type: 'amortization',
-            inputs: calculationResults.amortization,
-            outputLocation: 'B80'
-          });
-        }
-
-        // Only build the legacy xlsx if the merged request has something to
-        // render. Without this, queries that triggered calculation-mode but
-        // didn't populate a recognised calc type yield a banner-only file.
-        const hasRequestContent =
-          (spreadsheetRequest.calculations?.length ?? 0) > 0
-          || (spreadsheetRequest.tables?.length ?? 0) > 0
-          || (spreadsheetRequest.formulas?.length ?? 0) > 0
-          || (spreadsheetRequest.data?.length ?? 0) > 0;
-        if (hasRequestContent) {
-          excelWorkbook = await excelOrchestrator.createCalculationWorkbook(spreadsheetRequest);
-          console.log('[Orchestrator] Excel workbook generated with', excelWorkbook.formulasUsed.length, 'formulas');
+        // Agent-first path: if the calc agents have already emitted a
+        // canonical spec (Step A of the correctness plan), render it
+        // directly — no LLM re-generation, no layout hallucination.
+        const agentSpec = calculationResults._excelSpec;
+        if (agentSpec) {
+          console.log('[Orchestrator] Using agent-emitted ExcelWorkbookSpec (bypassing LLM generator)');
+          excelWorkbook = await excelOrchestrator.createWorkbookFromSpec(agentSpec);
           if (excelWorkbook.workbook) {
             try {
               spreadsheetPreviewData = excelOrchestrator.extractSpreadsheetPreview(excelWorkbook.workbook);
@@ -573,7 +529,67 @@ export class AIOrchestrator {
             }
           }
         } else {
-          console.log('[Orchestrator] Skipping legacy xlsx — empty request, AI sheet blocks will handle download');
+          console.log('[Orchestrator] Falling back to legacy calculation-workbook path (no agent spec available)');
+          const spreadsheetRequest = await excelOrchestrator.parseUserRequest(enrichedQuery, undefined);
+
+          // Add detected calculations to the request — legacy path.
+          if (calculationResults.taxCalculation) {
+            spreadsheetRequest.calculations?.push({
+              type: 'tax',
+              inputs: calculationResults.taxCalculation,
+              outputLocation: 'B2'
+            });
+          }
+          if (calculationResults.npv !== undefined) {
+            spreadsheetRequest.calculations?.push({
+              type: 'npv',
+              inputs: calculationResults,
+              outputLocation: 'B20'
+            });
+          }
+          if (calculationResults.irr !== undefined) {
+            spreadsheetRequest.calculations?.push({
+              type: 'irr',
+              inputs: calculationResults,
+              outputLocation: 'B35'
+            });
+          }
+          if (calculationResults.depreciation) {
+            spreadsheetRequest.calculations?.push({
+              type: 'depreciation',
+              inputs: calculationResults.depreciation,
+              outputLocation: 'B50'
+            });
+          }
+          if (calculationResults.amortization) {
+            spreadsheetRequest.calculations?.push({
+              type: 'amortization',
+              inputs: calculationResults.amortization,
+              outputLocation: 'B80'
+            });
+          }
+
+          // Only build the legacy xlsx if the merged request has something to
+          // render. Without this, queries that triggered calculation-mode but
+          // didn't populate a recognised calc type yield a banner-only file.
+          const hasRequestContent =
+            (spreadsheetRequest.calculations?.length ?? 0) > 0
+            || (spreadsheetRequest.tables?.length ?? 0) > 0
+            || (spreadsheetRequest.formulas?.length ?? 0) > 0
+            || (spreadsheetRequest.data?.length ?? 0) > 0;
+          if (hasRequestContent) {
+            excelWorkbook = await excelOrchestrator.createCalculationWorkbook(spreadsheetRequest);
+            console.log('[Orchestrator] Excel workbook generated with', excelWorkbook.formulasUsed.length, 'formulas');
+            if (excelWorkbook.workbook) {
+              try {
+                spreadsheetPreviewData = excelOrchestrator.extractSpreadsheetPreview(excelWorkbook.workbook);
+              } catch (e) {
+                console.warn('[Orchestrator] Failed to extract spreadsheet preview:', e);
+              }
+            }
+          } else {
+            console.log('[Orchestrator] Skipping legacy xlsx — empty request, AI sheet blocks will handle download');
+          }
         }
       } catch (error) {
         console.error('[Orchestrator] Excel generation failed:', error);
@@ -1448,9 +1464,39 @@ export class AIOrchestrator {
     routing: RoutingDecision
   ): Promise<any> {
     const results: any = {};
-    
+
+    // Agent-first path. The registered financial-calculation agents
+    // (NPVCalculator, TaxLiabilityCalculator, DepreciationScheduler,
+    // ROICalculator, BreakEvenAnalyzer) each return a canonical
+    // `excelSpec` alongside their numeric results. That spec is the
+    // source of truth for the downstream Excel generation step —
+    // Step A of the correctness plan. Agents that don't match the
+    // query are silently skipped; the legacy regex/solver paths
+    // below run in parallel for cases the agents don't cover yet
+    // (financial ratios, amortisation, corporate tax).
+    try {
+      const agentResult = await runCalculationAgents(query);
+      if (agentResult.agentsInvoked.length > 0) {
+        console.log(
+          `[Orchestrator] Calc agents invoked: ${agentResult.agentsInvoked.join(', ')}`,
+        );
+        // Merge agent outputs under their short keys so downstream
+        // code (Excel generation + chat prompt enrichment) can see
+        // them. We expose the spec under a reserved `_excelSpec` key
+        // so caller knows the workbook is pre-rendered.
+        if (agentResult.results.npv) results.npv = agentResult.results.npv;
+        if (agentResult.results.tax) results.taxCalculation = agentResult.results.tax;
+        if (agentResult.results.depreciation) results.depreciation = agentResult.results.depreciation;
+        if (agentResult.results.roi) results.roi = agentResult.results.roi;
+        if (agentResult.results.breakEven) results.breakEven = agentResult.results.breakEven;
+        if (agentResult.excelSpec) results._excelSpec = agentResult.excelSpec;
+      }
+    } catch (err) {
+      console.warn('[Orchestrator] Calc agent execution failed — falling back to regex path:', err);
+    }
+
     // Financial Ratio calculations (Current Ratio, Quick Ratio, etc.)
-    if (query.toLowerCase().includes('current ratio') || 
+    if (query.toLowerCase().includes('current ratio') ||
         query.toLowerCase().includes('quick ratio') ||
         query.toLowerCase().includes('liquidity ratio')) {
       const ratioParams = this.extractFinancialRatioParameters(query);
@@ -1481,8 +1527,10 @@ export class AIOrchestrator {
       }
     }
     
-    // NPV/IRR calculations
-    if (query.includes('npv') || query.includes('net present value')) {
+    // NPV/IRR calculations — LEGACY FALLBACK. Agent path above already
+    // ran; only re-run the regex-solver if the agent didn't fire
+    // (e.g. cash flows couldn't be parsed by the executor's parser).
+    if (!results.npv && (query.includes('npv') || query.includes('net present value'))) {
       const cashFlows = this.extractCashFlows(query);
       const discountRate = this.extractDiscountRate(query);
       if (cashFlows && discountRate) {
@@ -1495,8 +1543,8 @@ export class AIOrchestrator {
         };
       }
     }
-    
-    if (query.includes('irr') || query.includes('internal rate of return')) {
+
+    if (!results.irr && (query.includes('irr') || query.includes('internal rate of return'))) {
       const cashFlows = this.extractCashFlows(query);
       if (cashFlows) {
         const irr = financialSolverService.calculateIRR(cashFlows);
@@ -1508,8 +1556,8 @@ export class AIOrchestrator {
       }
     }
     
-    // Depreciation calculations
-    if (query.includes('depreciation') || query.includes('depreciate')) {
+    // Depreciation calculations — LEGACY FALLBACK (agent path runs first)
+    if (!results.depreciation && (query.includes('depreciation') || query.includes('depreciate'))) {
       const depParams = this.extractDepreciationParameters(query);
       if (depParams) {
         const annualDepreciation = financialSolverService.calculateDepreciation(
@@ -2249,11 +2297,30 @@ export class AIOrchestrator {
       
       try {
         const provider = aiProviderRegistry.getProvider(providerName);
-        
+
         // Get the appropriate model for this provider (undefined = use provider default)
         const providerModel = getModelForProvider(providerName);
-        
-        console.log(`[AIOrchestrator] Attempting ${providerName} (health: ${metrics.healthScore}) [${i + 1}/${healthyProviders.length}]${providerModel ? ` with model ${providerModel}` : ' (using default model)'}`);
+
+        // Azure OpenAI pins the deployment server-side and IGNORES
+        // `request.model` (see azureOpenAI.provider.ts:112-116). The
+        // requested model label is therefore just routing metadata;
+        // the deployment name is what actually serves the request.
+        // Surface both so the logs stop being misleading.
+        let actualServedBy: string | undefined;
+        if (providerName === AIProviderName.AZURE_OPENAI && provider) {
+          const deployments = provider.getAvailableModels();
+          if (deployments.length > 0) actualServedBy = deployments[0];
+        }
+        const requestedLabel = providerModel
+          ? ` with model ${providerModel}`
+          : ' (using default model)';
+        const servedLabel =
+          actualServedBy && actualServedBy !== providerModel
+            ? ` → served by Azure deployment "${actualServedBy}"`
+            : '';
+        console.log(
+          `[AIOrchestrator] Attempting ${providerName} (health: ${metrics.healthScore}) [${i + 1}/${healthyProviders.length}]${requestedLabel}${servedLabel}`,
+        );
 
         // Build the base request. When we have a conversationId, also attach
         // tool schemas in the provider's native shape and drive a tool-call

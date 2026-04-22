@@ -2,6 +2,7 @@ import express, { type Request, Response, NextFunction } from "express";
 import session from "express-session";
 import connectPgSimple from "connect-pg-simple";
 import { Pool } from 'pg';
+import { client as mainDbPool } from "./db";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import { VirusScanService } from "./services/virusScanService";
@@ -150,20 +151,36 @@ async function initializeSessionTable(): Promise<void> {
 // Session store will be set after initialization
 let sessionStore: any = null;
 
-// Create session store using PostgreSQL (persistent across restarts)
+// Create session store using PostgreSQL (persistent across restarts).
+//
+// Share the main `pool` from db.ts instead of letting connect-pg-simple
+// spin up its own internal pool via `conString`. Reasons:
+//
+//   1. Railway's proxy drops idle connections. Our main pool has
+//      `keepAlive: true`, an `on('error')` handler, and reconnect
+//      logic — a standalone session-store pool had none of that,
+//      which is why a single dropped connection produced the
+//      `Connection terminated unexpectedly → HTTP 500 for 72 s`
+//      stall we kept seeing in the logs.
+//   2. One pool means one pg connection budget + one place to tune
+//      sizing / timeouts.
+//   3. Shares the same SSL config, so no risk of dev/prod drift.
 const createSessionStore = () => {
   const PgStore = connectPgSimple(session);
-  
-  console.log('[Session] Using PostgreSQL session store');
+
+  console.log('[Session] Using PostgreSQL session store (shared main pool)');
   return new PgStore({
-    conString: process.env.DATABASE_URL,
+    // Use the exported main pool from db.ts. connect-pg-simple accepts
+    // either `conString` or `pool`; preferring `pool` gives us the
+    // main pool's keepAlive + error handling.
+    pool: mainDbPool,
     tableName: 'user_sessions',
     createTableIfMissing: false, // We create it ourselves above
     pruneSessionInterval: false, // Disable auto-prune to prevent log spam (rely on TTL)
     ttl: 30 * 24 * 60 * 60, // 30 days - sessions auto-expire
     errorLog: (error: any) => {
       // Ignore "already exists" and prune errors (handled by TTL)
-      if (error?.message?.includes('already exists') || 
+      if (error?.message?.includes('already exists') ||
           error?.message?.includes('prune') ||
           error?.code === '42P01') { // relation does not exist
         return;

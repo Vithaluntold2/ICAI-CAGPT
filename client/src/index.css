@@ -673,3 +673,37 @@
 .dark .react-flow__background pattern rect {
   fill: hsl(var(--foreground) / 0.04) !important;
 }
+
+
+/* ---------------------------------------------------------------------------
+ * Safari foreignObject-in-SVG transform fix
+ * ---------------------------------------------------------------------------
+ * X6 renders each node as:
+ *   <g transform="translate(x, y)">
+ *     <foreignObject width="w" height="h">
+ *       <div>…react node contents…</div>
+ *     </foreignObject>
+ *   </g>
+ *
+ * Safari has a long-standing bug (WebKit #23113 and kin) where a
+ * <foreignObject> nested inside a <g> with a `transform` attribute ignores
+ * the ancestor transform — the HTML content paints at the SVG origin (0,0)
+ * instead of the translated position. Every node ends up stacked on top of
+ * each other at the top-left while the edges (which are native SVG paths)
+ * route to the correct dagre-computed coordinates. Chrome/Firefox render
+ * both correctly; only Safari pins the foreignObject to 0,0.
+ *
+ * The standard fix is to force each node's container into its own
+ * compositing layer with translateZ(0). That bypasses the SVG-transform
+ * inheritance path entirely and uses the node's own CSS transform pipeline,
+ * which Safari honours. We also enable `overflow: visible` so shadows,
+ * outlines, and the "MORE" chip that sits outside the card padding are not
+ * clipped by the foreignObject's intrinsic bounds.
+ */
+.x6-graph svg foreignObject {
+  overflow: visible;
+}
+.x6-graph svg foreignObject > div {
+  transform: translateZ(0);
+  -webkit-transform: translateZ(0);
+}

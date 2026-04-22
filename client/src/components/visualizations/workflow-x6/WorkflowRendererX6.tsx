@@ -137,11 +137,36 @@ export default function WorkflowRendererX6({
   const PAD = 24;
   const MAX_SCALE = 1.6;
 
+  // Safari-specific paint bug workaround (complementary to fitContent's
+  // measurement bypass below). When x6 wraps each node in
+  // `<g transform="translate(x,y)"><foreignObject>…</foreignObject></g>`,
+  // WebKit paints the foreignObject HTML at the SVG origin (0,0) instead
+  // of the translated position. Edges (native SVG paths) route correctly;
+  // nodes stack at top-left. Flushing the SVG's display property forces
+  // WebKit to invalidate the ancestor-transform inheritance path it had
+  // cached with stale (0,0) positions. No-op on Chrome/Firefox.
+  const forceSafariReflow = useCallback(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const svg = container.querySelector('svg') as SVGElement | null;
+    if (!svg) return;
+    const prev = svg.style.display;
+    svg.style.display = 'none';
+    // Read offsetHeight to flush pending layout.
+    void (svg as unknown as HTMLElement).offsetHeight;
+    svg.style.display = prev;
+  }, []);
+
   /**
    * Fit the graph to contain the pre-computed content bounds inside the
    * container's visible area. No SVG measurement needed — bounds come
    * from dagre output, container size comes from clientWidth/Height. Works
    * identically in Chrome / Firefox / Safari.
+   *
+   * Chains `forceSafariReflow` after each fit so that Safari's cached
+   * foreignObject transforms get invalidated and the nodes actually paint
+   * at their correct translated positions (otherwise nodes visually stack
+   * at the origin even when the zoom math is correct).
    */
   const fitContent = useCallback(() => {
     const container = containerRef.current;
@@ -170,10 +195,11 @@ export default function WorkflowRendererX6({
       const cx = (bounds.minX + bounds.maxX) / 2;
       const cy = (bounds.minY + bounds.maxY) / 2;
       graph.centerPoint(cx, cy);
+      forceSafariReflow();
     } catch {
       /* graph disposed mid-fit */
     }
-  }, []);
+  }, [forceSafariReflow]);
 
   /**
    * Schedule fitContent with retries until the container is a reasonable
@@ -198,7 +224,9 @@ export default function WorkflowRendererX6({
     };
     run();
     // Settle passes — Safari occasionally lands a theme / font reflow a
-    // few frames after mount. Re-fit so the final state is always correct.
+    // few frames after mount, and foreignObject paint positions may shift
+    // after embedded HTML completes layout. Re-fit so the final state is
+    // always correct. fitContent itself calls forceSafariReflow.
     const t1 = window.setTimeout(() => !cancelled && fitContent(), 120);
     const t2 = window.setTimeout(() => !cancelled && fitContent(), 400);
     return () => {

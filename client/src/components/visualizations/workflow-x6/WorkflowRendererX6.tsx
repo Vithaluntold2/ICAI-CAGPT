@@ -123,49 +123,90 @@ export default function WorkflowRendererX6({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const graphRef = useRef<Graph | null>(null);
 
-  // Safari sometimes settles the parent's layout *after* our first render,
-  // so the initial zoomToFit fits against a collapsed container and the
-  // graph stays at 1:1 with only the top-left visible. We retry on rAF
-  // until the container is meaningfully sized (≥120×120) before fitting,
-  // then do one extra settle-fit a couple frames later in case the
-  // foreignObject-based nodes reflowed after their CSS vars resolved.
-  const fitWhenReady = useCallback(() => {
+  // The content's bounding box derived from the DAGRE layout we already
+  // computed in-memory. Dagre gives us exact pixel coords for each node
+  // keyed by id; we fold in NODE_SIZE per type to get the real box. This
+  // is populated at the end of the layout effect and read by fitContent()
+  // so we never have to ask X6 / Safari what the content bounds are.
+  // That matters because Safari's SVG getBBox() returns stale values for
+  // foreignObject-based nodes until the embedded HTML has actually
+  // painted — X6's zoomToFit then fits against a tiny partial box and
+  // leaves the viewport stuck at the top-left with most nodes offscreen.
+  const contentBoundsRef = useRef<{ minX: number; minY: number; maxX: number; maxY: number } | null>(null);
+
+  const PAD = 24;
+  const MAX_SCALE = 1.6;
+
+  /**
+   * Fit the graph to contain the pre-computed content bounds inside the
+   * container's visible area. No SVG measurement needed — bounds come
+   * from dagre output, container size comes from clientWidth/Height. Works
+   * identically in Chrome / Firefox / Safari.
+   */
+  const fitContent = useCallback(() => {
     const container = containerRef.current;
     const graph = graphRef.current;
-    if (!container || !graph) return;
+    const bounds = contentBoundsRef.current;
+    if (!container || !graph || !bounds) return;
+
+    const vw = container.clientWidth;
+    const vh = container.clientHeight;
+    if (vw < 40 || vh < 40) return; // container not laid out yet
+
+    const contentW = bounds.maxX - bounds.minX;
+    const contentH = bounds.maxY - bounds.minY;
+    if (contentW <= 0 || contentH <= 0) return;
+
+    const scale = Math.min(
+      MAX_SCALE,
+      (vw - 2 * PAD) / contentW,
+      (vh - 2 * PAD) / contentH,
+    );
+
+    try {
+      // X6's zoomTo takes an absolute scale by default. Centre the content
+      // box in the viewport after scaling.
+      graph.zoomTo(scale);
+      const cx = (bounds.minX + bounds.maxX) / 2;
+      const cy = (bounds.minY + bounds.maxY) / 2;
+      graph.centerPoint(cx, cy);
+    } catch {
+      /* graph disposed mid-fit */
+    }
+  }, []);
+
+  /**
+   * Schedule fitContent with retries until the container is a reasonable
+   * size. Safari sometimes settles parent flex layout a frame or two
+   * after the effect runs; the retry loop absorbs that without depending
+   * on broken SVG measurement.
+   */
+  const fitWhenReady = useCallback(() => {
+    const container = containerRef.current;
+    if (!container) return;
     let cancelled = false;
     let attempt = 0;
     const run = () => {
       if (cancelled) return;
-      if (!graphRef.current) return;
-      const { clientWidth, clientHeight } = container;
+      if (!containerRef.current || !graphRef.current) return;
+      const { clientWidth, clientHeight } = containerRef.current;
       if (clientWidth < 120 || clientHeight < 120) {
-        if (attempt++ < 10) requestAnimationFrame(run);
+        if (attempt++ < 20) requestAnimationFrame(run);
         return;
       }
-      try {
-        graph.zoomToFit({ padding: 24, maxScale: 1.6 });
-      } catch {
-        /* graph disposed mid-fit */
-      }
+      fitContent();
     };
     run();
-    // Second settle pass — Safari paints foreignObject content one frame
-    // late, which can shift reported cell bounds. Fit again after two
-    // rAFs and also after a short timeout for the slowest case (fonts
-    // loading, theme var cascade).
-    requestAnimationFrame(() =>
-      requestAnimationFrame(() => {
-        if (cancelled) return;
-        try { graphRef.current?.zoomToFit({ padding: 24, maxScale: 1.6 }); } catch {}
-      }),
-    );
-    const t = window.setTimeout(() => {
-      if (cancelled) return;
-      try { graphRef.current?.zoomToFit({ padding: 24, maxScale: 1.6 }); } catch {}
-    }, 160);
-    return () => { cancelled = true; window.clearTimeout(t); };
-  }, []);
+    // Settle passes — Safari occasionally lands a theme / font reflow a
+    // few frames after mount. Re-fit so the final state is always correct.
+    const t1 = window.setTimeout(() => !cancelled && fitContent(), 120);
+    const t2 = window.setTimeout(() => !cancelled && fitContent(), 400);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
+    };
+  }, [fitContent]);
 
   const [detailNode, setDetailNode] = useState<WorkflowNode | null>(null);
   const [isDark, setIsDark] = useState<boolean>(() =>
@@ -316,6 +357,24 @@ export default function WorkflowRendererX6({
     edges.forEach((e) => dag.setEdge(e.source, e.target));
     dagre.layout(dag);
 
+    // Compute content bounds from dagre output so Safari-safe fitContent()
+    // doesn't need SVG measurement later.
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    nodes.forEach((n) => {
+      const pos = dag.node(n.id);
+      if (!pos) return;
+      const size = NODE_SIZE[n.type] ?? NODE_SIZE.step;
+      const hx = size.width / 2;
+      const hy = size.height / 2;
+      if (pos.x - hx < minX) minX = pos.x - hx;
+      if (pos.y - hy < minY) minY = pos.y - hy;
+      if (pos.x + hx > maxX) maxX = pos.x + hx;
+      if (pos.y + hy > maxY) maxY = pos.y + hy;
+    });
+    if (isFinite(minX)) {
+      contentBoundsRef.current = { minX, minY, maxX, maxY };
+    }
+
     graph.clearCells();
 
     // Add nodes.
@@ -398,7 +457,10 @@ export default function WorkflowRendererX6({
   // Toolbar actions
   const zoomIn = () => graphRef.current?.zoom(0.15);
   const zoomOut = () => graphRef.current?.zoom(-0.15);
-  const fitView = () => graphRef.current?.zoomToFit({ padding: 24, maxScale: 1.6 });
+  // Use our dagre-based fit (Safari-safe) rather than X6's zoomToFit which
+  // depends on SVG getBBox measurements that Safari returns incorrectly
+  // for foreignObject-hosted HTML nodes.
+  const fitView = () => fitContent();
 
   const exportAs = useCallback(
     async (format: 'png' | 'svg') => {
@@ -406,9 +468,10 @@ export default function WorkflowRendererX6({
       if (!el) return;
 
       // Fit before capture so the saved image shows the full graph and
-      // isn't clipped by whatever zoom/pan the user left it at.
+      // isn't clipped by whatever zoom/pan the user left it at. Uses our
+      // dagre-derived fit (Safari-safe — see fitContent() docstring).
       try {
-        graphRef.current?.zoomToFit({ padding: 24, maxScale: 1.6 });
+        fitContent();
       } catch {
         /* fit can throw on dispose race — ignore */
       }

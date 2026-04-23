@@ -509,92 +509,6 @@ export class AIOrchestrator {
         console.error('[Orchestrator] Excel model generation failed:', error);
         // Don't fail the request if Excel generation fails
       }
-    } 
-    // Calculation mode Excel generation.
-    // FIX: Allow Excel generation if triage detected calculation needs, even if chat mode wasn't explicitly set
-    else if ((chatMode === 'calculation' || classification.requiresCalculation) && calculationResults && Object.keys(calculationResults).length > 0) {
-      try {
-        // Agent-first path: if the calc agents have already emitted a
-        // canonical spec (Step A of the correctness plan), render it
-        // directly — no LLM re-generation, no layout hallucination.
-        const agentSpec = calculationResults._excelSpec;
-        if (agentSpec) {
-          console.log('[Orchestrator] Using agent-emitted ExcelWorkbookSpec (bypassing LLM generator)');
-          excelWorkbook = await excelOrchestrator.createWorkbookFromSpec(agentSpec);
-          if (excelWorkbook.workbook) {
-            try {
-              spreadsheetPreviewData = excelOrchestrator.extractSpreadsheetPreview(excelWorkbook.workbook);
-            } catch (e) {
-              console.warn('[Orchestrator] Failed to extract spreadsheet preview:', e);
-            }
-          }
-        } else {
-          console.log('[Orchestrator] Falling back to legacy calculation-workbook path (no agent spec available)');
-          const spreadsheetRequest = await excelOrchestrator.parseUserRequest(enrichedQuery, undefined);
-
-          // Add detected calculations to the request — legacy path.
-          if (calculationResults.taxCalculation) {
-            spreadsheetRequest.calculations?.push({
-              type: 'tax',
-              inputs: calculationResults.taxCalculation,
-              outputLocation: 'B2'
-            });
-          }
-          if (calculationResults.npv !== undefined) {
-            spreadsheetRequest.calculations?.push({
-              type: 'npv',
-              inputs: calculationResults,
-              outputLocation: 'B20'
-            });
-          }
-          if (calculationResults.irr !== undefined) {
-            spreadsheetRequest.calculations?.push({
-              type: 'irr',
-              inputs: calculationResults,
-              outputLocation: 'B35'
-            });
-          }
-          if (calculationResults.depreciation) {
-            spreadsheetRequest.calculations?.push({
-              type: 'depreciation',
-              inputs: calculationResults.depreciation,
-              outputLocation: 'B50'
-            });
-          }
-          if (calculationResults.amortization) {
-            spreadsheetRequest.calculations?.push({
-              type: 'amortization',
-              inputs: calculationResults.amortization,
-              outputLocation: 'B80'
-            });
-          }
-
-          // Only build the legacy xlsx if the merged request has something to
-          // render. Without this, queries that triggered calculation-mode but
-          // didn't populate a recognised calc type yield a banner-only file.
-          const hasRequestContent =
-            (spreadsheetRequest.calculations?.length ?? 0) > 0
-            || (spreadsheetRequest.tables?.length ?? 0) > 0
-            || (spreadsheetRequest.formulas?.length ?? 0) > 0
-            || (spreadsheetRequest.data?.length ?? 0) > 0;
-          if (hasRequestContent) {
-            excelWorkbook = await excelOrchestrator.createCalculationWorkbook(spreadsheetRequest);
-            console.log('[Orchestrator] Excel workbook generated with', excelWorkbook.formulasUsed.length, 'formulas');
-            if (excelWorkbook.workbook) {
-              try {
-                spreadsheetPreviewData = excelOrchestrator.extractSpreadsheetPreview(excelWorkbook.workbook);
-              } catch (e) {
-                console.warn('[Orchestrator] Failed to extract spreadsheet preview:', e);
-              }
-            }
-          } else {
-            console.log('[Orchestrator] Skipping legacy xlsx — empty request, AI sheet blocks will handle download');
-          }
-        }
-      } catch (error) {
-        console.error('[Orchestrator] Excel generation failed:', error);
-        // Don't fail the request if Excel generation fails
-      }
     }
     
     // Step 3.7: RAG Pipeline - Retrieve relevant context from knowledge base
@@ -1168,17 +1082,20 @@ export class AIOrchestrator {
     // artifact (which also drives inline chat rendering via <artifact /> tags).
     // Failing silently is fine — the SSE route runs the same extraction as a
     // fallback, so a regression here doesn't break the OutputPane path.
+    // NOTE: Calculation mode is purely textual — skip sheet extraction entirely.
     let aiAuthoredSpreadsheet: any = null;
-    try {
-      const { extractAndEvaluateSheetBlocks } = await import('./excel/sheetBlockParser');
-      const extracted = extractAndEvaluateSheetBlocks(mainResponse);
-      if (extracted.blockCount > 0 && extracted.spreadsheetData) {
-        mainResponse = extracted.text;
-        aiAuthoredSpreadsheet = extracted.spreadsheetData;
-        console.log(`[Orchestrator] Extracted ${extracted.blockCount} AI-authored sheet block(s)`);
+    if (chatMode !== 'calculation') {
+      try {
+        const { extractAndEvaluateSheetBlocks } = await import('./excel/sheetBlockParser');
+        const extracted = extractAndEvaluateSheetBlocks(mainResponse);
+        if (extracted.blockCount > 0 && extracted.spreadsheetData) {
+          mainResponse = extracted.text;
+          aiAuthoredSpreadsheet = extracted.spreadsheetData;
+          console.log(`[Orchestrator] Extracted ${extracted.blockCount} AI-authored sheet block(s)`);
+        }
+      } catch (err) {
+        console.warn('[Orchestrator] Sheet-block extraction skipped:', (err as Error).message);
       }
-    } catch (err) {
-      console.warn('[Orchestrator] Sheet-block extraction skipped:', (err as Error).message);
     }
 
     // Prefer AI-authored sheet data over the generator's output for downstream

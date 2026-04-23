@@ -207,7 +207,7 @@ export class DocumentIngestion extends EventEmitter {
     return chunks.map(chunk => {
       const hash = this.hashString(chunk);
       const embedding: number[] = [];
-      for (let i = 0; i < 1536; i++) {
+      for (let i = 0; i < 3072; i++) {
         embedding.push(Math.sin(hash * (i + 1)) * Math.cos(hash * (i + 2)));
       }
       const magnitude = Math.sqrt(embedding.reduce((sum, val) => sum + val * val, 0));

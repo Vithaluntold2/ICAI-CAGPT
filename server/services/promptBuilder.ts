@@ -642,113 +642,55 @@ export class PromptBuilder {
         break;
         
       case 'calculation':
-        modeInstructions += `# CALCULATION MODE — FORMULAS + LIVE RESULTS\n\n`;
+        modeInstructions += `# CALCULATION MODE — DIRECT TEXTUAL COMPUTATION\n\n`;
 
         modeInstructions += `## HOW THIS MODE WORKS\n\n`;
-        modeInstructions += `The server will **automatically evaluate** every Excel-style formula you write and inline the computed value next to it. You do NOT need to compute values yourself — write the formula using the Excel function set (SUM, IF, NPV, IRR, PMT, FV, PV, VLOOKUP, XLOOKUP, INDEX/MATCH, etc.) and the engine will resolve it.\n\n`;
+        modeInstructions += `You are a Chartered Accountant's calculation assistant. Your job is to **directly compute and present the actual numerical results** step by step in plain text. The user expects to see the final computed values — not raw formulas, not Excel references, not spreadsheet blocks.\n\n`;
 
         modeInstructions += `### You MUST:\n`;
-        modeInstructions += `1. **State assumptions** (inputs, rates, time periods) clearly before any formula.\n`;
-        modeInstructions += `2. **Write each calculation as a standalone Excel formula** that can be evaluated in isolation (no cell references — inline the numeric inputs).\n`;
-        modeInstructions += `   - Good: \`=FV(0.06, 5, 0, -10000)\`  ← engine computes = 13,382.26\n`;
-        modeInstructions += `   - Also good: \`=10000 * (1 + 0.06)^5\`\n`;
-        modeInstructions += `   - Avoid unless you also define the cells: \`=NPV(B1,C2:C6)+B2\`\n`;
-        modeInstructions += `3. **Interpret the result** after each formula: "That produces ..., which means ...".\n`;
-        modeInstructions += `4. **Chain reasoning step-by-step** with one formula per step so each intermediate value is auditable.\n\n`;
+        modeInstructions += `1. **State assumptions** (inputs, rates, time periods) clearly before any computation.\n`;
+        modeInstructions += `2. **Show step-by-step workings** with the formula logic AND the computed result for each step.\n`;
+        modeInstructions += `   - Good: "PV of Year 1 = ₹1,20,000 / (1 + 0.10)¹ = ₹1,20,000 / 1.10 = **₹1,09,090.91**"\n`;
+        modeInstructions += `   - Good: "NPV = -₹5,00,000 + ₹1,09,090.91 + ₹1,23,966.94 + ... = **₹1,60,127.54**"\n`;
+        modeInstructions += `3. **Present final results clearly** with the computed numeric values prominently displayed.\n`;
+        modeInstructions += `4. **Use markdown tables** for multi-row data (schedules, year-by-year breakdowns) — but fill in the actual computed numbers, not formulas.\n`;
+        modeInstructions += `5. **Interpret the result** after each major computation: what does this number mean for the decision?\n`;
+        modeInstructions += `6. **Chain reasoning step-by-step** so each intermediate value is auditable.\n\n`;
 
         modeInstructions += `### You MUST NOT:\n`;
-        modeInstructions += `-  Guess or estimate a numeric answer without writing the corresponding formula.\n`;
-        modeInstructions += `-  Invent values. If a required input is missing, ask for it OR clearly label an assumed value.\n`;
-        modeInstructions += `-  Skip formulas and jump straight to a "final answer" — show the work.\n\n`;
+        modeInstructions += `- Emit \\\`\\\`\\\`sheet\\\`\\\`\\\` or \\\`\\\`\\\`spreadsheet\\\`\\\`\\\` code blocks. This mode does NOT produce spreadsheet output.\n`;
+        modeInstructions += `- Write raw Excel formulas like \`=NPV(B1,C3:C7)+B2\` without also computing the result.\n`;
+        modeInstructions += `- Reference cell addresses (A1, B2, etc.) — present everything as readable text and tables.\n`;
+        modeInstructions += `- Say "download the Excel file" or "let Excel compute" — YOU compute the values directly.\n`;
+        modeInstructions += `- Guess or estimate. If a required input is missing, ask for it OR clearly label an assumed value.\n`;
+        modeInstructions += `- Skip steps and jump straight to a "final answer" — show the work.\n\n`;
 
-        modeInstructions += `### How the engine renders your formula:\n`;
-        modeInstructions += `Write: \`\`\`=FV(0.06, 5, 0, -10000)\`\`\`\n`;
-        modeInstructions += `User sees: \`\`=FV(0.06, 5, 0, -10000)\`\` → **13,382.26**\n\n`;
+        modeInstructions += `## OUTPUT FORMAT\n\n`;
 
-        modeInstructions += `## MULTI-CELL / TABULAR RESULTS — EMIT A SHEET BLOCK\n\n`;
-        modeInstructions += `For anything that has more than 2-3 numbers (amortisation schedules, scenario tables, cash-flow statements, sensitivity analyses, ratio breakdowns), **emit a dedicated sheet block**. The server evaluates every formula in it, renders the result as a full spreadsheet in the right-side Output Panel, and replaces the raw block in chat with a one-line pointer.\n\n`;
+        modeInstructions += `### 1. Input Summary\n`;
+        modeInstructions += `Present the given inputs in a clear markdown table.\n\n`;
 
-        modeInstructions += `**PREFERRED FORMAT — addressable JSON (no column-shift ambiguity):**\n\n`;
-        modeInstructions += '```text\n';
-        modeInstructions += '```sheet\n';
-        modeInstructions += '{\n';
-        modeInstructions += '  "title": "NPV at 10% discount (3-year cashflow)",\n';
-        modeInstructions += '  "description": "Present value of year-by-year inflows, with total",\n';
-        modeInstructions += '  "cells": [\n';
-        modeInstructions += '    {"cell": "A1", "value": "Year", "type": "header"},\n';
-        modeInstructions += '    {"cell": "B1", "value": "Cashflow", "type": "header"},\n';
-        modeInstructions += '    {"cell": "C1", "value": "PV", "type": "header"},\n';
-        modeInstructions += '    {"cell": "A2", "value": 1},\n';
-        modeInstructions += '    {"cell": "B2", "value": 400},\n';
-        modeInstructions += '    {"cell": "C2", "formula": "=B2/(1+0.1)^A2"},\n';
-        modeInstructions += '    {"cell": "A3", "value": 2},\n';
-        modeInstructions += '    {"cell": "B3", "value": 500},\n';
-        modeInstructions += '    {"cell": "C3", "formula": "=B3/(1+0.1)^A3"},\n';
-        modeInstructions += '    {"cell": "A4", "value": 3},\n';
-        modeInstructions += '    {"cell": "B4", "value": 600},\n';
-        modeInstructions += '    {"cell": "C4", "formula": "=B4/(1+0.1)^A4"},\n';
-        modeInstructions += '    {"cell": "A5", "value": "Total"},\n';
-        modeInstructions += '    {"cell": "B5", "formula": "=SUM(B2:B4)"},\n';
-        modeInstructions += '    {"cell": "C5", "formula": "=SUM(C2:C4)"}\n';
-        modeInstructions += '  ]\n';
-        modeInstructions += '}\n';
-        modeInstructions += '```\n';
-        modeInstructions += '```\n\n';
+        modeInstructions += `### 2. Step-by-Step Computation\n`;
+        modeInstructions += `Show each calculation step with the formula logic and the computed result.\n`;
+        modeInstructions += `Use markdown tables for multi-row schedules (year-by-year, period-by-period).\n\n`;
 
-        modeInstructions += `### Addressable-JSON sheet block rules — MUST follow:\n`;
-        modeInstructions += `1. **Language tag is \`sheet\`** (or \`spreadsheet\`).\n`;
-        modeInstructions += `2. Body is STRICT JSON. No comments, no trailing commas.\n`;
-        modeInstructions += `3. Each cell is \`{"cell":"A1","value":...}\` OR \`{"cell":"A1","formula":"=..."}\`. Omit cells that have no content — empty cells are absent, not blank entries.\n`;
-        modeInstructions += `4. Formulas use real cell refs (A1, B2:B4, etc.). Every formula must reference a cell that actually exists in this block.\n`;
-        modeInstructions += `5. Optional top-level: \`title\`, \`description\`, \`name\` (sheet-tab name).\n`;
-        modeInstructions += `6. **Emit AT MOST 3 sheet blocks per response**.\n`;
-        modeInstructions += `7. **Do NOT repeat the sheet's contents in chat prose** — the spreadsheet panel IS the presentation.\n\n`;
+        modeInstructions += `### 3. Final Results\n`;
+        modeInstructions += `Present the key final numbers prominently (bold, highlighted).\n\n`;
 
-        modeInstructions += `### Legacy CSV format — accepted but DEPRECATED:\n`;
-        modeInstructions += `If you emit CSV inside a \`sheet\` block, every data row MUST have the SAME number of comma-separated cells as the header row. Use adjacent commas for empty cells: \`Total,=SUM(B2:B4),,=SUM(D2:D4)\`. Rows with fewer cells than the header are a common LLM mistake that shifts visible values into the wrong column — prefer the addressable JSON format above.\n\n`;
+        modeInstructions += `### 4. Interpretation & Decision Guidance\n`;
+        modeInstructions += `Explain what the computed values mean in context (accept/reject, above/below hurdle, etc.).\n\n`;
 
-        modeInstructions += `### When to use which format:\n`;
-        modeInstructions += `- **Single value** (NPV, EMI, a ratio, compound-interest answer): use inline formula \`\`=FV(...)\`\` style.\n`;
-        modeInstructions += `- **Schedule / table / scenario** (multi-row, multi-column): use \`\`\`sheet\`\`\` block.\n`;
-        modeInstructions += `- **Both**: emit the headline inline formula first, then the sheet block for detail.\n\n`;
-        
-        modeInstructions += `## REQUIRED OUTPUT FORMAT\n\n`;
-        
-        modeInstructions += `### Input Data Table\n`;
-        modeInstructions += `| Cell | Description | Value |\n`;
-        modeInstructions += `|------|-------------|-------|\n`;
-        modeInstructions += `| B1   | Discount Rate | 9.5% |\n`;
-        modeInstructions += `| B2   | Initial Investment | -$10,000,000 |\n`;
-        modeInstructions += `| C3:C7 | Cash Flows Year 1-5 | [user values] |\n\n`;
-        
-        modeInstructions += `### Excel Formulas\n`;
-        modeInstructions += `| Result | Excel Formula | Cell |\n`;
-        modeInstructions += `|--------|---------------|------|\n`;
-        modeInstructions += `| NPV | =NPV(B1,C3:C7)+B2 | D1 |\n`;
-        modeInstructions += `| IRR | =IRR(B2:C7) | D2 |\n`;
-        modeInstructions += `| Payback Period | =MATCH(TRUE,CUMSUM(B2:C7)>0,0) | D3 |\n\n`;
-        
-        modeInstructions += `### Present Value Breakdown (with formulas, not values)\n`;
-        modeInstructions += `| Year | Cash Flow | Discount Factor Formula | PV Formula |\n`;
-        modeInstructions += `|------|-----------|------------------------|------------|\n`;
-        modeInstructions += `| 1 | =C3 | =1/(1+$B$1)^A3 | =C3*D3 |\n`;
-        modeInstructions += `| 2 | =C4 | =1/(1+$B$1)^A4 | =C4*D4 |\n\n`;
-        
-        modeInstructions += `### Interpretation (after Excel computes)\n`;
-        modeInstructions += `- Explain what a positive/negative NPV means\n`;
-        modeInstructions += `- Explain IRR interpretation vs hurdle rate\n`;
-        modeInstructions += `- **But DO NOT state the computed values - let Excel do that**\n\n`;
-        
         modeInstructions += `## EXAMPLE CORRECT RESPONSE\n`;
-        modeInstructions += `"The NPV formula =NPV(9.5%,C3:C7)+B2 will compute the net present value.\n`;
-        modeInstructions += `If the result is positive, the investment exceeds the 9.5% hurdle rate.\n`;
-        modeInstructions += `Download the Excel file to see the computed values."\n\n`;
-        
+        modeInstructions += `"**NPV = ₹1,60,127.54** (positive)\n`;
+        modeInstructions += `Since NPV > 0, the project earns more than the 10% hurdle rate and should be accepted.\n\n`;
+        modeInstructions += `**IRR = 19.72%**\n`;
+        modeInstructions += `Since IRR (19.72%) > Cost of Capital (10%), this confirms the project is financially viable."\n\n`;
+
         modeInstructions += `## EXAMPLE INCORRECT RESPONSE (DO NOT DO THIS)\n`;
-        modeInstructions += `"The NPV is $5,251,123.64" ← WRONG: You computed the value\n`;
-        modeInstructions += `"Year 1 PV = $1,141,552.51" ← WRONG: You did the math\n\n`;
-        
-        modeInstructions += `**START WITH THE INPUT DATA TABLE. PROVIDE FORMULAS. LET EXCEL COMPUTE.**\n\n`;
+        modeInstructions += `"The NPV formula =NPV(10%,C3:C7)+B2 will compute the net present value." ← WRONG: You must compute and state the value\n`;
+        modeInstructions += `"Download the Excel file to see the computed values." ← WRONG: No Excel output in this mode\n\n`;
+
+        modeInstructions += `**COMPUTE THE ACTUAL VALUES. SHOW THE WORK. PRESENT RESULTS DIRECTLY.**\n\n`;
         break;
 
       case 'roundtable':

@@ -319,7 +319,7 @@ export class RegulationSearcher extends EventEmitter implements AgentDefinition 
     console.warn('[RegulationSearcher] Using fallback embedding - configure OPENAI_API_KEY for semantic search');
     const hash = this.hashString(query);
     const embedding: number[] = [];
-    for (let i = 0; i < 1536; i++) {
+    for (let i = 0; i < 3072; i++) {
       // Use hash to generate deterministic values
       embedding.push(Math.sin(hash * (i + 1)) * Math.cos(hash * (i + 2)));
     }

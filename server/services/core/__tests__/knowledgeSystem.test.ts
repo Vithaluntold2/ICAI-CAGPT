@@ -206,7 +206,7 @@ describe('VectorStore', () => {
 
   describe('Document Management', () => {
     it('should add and retrieve documents', async () => {
-      const embedding = new Array(1536).fill(0).map(() => Math.random());
+      const embedding = new Array(3072).fill(0).map(() => Math.random());
 
       const doc = await store.addDocument({
         content: 'Test content',
@@ -242,7 +242,7 @@ describe('VectorStore', () => {
     });
 
     it('should get documents by type', async () => {
-      const embedding = new Array(1536).fill(0).map(() => Math.random());
+      const embedding = new Array(3072).fill(0).map(() => Math.random());
 
       await store.addDocument({
         content: 'Regulation 1',
@@ -261,7 +261,7 @@ describe('VectorStore', () => {
     });
 
     it('should update documents', async () => {
-      const embedding = new Array(1536).fill(0).map(() => Math.random());
+      const embedding = new Array(3072).fill(0).map(() => Math.random());
 
       const doc = await store.addDocument({
         content: 'Original',
@@ -277,7 +277,7 @@ describe('VectorStore', () => {
     });
 
     it('should delete documents', async () => {
-      const embedding = new Array(1536).fill(0).map(() => Math.random());
+      const embedding = new Array(3072).fill(0).map(() => Math.random());
 
       const doc = await store.addDocument({
         content: 'Test',
@@ -294,7 +294,7 @@ describe('VectorStore', () => {
   describe('Semantic Search', () => {
     it('should search by similarity', async () => {
       // Add documents with known embeddings
-      const embedding1 = new Array(1536).fill(1).map(() => Math.random());
+      const embedding1 = new Array(3072).fill(1).map(() => Math.random());
       const embedding2 = [...embedding1].map(v => v + 0.1); // Similar
 
       await store.addDocument({
@@ -314,7 +314,7 @@ describe('VectorStore', () => {
     });
 
     it('should filter by type', async () => {
-      const embedding = new Array(1536).fill(0).map(() => Math.random());
+      const embedding = new Array(3072).fill(0).map(() => Math.random());
 
       await store.addDocument({
         content: 'Regulation',
@@ -336,7 +336,7 @@ describe('VectorStore', () => {
     });
 
     it('should filter by tags', async () => {
-      const embedding = new Array(1536).fill(0).map(() => Math.random());
+      const embedding = new Array(3072).fill(0).map(() => Math.random());
 
       await store.addDocument({
         content: 'Tagged doc',
@@ -367,7 +367,7 @@ describe('VectorStore', () => {
     });
 
     it('should find similar documents', async () => {
-      const embedding = new Array(1536).fill(0).map(() => Math.random());
+      const embedding = new Array(3072).fill(0).map(() => Math.random());
 
       const doc1 = await store.addDocument({
         content: 'Document 1',
@@ -391,7 +391,7 @@ describe('VectorStore', () => {
 
   describe('Statistics', () => {
     it('should return accurate statistics', async () => {
-      const embedding = new Array(1536).fill(0).map(() => Math.random());
+      const embedding = new Array(3072).fill(0).map(() => Math.random());
 
       await store.addDocument({
         content: 'Doc 1',

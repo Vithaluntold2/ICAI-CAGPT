@@ -38,7 +38,7 @@ export interface VectorStoreStats {
 export class VectorStore extends EventEmitter {
   private documents: Map<string, VectorDocument> = new Map();
   private documentsByType: Map<string, Set<string>> = new Map();
-  private embeddingDimension: number = 1536; // OpenAI ada-002 default
+  private embeddingDimension: number = 3072; // Azure text-embedding-3-large
 
   /**
    * Add document with embedding

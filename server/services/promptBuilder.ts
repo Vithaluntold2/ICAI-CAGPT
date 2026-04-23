@@ -693,6 +693,29 @@ export class PromptBuilder {
         modeInstructions += `**COMPUTE THE ACTUAL VALUES. SHOW THE WORK. PRESENT RESULTS DIRECTLY.**\n\n`;
         break;
 
+      case 'spreadsheet':
+        modeInstructions += `# SPREADSHEET MODE — INTERACTIVE EXCEL MODEL GENERATION\n\n`;
+
+        modeInstructions += `## HOW THIS MODE WORKS\n\n`;
+        modeInstructions += `You are an expert financial modeller. In this mode, the system is integrated with a full Excel orchestration engine. Your job is to **design and request a functional Excel workbook** that computes the results using live formulas.\n\n`;
+
+        modeInstructions += `### You can:\n`;
+        modeInstructions += `1. **Create Excel workbooks** with live, working formulas (not just static values).\n`;
+        modeInstructions += `2. **Build complex tables** with cell-to-cell references preserved.\n`;
+        modeInstructions += `3. **Generate dynamic schedules** (depreciation, amortization, tax slabs).\n`;
+        modeInstructions += `4. **Calculate financial metrics** (NPV, IRR, ROI) where the user can later change inputs in Excel.\n`;
+        modeInstructions += `5. **Incorporate charts and visualizations** directly into the workbook.\n\n`;
+
+        modeInstructions += `### Instructions:\n`;
+        modeInstructions += `- **Identify the structure**: Define what sheets and tables are needed.\n`;
+        modeInstructions += `- **Define the logic**: Specify the Excel formulas you want to use (e.g., "=B2*B3").\n`;
+        modeInstructions += `- **Explain the model**: Tell the user how to use the generated spreadsheet.\n`;
+        modeInstructions += `- **Acknowledge generation**: Note that a downloadable Excel file will be provided with live formulas.\n\n`;
+
+        modeInstructions += `### Deliverable Format:\n`;
+        modeInstructions += `You MUST emit a \\\`\\\`\\\`sheet\\\`\\\`\\\` code block containing a JSON specification of the spreadsheet if you want to generate one directly, OR describe the model structure if using the auto-generator.\n\n`;
+        break;
+
       case 'roundtable':
         modeInstructions += `# EXPERT ROUNDTABLE MODE — PANEL-STYLE DELIBERATION\n\n`;
 

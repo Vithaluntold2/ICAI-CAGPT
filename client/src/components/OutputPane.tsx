@@ -68,6 +68,31 @@ export default function OutputPane({
 
   const handleExport = async (format: 'docx' | 'pdf' | 'pptx' | 'xlsx' | 'csv' | 'txt') => {
     try {
+      let exportContent = content;
+
+      // Fallback: if main content is empty but we have a spreadsheet displayed,
+      // convert the visible spreadsheet data to a markdown table so the backend
+      // exporter has something to work with.
+      if (!exportContent && spreadsheetData?.sheets?.[0]) {
+        const sheet = spreadsheetData.sheets[0];
+        const rows = sheet.data;
+        if (rows.length > 0) {
+          let md = `### ${sheet.name || 'Spreadsheet'}\n\n`;
+          // Create headers (A, B, C...)
+          const colCount = rows[0].length;
+          md += '| ' + Array.from({ length: colCount }, (_, i) => String.fromCharCode(65 + i)).join(' | ') + ' |\n';
+          md += '| ' + Array.from({ length: colCount }, () => '---').join(' | ') + ' |\n';
+          // Create rows
+          for (const row of rows) {
+            md += '| ' + row.map(cell => {
+              const val = typeof cell === 'object' ? cell?.value : cell;
+              return val !== undefined && val !== null ? String(val).replace(/\|/g, '\\|') : '';
+            }).join(' | ') + ' |\n';
+          }
+          exportContent = md;
+        }
+      }
+
       const response = await fetch('/api/export', {
         method: 'POST',
         headers: {
@@ -75,7 +100,7 @@ export default function OutputPane({
         },
         credentials: 'include',
         body: JSON.stringify({
-          content,
+          content: exportContent,
           visualization,
           format,
           title: 'CA GPT Output'

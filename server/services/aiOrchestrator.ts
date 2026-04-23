@@ -19,6 +19,7 @@ import { aiProviderRegistry, AIProviderName, ProviderError, providerHealthMonito
 import { requirementClarificationAIService, type ClarificationAnalysis } from './requirementClarificationAI';
 import { documentAnalyzerAgent } from './agents/documentAnalyzer';
 import { runCalculationAgents, type CalcExecutorResult } from './agents/calcExecutor';
+import { runTwoAgentSolver, llmJsonDecomposer } from './agents/twoAgentSolver';
 import { visualizationGenerator } from './visualizationGenerator';
 import { promptBuilder } from './promptBuilder';
 import type { VisualizationData } from '../../shared/types/visualization';
@@ -422,7 +423,7 @@ export class AIOrchestrator {
     }
     
     // Step 3: Execute any needed calculations/solvers
-    const calculationResults = await this.executeCalculations(enrichedQuery, classification, routingDecision);
+    const calculationResults = await this.executeCalculations(enrichedQuery, classification, routingDecision, chatMode);
     
     // Step 3.5: Generate Excel workbook 
     // Two modes: 
@@ -432,9 +433,12 @@ export class AIOrchestrator {
     let spreadsheetPreviewData: SpreadsheetPreviewData | undefined;
     
     // Check if this is an AI-driven Excel model request
-    const isExcelModelRequest = excelModelGenerator.isExcelRequest(enrichedQuery);
+    // NOTE: Only generate Excel workbooks in spreadsheet mode. Calculation mode
+    // is purely textual, and other modes should not produce Excel output.
+    const isExcelModelRequest = chatMode === 'spreadsheet' && excelModelGenerator.isExcelRequest(enrichedQuery);
     console.log('[Orchestrator] Excel detection check:', {
       query: enrichedQuery.slice(0, 100),
+      chatMode,
       isExcelModelRequest
     });
     
@@ -1041,7 +1045,7 @@ export class AIOrchestrator {
     let reasoningContent: string | undefined;
     let mainResponse = finalResponse;
 
-    if (chatMode && ['checklist', 'workflow', 'audit-plan'].includes(chatMode)) {
+    if (chatMode && ['checklist', 'workflow', 'audit-plan', 'calculation'].includes(chatMode)) {
       const { deliverable, reasoning, remainingContent } = this.parseSeparatedContent(finalResponse);
       if (deliverable && reasoning) {
         deliverableContent = deliverable;
@@ -1050,13 +1054,14 @@ export class AIOrchestrator {
       }
     }
 
-    // Deliverable Composer: the entire polished response IS the deliverable —
-    // this mode has no separate reasoning stream, and we don't force the AI to
-    // emit <DELIVERABLE>/<REASONING> tags. Promote the full response so it
-    // becomes a persisted document artifact on the whiteboard. Chat continues
-    // to echo the prose (mainResponse unchanged) — the extractPipeline skips
-    // the inline <artifact /> placeholder for documents to avoid duplication.
-    if (chatMode === 'deliverable-composer' && !deliverableContent && finalResponse?.trim()) {
+    // Deliverable Composer & Calculation: the entire polished response IS the 
+    // deliverable — these modes have no separate reasoning stream by default, 
+    // and we don't force the AI to emit <DELIVERABLE>/<REASONING> tags. 
+    // Promote the full response so it becomes a persisted document artifact 
+    // on the whiteboard. Chat continues to echo the prose (mainResponse 
+    // unchanged) — the extractPipeline skips the inline <artifact /> 
+    // placeholder for documents to avoid duplication.
+    if ((chatMode === 'deliverable-composer' || chatMode === 'calculation') && !deliverableContent && finalResponse?.trim()) {
       deliverableContent = finalResponse;
     }
 
@@ -1156,12 +1161,12 @@ export class AIOrchestrator {
             precomputedSlots.visualization = visualization as any;
           }
         }
-        // Deliverable Composer emits a long-form markdown document via the
-        // `deliverableContent` field. Promote it to a persisted artifact so it
-        // can be selected, referenced, and exported like any other artifact.
-        if (chatMode === 'deliverable-composer' && deliverableContent) {
+        // Deliverable Composer & Calculation emit a long-form markdown document.
+        // Promote it to a persisted artifact so it can be selected, referenced, 
+        // and exported like any other artifact.
+        if ((chatMode === 'deliverable-composer' || chatMode === 'calculation') && deliverableContent) {
           precomputedSlots.document = {
-            title: 'Deliverable',
+            title: chatMode === 'calculation' ? 'Calculation Report' : 'Deliverable',
             content: deliverableContent,
             mode: chatMode,
           };
@@ -1399,9 +1404,36 @@ export class AIOrchestrator {
   private async executeCalculations(
     query: string,
     classification: QueryClassification,
-    routing: RoutingDecision
+    routing: RoutingDecision,
+    chatMode?: string
   ): Promise<any> {
     const results: any = {};
+
+    // Spreadsheet Mode - Two-Agent Solver path
+    // deterministic deterministic pipeline that guarantees math correctness
+    // by stripping arithmetic from the LLM and piping decomposed sub-questions
+    // into hardcoded financial solvers.
+    if (chatMode === 'spreadsheet') {
+      try {
+        console.log('[Orchestrator] Attempting Two-Agent Solver for spreadsheet mode...');
+        const provider = aiProviderRegistry.getProvider(routing.preferredProvider || AIProviderName.AZURE_OPENAI);
+        
+        const solverResult = await runTwoAgentSolver(provider, query, {
+          decomposer: llmJsonDecomposer
+        });
+
+        if (solverResult.success && solverResult.excelSpec) {
+          console.log(`[Orchestrator] Two-Agent Solver success: ${solverResult.subQuestions.length} sub-questions processed`);
+          results._excelSpec = solverResult.excelSpec;
+          
+          // Also merge any specific numeric results if available
+          // (The solver mainly produces the spec, but we can extract top-level metrics if needed)
+          return results;
+        }
+      } catch (err) {
+        console.warn('[Orchestrator] Two-Agent Solver failed, falling back to agent path:', err);
+      }
+    }
 
     // Agent-first path. The registered financial-calculation agents
     // (NPVCalculator, TaxLiabilityCalculator, DepreciationScheduler,
@@ -1881,6 +1913,21 @@ export class AIOrchestrator {
           break;
         case 'calculation':
           context += `INSTRUCTIONS FOR FINANCIAL CALCULATION MODE:\n`;
+          context += `You are a Chartered Accountant's calculation assistant. Your job is to **directly compute and present the actual numerical results** step by step in plain text.\n\n`;
+          context += `### You MUST:\n`;
+          context += `1. **State assumptions** clearly before any computation.\n`;
+          context += `2. **Show step-by-step workings** with the formula logic AND the computed result for each step.\n`;
+          context += `3. **Present final results clearly** with prominently displayed computed values.\n`;
+          context += `4. **Use markdown tables** for schedules/breakdowns, filling in computed numbers.\n`;
+          context += `5. **Interpret the result** after major computations.\n\n`;
+          context += `### You MUST NOT:\n`;
+          context += `- Emit \\\`\\\`\\\`sheet\\\`\\\`\\\` or \\\`\\\`\\\`spreadsheet\\\`\\\`\\\` code blocks.\n`;
+          context += `- Write raw Excel formulas without also computing the result.\n`;
+          context += `- Reference cell addresses (A1, B2, etc.) — use readable text.\n`;
+          context += `- Say "download the Excel file" — YOU compute the values directly.\n\n`;
+          break;
+        case 'spreadsheet':
+          context += `INSTRUCTIONS FOR SPREADSHEET MODE:\n`;
           context += `You are integrated with a full Excel orchestration engine. You can:\n`;
           context += `1. Create Excel workbooks with live formulas (not just static values)\n`;
           context += `2. Build calculation tables with preserved formulas\n`;
@@ -1894,14 +1941,6 @@ export class AIOrchestrator {
           context += `- Show formulas that will be created (e.g., "=B2*B3")\n`;
           context += `- Explain your methodology clearly\n`;
           context += `- Note: The system will generate a downloadable Excel file with working formulas\n\n`;
-          context += `Available calculation types:\n`;
-          context += `- tax: Corporate/personal tax calculations\n`;
-          context += `- npv: Net present value with discount rate\n`;
-          context += `- irr: Internal rate of return\n`;
-          context += `- depreciation: Asset depreciation schedules\n`;
-          context += `- amortization: Loan payment schedules\n`;
-          context += `- loan: Loan calculations with amortization\n`;
-          context += `- custom: Any financial calculation with formulas\n\n`;
           break;
       }
     }
@@ -2196,8 +2235,8 @@ export class AIOrchestrator {
       maxTokensForMode = 200; // Very short for greetings/thanks
       console.log(`[AIOrchestrator] Casual message detected - using minimal tokens: ${maxTokensForMode}`);
     } else if (isCalculationMode) {
-      maxTokensForMode = 2000; // Concise for calculations - just show the math
-      console.log(`[AIOrchestrator] Calculation mode - using concise maxTokens: ${maxTokensForMode}`);
+      maxTokensForMode = 8000; // Reasoning models (gpt-5.x) consume thinking tokens from this budget
+      console.log(`[AIOrchestrator] Calculation mode - using maxTokens: ${maxTokensForMode}`);
     } else if (isComprehensiveMode) {
       maxTokensForMode = 12000; // Comprehensive for research modes
       console.log(`[AIOrchestrator] Professional mode - using maxTokens: ${maxTokensForMode} for mode: ${chatMode}`);

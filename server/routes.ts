@@ -1116,9 +1116,19 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
           res.setHeader("Content-Disposition", `attachment; filename="${title.replace(/[^a-z0-9_-]+/gi, "_")}.pdf"`);
           return res.send(buf);
         } catch (err) {
-          console.error("[whiteboard/export] document pdf failed, falling back to image-wrap:", err);
-          // Fall through to the renderedImages path below so the user still
-          // gets a PDF — lower fidelity, but never a hard failure.
+          console.error("[whiteboard/export] high-fidelity document pdf failed, falling back to pdfkit:", err);
+          try {
+            // Second fallback: use the simpler pdfkit-based exporter which
+            // doesn't require a headless browser.
+            const buf = await DocumentExporter.exportToPdf(content, title);
+            res.setHeader("Content-Type", "application/pdf");
+            res.setHeader("Content-Disposition", `attachment; filename="${title.replace(/[^a-z0-9_-]+/gi, "_")}.pdf"`);
+            return res.send(buf);
+          } catch (fallbackErr) {
+            console.error("[whiteboard/export] pdfkit fallback also failed:", fallbackErr);
+            // Fall through to the renderedImages path below so the user still
+            // gets a PDF (via image-wrap) if they provided images.
+          }
         }
       }
       if (!renderedImages) return res.status(400).json({ error: "rendered_images_required" });

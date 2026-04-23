@@ -45,7 +45,13 @@ export function ArtifactRenderer({
     case "flowchart":
       return <FlowchartArtifact payload={artifact.payload as any} />;
     case "document":
-      return <DocumentArtifact payload={artifact.payload as any} />;
+      return (
+        <DocumentArtifact
+          artifactId={artifact.id}
+          conversationId={conversationId}
+          payload={artifact.payload as any}
+        />
+      );
     case "checklist":
       return (
         <ChecklistArtifact

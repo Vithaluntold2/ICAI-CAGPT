@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -15,6 +15,12 @@ interface DocumentPayload {
   title?: string;
   content: string;
   mode?: string;
+}
+
+interface Props {
+  artifactId: string;
+  conversationId?: string;
+  payload: DocumentPayload;
 }
 
 function CodeBlock({ className, children }: { className?: string; children: React.ReactNode }) {
@@ -45,7 +51,7 @@ function CodeBlock({ className, children }: { className?: string; children: Reac
  * Composer output) inside a scrollable, document-like card so it can be
  * selected, referenced, and read comfortably on the whiteboard.
  */
-export function DocumentArtifact({ payload }: { payload: DocumentPayload }) {
+export function DocumentArtifact({ artifactId, conversationId, payload }: Props) {
   const contentRef = useRef<HTMLDivElement>(null);
   const [downloading, setDownloading] = useState(false);
   const { toast } = useToast();
@@ -53,18 +59,10 @@ export function DocumentArtifact({ payload }: { payload: DocumentPayload }) {
   const content = payload?.content || "";
   const safeName = title.replace(/[^a-z0-9_-]+/gi, "_");
 
-  // Produce a real *vector* PDF — text stays text, not a screenshot.
-  //
-  // Pipeline: rendered markdown HTML → html-to-pdfmake (converts to pdfmake's
-  // doc-definition tree) → pdfmake (emits actual PDF text/vector commands).
-  // Output is selectable, copy-pasteable, sharp at any zoom — the "written
-  // then saved" quality the user wanted. html2pdf.js was replaced because
-  // it rasterises every page via html2canvas, which produces the blurry
-  // screenshot look.
-  const downloadPDF = async () => {
-    if (!contentRef.current || downloading) return;
-    setDownloading(true);
-
+  // Client-side fallback using pdfmake. Used only if conversationId is
+  // missing (e.g. preview mode) or server export fails.
+  const downloadPdfClientSide = async () => {
+    if (!contentRef.current) return;
     try {
       const [{ default: htmlToPdfmake }, pdfmakeMod, vfsMod] = await Promise.all([
         import("html-to-pdfmake"),
@@ -72,16 +70,12 @@ export function DocumentArtifact({ payload }: { payload: DocumentPayload }) {
         import("pdfmake/build/vfs_fonts"),
       ]);
 
-      // pdfmake needs its virtual font table wired up. Shape differs
-      // across versions — cover both.
       const pdfmake: any = (pdfmakeMod as any).default ?? pdfmakeMod;
       const vfs: any = (vfsMod as any).default ?? vfsMod;
       pdfmake.vfs = vfs.pdfMake?.vfs ?? vfs.vfs ?? vfs;
 
       const html = contentRef.current.innerHTML;
       const body = htmlToPdfmake(html, {
-        // Default font sizes in px; pdfmake converts. These match an
-        // A4 business-document look.
         defaultStyles: {
           h1: { fontSize: 18, bold: true, marginTop: 14, marginBottom: 6 },
           h2: { fontSize: 15, bold: true, marginTop: 12, marginBottom: 5 },
@@ -102,10 +96,7 @@ export function DocumentArtifact({ payload }: { payload: DocumentPayload }) {
       const docDefinition = {
         pageSize: "A4",
         pageMargins: [48, 56, 48, 56] as [number, number, number, number],
-        info: {
-          title,
-          creator: "CA-GPT",
-        },
+        info: { title, creator: "CA-GPT" },
         content: [
           { text: title, fontSize: 20, bold: true, marginBottom: 4 },
           {
@@ -119,14 +110,52 @@ export function DocumentArtifact({ payload }: { payload: DocumentPayload }) {
           { canvas: [{ type: "line", x1: 0, y1: 0, x2: 500, y2: 0, lineWidth: 0.5, lineColor: "#ddd" }], marginBottom: 10 },
           body,
         ],
-        defaultStyle: {
-          fontSize: 11,
-          lineHeight: 1.35,
-          color: "#111",
-        },
+        defaultStyle: { fontSize: 11, lineHeight: 1.35, color: "#111" },
       };
 
       pdfmake.createPdf(docDefinition).download(`${safeName}.pdf`);
+    } catch (err: any) {
+      throw new Error(`Client-side PDF generation failed: ${err.message}`);
+    }
+  };
+
+  // Produce a real vector PDF via the server (primary) or client (fallback).
+  // Server pipeline: markdown → headless Chrome → high-quality vector PDF.
+  // Client pipeline: rendered HTML → pdfmake. Server is preferred for
+  // better table rendering and font consistency.
+  const downloadPDF = useCallback(async () => {
+    if (downloading) return;
+    setDownloading(true);
+
+    try {
+      if (conversationId) {
+        const res = await fetch(
+          `/api/conversations/${conversationId}/whiteboard/export`,
+          {
+            method: "POST",
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ format: "pdf", artifactIds: [artifactId] }),
+          },
+        );
+        
+        if (res.ok) {
+          const blob = await res.blob();
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = `${safeName}.pdf`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+          return;
+        }
+        console.warn("[DocumentArtifact] Server export failed, falling back to client-side", res.status);
+      }
+      
+      // Fallback to client-side generation
+      await downloadPdfClientSide();
     } catch (err: any) {
       toast({
         title: "PDF export failed",
@@ -136,7 +165,7 @@ export function DocumentArtifact({ payload }: { payload: DocumentPayload }) {
     } finally {
       setDownloading(false);
     }
-  };
+  }, [artifactId, conversationId, safeName, payload?.mode, title, toast, downloading]);
 
   return (
     <div className="bg-card border rounded-lg flex flex-col h-full max-h-[780px]">

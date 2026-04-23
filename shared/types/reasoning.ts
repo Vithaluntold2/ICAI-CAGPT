@@ -25,6 +25,16 @@ export interface ProviderCapabilities {
   maxContextTokens: number;
   supportsStreaming: boolean;
   optimalFor: string[]; // ['research', 'calculation', 'audit', etc.]
+  /**
+   * Whether this provider accepts `toolChoice: 'required'` (or a pinned
+   * `{ type: 'tool', name }`) to force a tool call. Routers must filter
+   * providers lacking this capability out of the failover chain whenever
+   * the request's `toolChoice` is anything other than 'auto' / undefined.
+   *
+   * Today: true for Azure-OpenAI, OpenAI, Claude. False for Gemini (adapter
+   * doesn't plumb tools) and Perplexity (no tool-calling API).
+   */
+  supportsForcedToolCall?: boolean;
 }
 
 // Chain-of-Thought Trace

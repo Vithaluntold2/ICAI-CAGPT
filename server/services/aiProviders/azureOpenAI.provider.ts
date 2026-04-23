@@ -83,7 +83,31 @@ export class AzureOpenAIProvider extends AIProvider {
 
     try {
       // Handle PDF attachments by extracting text
-      let messages = [...request.messages];
+      // Translate our provider-agnostic messages into the Azure OpenAI shape.
+      // `role: 'tool'` → `{role:'tool', tool_call_id, content}`.
+      // `role: 'assistant'` with toolCalls → `{role:'assistant', tool_calls, content}`.
+      // Other messages pass through.
+      let messages: any[] = request.messages.map(msg => {
+        if (msg.role === 'tool') {
+          return {
+            role: 'tool',
+            content: msg.content,
+            tool_call_id: msg.toolCallId ?? '',
+          };
+        }
+        if (msg.role === 'assistant' && msg.toolCalls && msg.toolCalls.length > 0) {
+          return {
+            role: 'assistant',
+            content: msg.content || null,
+            tool_calls: msg.toolCalls.map(tc => ({
+              id: tc.id,
+              type: 'function',
+              function: { name: tc.name, arguments: JSON.stringify(tc.input) },
+            })),
+          };
+        }
+        return { role: msg.role, content: msg.content };
+      });
       if (request.attachment && request.attachment.mimeType === 'application/pdf') {
         try {
           console.log(`[AzureOpenAI] Extracting text from PDF: ${request.attachment.filename}`);
@@ -121,6 +145,32 @@ export class AzureOpenAIProvider extends AIProvider {
       };
       if (request.tools && request.tools.length > 0) {
         apiRequest.tools = request.tools;
+        // Translate provider-agnostic toolChoice into Azure/OpenAI's
+        // `tool_choice`. Shapes:
+        //   'auto' | 'required' | 'none' → string literal.
+        //   { type: 'tool', name }        → { type: 'function', function: { name } }.
+        // Left unset (undefined) when caller did not specify — Azure
+        // defaults to 'auto' which preserves pre-toolChoice behaviour.
+        if (request.toolChoice !== undefined) {
+          if (typeof request.toolChoice === 'string') {
+            apiRequest.tool_choice = request.toolChoice;
+          } else if (request.toolChoice.type === 'tool') {
+            apiRequest.tool_choice = {
+              type: 'function',
+              function: { name: request.toolChoice.name },
+            };
+          }
+        }
+      } else if (request.toolChoice === 'required' || (typeof request.toolChoice === 'object' && request.toolChoice?.type === 'tool')) {
+        // Caller asked for a forced tool call but didn't supply tools.
+        // That's always a programmer error — fail loudly rather than
+        // let the model produce unconstrained arithmetic.
+        throw new ProviderError(
+          `toolChoice='${JSON.stringify(request.toolChoice)}' requires a non-empty tools array`,
+          this.getName(),
+          'INVALID_TOOL_CHOICE',
+          false,
+        );
       }
       // Pass through structured-output + deterministic-sampling flags.
       // Supported on gpt-4o / gpt-4o-mini / gpt-5.x Azure deployments.

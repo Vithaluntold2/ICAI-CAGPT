@@ -25,7 +25,8 @@ export type ProfessionalMode =
   | 'scenario-simulator'
   | 'deliverable-composer'
   | 'forensic-intelligence'
-  | 'roundtable';
+  | 'roundtable'
+  | 'spreadsheet';
 
 /**
  * Agent capability types

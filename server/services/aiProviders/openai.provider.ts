@@ -108,10 +108,34 @@ export class OpenAIProvider extends AIProvider {
     const model = request.model || this.config.defaultModel || 'gpt-4o';
     
     try {
-      let messages = request.messages.map(msg => ({
-        role: msg.role,
-        content: msg.content,
-      }));
+      // Translate our provider-agnostic message shape into OpenAI's.
+      // Structured `role: 'tool'` messages carry `toolCallId` → `tool_call_id`;
+      // assistant messages that emitted tool calls carry `toolCalls` → `tool_calls`.
+      // Plain text messages pass through unchanged.
+      let messages = request.messages.map(msg => {
+        if (msg.role === 'tool') {
+          return {
+            role: 'tool' as const,
+            content: msg.content,
+            tool_call_id: msg.toolCallId ?? '',
+          };
+        }
+        if (msg.role === 'assistant' && msg.toolCalls && msg.toolCalls.length > 0) {
+          return {
+            role: 'assistant' as const,
+            content: msg.content || null,
+            tool_calls: msg.toolCalls.map(tc => ({
+              id: tc.id,
+              type: 'function' as const,
+              function: { name: tc.name, arguments: JSON.stringify(tc.input) },
+            })),
+          };
+        }
+        return {
+          role: msg.role,
+          content: msg.content,
+        };
+      });
 
       // Handle PDF attachments by extracting text
       if (request.attachment && request.attachment.mimeType === 'application/pdf') {
@@ -136,6 +160,32 @@ export class OpenAIProvider extends AIProvider {
         }
       }
 
+      // Translate provider-agnostic toolChoice into OpenAI's `tool_choice`.
+      // See azureOpenAI.provider.ts for the shape discussion; identical mapping.
+      let tool_choice: any = undefined;
+      if (request.toolChoice !== undefined) {
+        if (typeof request.toolChoice === 'string') {
+          tool_choice = request.toolChoice;
+        } else if (request.toolChoice.type === 'tool') {
+          tool_choice = {
+            type: 'function',
+            function: { name: request.toolChoice.name },
+          };
+        }
+      }
+      const hasTools = !!(request.tools && request.tools.length > 0);
+      const wantsForcedTool =
+        request.toolChoice === 'required' ||
+        (typeof request.toolChoice === 'object' && request.toolChoice?.type === 'tool');
+      if (wantsForcedTool && !hasTools) {
+        throw new ProviderError(
+          `toolChoice='${JSON.stringify(request.toolChoice)}' requires a non-empty tools array`,
+          this.getName(),
+          'INVALID_TOOL_CHOICE',
+          false,
+        );
+      }
+
       // We don't support streaming in this method
       const completion = await this.client.chat.completions.create({
         model,
@@ -144,6 +194,7 @@ export class OpenAIProvider extends AIProvider {
         max_tokens: request.maxTokens ?? 2000,
         stream: false,  // Explicitly false to get correct return type
         tools: request.tools,
+        ...(tool_choice !== undefined && hasTools ? { tool_choice } : {}),
         response_format: request.responseFormat === 'json' 
           ? { type: 'json_object' as const }
           : undefined,

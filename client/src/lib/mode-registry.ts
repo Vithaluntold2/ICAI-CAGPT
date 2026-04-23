@@ -10,6 +10,7 @@ import {
   ScanSearch,
   FileStack,
   Users,
+  FileSpreadsheet,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -23,7 +24,8 @@ export type ChatMode =
   | 'scenario-simulator'
   | 'forensic-intelligence'
   | 'deliverable-composer'
-  | 'roundtable';
+  | 'roundtable'
+  | 'spreadsheet';
 
 export interface ModeConfig {
   id: ChatMode;
@@ -143,6 +145,17 @@ export const MODES: ModeConfig[] = [
       'Should we restate FY24 for a newly-found error?',
       'GAAR applicability on a proposed structure',
       'Panel debate: intangibles amortisation life',
+    ],
+  },
+  {
+    id: 'spreadsheet',
+    label: 'Spreadsheet',
+    icon: FileSpreadsheet,
+    description: 'Deterministic two-agent calculation pipeline — every answer ships with an auditable `.xlsx` workbook. The model never does arithmetic; solvers compute, Excel renders.',
+    starters: [
+      'Build an NPV workbook for ₹12cr capex over 8 years',
+      'Depreciation schedule under Sec 32 WDV 15%',
+      'Personal income tax FY25-26 under both regimes',
     ],
   },
 ];

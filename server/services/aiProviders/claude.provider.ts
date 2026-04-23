@@ -86,6 +86,34 @@ export class ClaudeProvider extends AIProvider {
       };
       if (request.tools && request.tools.length > 0) {
         apiRequest.tools = request.tools;
+        // Translate provider-agnostic toolChoice into Anthropic's `tool_choice`.
+        // Anthropic shapes:
+        //   'auto'     → { type: 'auto' }
+        //   'required' → { type: 'any' }     (force SOME tool, Anthropic's closest analogue)
+        //   'none'     → omit tools entirely (handled by caller — or we just drop)
+        //   { type: 'tool', name } → { type: 'tool', name }
+        if (request.toolChoice !== undefined) {
+          if (request.toolChoice === 'auto') {
+            apiRequest.tool_choice = { type: 'auto' };
+          } else if (request.toolChoice === 'required') {
+            apiRequest.tool_choice = { type: 'any' };
+          } else if (request.toolChoice === 'none') {
+            // Anthropic has no 'none'; stripping tools is the correct way to
+            // forbid them. Keep tools present but skip setting tool_choice —
+            // most call sites don't reach here because the caller shouldn't
+            // send both tools and 'none', but we defend.
+            delete apiRequest.tools;
+          } else if (request.toolChoice.type === 'tool') {
+            apiRequest.tool_choice = { type: 'tool', name: request.toolChoice.name };
+          }
+        }
+      } else if (request.toolChoice === 'required' || (typeof request.toolChoice === 'object' && request.toolChoice?.type === 'tool')) {
+        throw new ProviderError(
+          `toolChoice='${JSON.stringify(request.toolChoice)}' requires a non-empty tools array`,
+          this.getName(),
+          'INVALID_TOOL_CHOICE',
+          false,
+        );
       }
 
       const response = await this.client.messages.create(apiRequest);
@@ -203,11 +231,21 @@ export class ClaudeProvider extends AIProvider {
   }
 
   /**
-   * Convert CompletionMessage[] to Claude's format (separate system message)
+   * Convert CompletionMessage[] to Claude's format (separate system message).
+   *
+   * Tool rounds need native content-block shapes, not plain strings:
+   *   - An assistant turn that emitted tool calls becomes
+   *     `{ role: 'assistant', content: [{type:'text',text}, {type:'tool_use', id, name, input}, ...] }`.
+   *     Anthropic REJECTS the conversation if the prior assistant
+   *     turn's tool_use is replayed as a string instead of blocks.
+   *   - Each subsequent `role:'tool'` message becomes a user turn with
+   *     `content: [{type:'tool_result', tool_use_id, content}]`.
+   *     Consecutive tool results collapse into a single user turn so
+   *     they pair cleanly with the preceding assistant tool_use turn.
    */
   private convertMessages(messages: CompletionMessage[]): {
     system?: string;
-    messages: Array<{ role: 'user' | 'assistant'; content: string }>;
+    messages: Array<{ role: 'user' | 'assistant'; content: any }>;
   } {
     const systemMessages = messages.filter(m => m.role === 'system');
     const conversationMessages = messages.filter(m => m.role !== 'system');
@@ -216,10 +254,41 @@ export class ClaudeProvider extends AIProvider {
       ? systemMessages.map(m => m.content).join('\n\n')
       : undefined;
 
-    const claudeMessages = conversationMessages.map(m => ({
-      role: m.role as 'user' | 'assistant',
-      content: m.content,
-    }));
+    const claudeMessages: Array<{ role: 'user' | 'assistant'; content: any }> = [];
+    let pendingToolResults: Array<{ type: 'tool_result'; tool_use_id: string; content: string }> = [];
+
+    const flushToolResults = () => {
+      if (pendingToolResults.length > 0) {
+        claudeMessages.push({ role: 'user', content: pendingToolResults });
+        pendingToolResults = [];
+      }
+    };
+
+    for (const m of conversationMessages) {
+      if (m.role === 'tool') {
+        pendingToolResults.push({
+          type: 'tool_result',
+          tool_use_id: m.toolCallId ?? '',
+          content: m.content,
+        });
+        continue;
+      }
+      flushToolResults();
+      if (m.role === 'assistant' && m.toolCalls && m.toolCalls.length > 0) {
+        const blocks: any[] = [];
+        if (m.content && m.content.trim()) blocks.push({ type: 'text', text: m.content });
+        for (const tc of m.toolCalls) {
+          blocks.push({ type: 'tool_use', id: tc.id, name: tc.name, input: tc.input });
+        }
+        claudeMessages.push({ role: 'assistant', content: blocks });
+        continue;
+      }
+      claudeMessages.push({
+        role: m.role as 'user' | 'assistant',
+        content: m.content,
+      });
+    }
+    flushToolResults();
 
     return { system, messages: claudeMessages };
   }

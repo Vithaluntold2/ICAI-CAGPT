@@ -19,6 +19,7 @@ export type CanonicalChatMode =
   | 'deliverable-composer'
   | 'forensic-intelligence'
   | 'roundtable'
+  | 'spreadsheet'
   | 'web-search';
 
 /**
@@ -46,6 +47,11 @@ const CHAT_MODE_ALIASES: Record<string, CanonicalChatMode> = {
   'deliverable-composer': 'deliverable-composer',
   'forensic-intelligence': 'forensic-intelligence',
   'roundtable': 'roundtable',
+  // Spreadsheet Mode — forces the two-agent calculation path and enforces
+  // the "LLM never computes, always emit a workbook" invariant. See
+  // twoAgentSolver.ts for the runtime pipeline.
+  'spreadsheet': 'spreadsheet',
+  'spreadsheet-mode': 'spreadsheet',
 };
 
 /**
@@ -84,7 +90,17 @@ export function normalizeChatMode(chatMode?: string | null): CanonicalChatMode {
  */
 export function isCotMode(chatMode?: string | null): boolean {
   const normalized = normalizeChatMode(chatMode);
-  return normalized === 'deep-research' || normalized === 'calculation';
+  return normalized === 'deep-research' || normalized === 'calculation' || normalized === 'spreadsheet';
+}
+
+/**
+ * Spreadsheet Mode: deterministic two-agent calculation pipeline.
+ * When this is true, the server MUST route through `runTwoAgentSolver`
+ * and always emit an `.xlsx` attachment — the LLM is forbidden from
+ * quoting numeric answers in prose.
+ */
+export function isSpreadsheetMode(chatMode?: string | null): boolean {
+  return normalizeChatMode(chatMode) === 'spreadsheet';
 }
 
 /**
@@ -114,6 +130,7 @@ export function isAgentWorkflowMode(chatMode?: string | null): boolean {
     'scenario-simulator',
     'deliverable-composer',
     'forensic-intelligence',
-    'roundtable'
+    'roundtable',
+    'spreadsheet'            // Two-Agent Solver pipeline
   ].includes(normalized);
 }

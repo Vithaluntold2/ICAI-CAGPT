@@ -24,6 +24,7 @@ import voiceRoutes from "./routes/voiceRoutes";
 import roundtableRoutes from "./routes/roundtableRoutes";
 import searchRoutes from "./routes/searchRoutes";
 import guideRoutes from "./routes/guideRoutes";
+import costRoutes from "./routes/costRoutes";
 // test-mindmap routes loaded dynamically in development only
 import { 
   setupSecurityMiddleware,
@@ -230,6 +231,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Register Guide test result routes — persistent multi-tester tracking
   app.use('/api/guide', guideRoutes);
+
+  // Register cost / budget / telemetry routes — powers Spreadsheet Mode
+  // cost-estimator UI (plan §7 step 8).
+  app.use('/api/cost', costRoutes);
   
   // Authentication routes (with rate limiting)
   app.post("/api/auth/register", authRateLimiter, async (req, res) => {

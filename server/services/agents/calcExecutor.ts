@@ -30,6 +30,8 @@ import {
   DepreciationScheduler,
   ROICalculator,
   BreakEvenAnalyzer,
+  FinancialRatioCalculator,
+  AmortizationScheduler,
 } from './financialCalculationAgents';
 import { buildCalcWorkbook } from './calcAgentHelpers';
 
@@ -54,6 +56,8 @@ const taxAgent = new TaxLiabilityCalculator();
 const depreciationAgent = new DepreciationScheduler();
 const roiAgent = new ROICalculator();
 const breakEvenAgent = new BreakEvenAnalyzer();
+const ratioAgent = new FinancialRatioCalculator();
+const amortizationAgent = new AmortizationScheduler();
 
 /**
  * Main entry point. Inspects the query text, runs whichever agents
@@ -190,6 +194,46 @@ export async function runCalculationAgents(query: string): Promise<CalcExecutorR
     }
   }
 
+  // --- Financial Ratios --------------------------------------------
+  if (/\bratio(s)?\b|current\s*ratio|quick\s*ratio|debt[- ]to[- ]equity|\broe\b|\broa\b|liquidity|leverage/i.test(query)) {
+    const params = parseRatioParams(query);
+    if (params) {
+      const out = await ratioAgent.execute({
+        query,
+        data: params,
+        conversationId: 'calc',
+        context: {},
+        timestamp: now,
+        userTier: 'free',
+      });
+      if (out.success && out.data) {
+        results.ratios = out.data;
+        if (out.data.excelSpec) sheets.push(...out.data.excelSpec.sheets);
+        agentsInvoked.push('financial-ratio-calculator');
+      }
+    }
+  }
+
+  // --- Amortization ------------------------------------------------
+  if (/amortization|amortisation|loan\s*schedule|emi|mortgage/i.test(query)) {
+    const params = parseAmortizationParams(query);
+    if (params) {
+      const out = await amortizationAgent.execute({
+        query,
+        data: params,
+        conversationId: 'calc',
+        context: {},
+        timestamp: now,
+        userTier: 'free',
+      });
+      if (out.success && out.data) {
+        results.amortization = out.data;
+        if (out.data.excelSpec) sheets.push(...out.data.excelSpec.sheets);
+        agentsInvoked.push('amortization-scheduler');
+      }
+    }
+  }
+
   const excelSpec =
     sheets.length > 0
       ? buildCalcWorkbook(
@@ -321,6 +365,73 @@ function parseBreakEvenParams(query: string): { fixedCosts: number; variableCost
   };
 }
 
+function parseRatioParams(query: string): {
+  currentAssets: number;
+  currentLiabilities: number;
+  totalAssets: number;
+  totalLiabilities: number;
+  inventory: number;
+  netIncome: number;
+  equity: number;
+} | null {
+  const pick = (re: RegExp) => {
+    const m = query.match(re);
+    return m ? parseNumberWithSuffix(m[1]) : 0;
+  };
+  const currentAssets = pick(/current\s*assets?\s*(?:of|is|are|=|:)?\s*\$?₹?\s*([0-9,.]+\s*(?:k|m|cr|lakh|lac)?)/i);
+  const currentLiabilities = pick(/current\s*liabilities?\s*(?:of|is|are|=|:)?\s*\$?₹?\s*([0-9,.]+\s*(?:k|m|cr|lakh|lac)?)/i);
+  const totalAssets = pick(/total\s*assets?\s*(?:of|is|are|=|:)?\s*\$?₹?\s*([0-9,.]+\s*(?:k|m|cr|lakh|lac)?)/i);
+  const totalLiabilities = pick(/total\s*liabilities?\s*(?:of|is|are|=|:)?\s*\$?₹?\s*([0-9,.]+\s*(?:k|m|cr|lakh|lac)?)/i);
+  const inventory = pick(/inventory\s*(?:of|is|=|:)?\s*\$?₹?\s*([0-9,.]+\s*(?:k|m|cr|lakh|lac)?)/i);
+  const netIncome = pick(/(?:net\s*income|net\s*profit|profit\s*after\s*tax|pat)\s*(?:of|is|=|:)?\s*\$?₹?\s*([0-9,.]+\s*(?:k|m|cr|lakh|lac)?)/i);
+  const equity = pick(/(?:shareholders?\s*equity|equity|net\s*worth)\s*(?:of|is|=|:)?\s*\$?₹?\s*([0-9,.]+\s*(?:k|m|cr|lakh|lac)?)/i);
+
+  // Need at least one pair of inputs to produce a meaningful ratio.
+  const hasLiquidity = currentAssets > 0 && currentLiabilities > 0;
+  const hasProfitability = netIncome !== 0 && (equity > 0 || totalAssets > 0);
+  const hasLeverage = totalLiabilities > 0 && equity > 0;
+  if (!hasLiquidity && !hasProfitability && !hasLeverage) return null;
+
+  return {
+    currentAssets,
+    currentLiabilities,
+    totalAssets,
+    totalLiabilities,
+    inventory,
+    netIncome,
+    equity,
+  };
+}
+
+function parseAmortizationParams(query: string): {
+  principal: number;
+  annualRate: number;
+  years: number;
+  paymentsPerYear: number;
+} | null {
+  const principalMatch =
+    query.match(/(?:principal|loan(?:\s*amount)?|borrowed)\s*(?:of|is|=|:)?\s*\$?₹?\s*([0-9,.]+\s*(?:k|m|cr|lakh|lac)?)/i);
+  const rateMatch = query.match(/(?:interest\s*rate|rate|apr)\s*(?:of|is|=|:|at)?\s*([0-9]+(?:\.[0-9]+)?)\s*%/i);
+  const yearsMatch = query.match(/(?:over|for|term\s*of|tenure\s*of)\s*([0-9]+(?:\.[0-9]+)?)\s*(?:year|yr)/i);
+  if (!principalMatch || !rateMatch || !yearsMatch) return null;
+
+  let paymentsPerYear = 12;
+  if (/annually|per\s*year|yearly/i.test(query)) paymentsPerYear = 1;
+  else if (/quarterly/i.test(query)) paymentsPerYear = 4;
+  else if (/semi[- ]?annual|half[- ]?yearly/i.test(query)) paymentsPerYear = 2;
+  else if (/weekly/i.test(query)) paymentsPerYear = 52;
+
+  const annualRateRaw = parseFloat(rateMatch[1]);
+  const annualRate = annualRateRaw > 1 ? annualRateRaw / 100 : annualRateRaw;
+
+  return {
+    principal: parseNumberWithSuffix(principalMatch[1]),
+    annualRate,
+    years: parseFloat(yearsMatch[1]),
+    paymentsPerYear,
+  };
+}
+
 function deriveWorkbookTitle(agentsInvoked: string[]): string {
   if (agentsInvoked.length === 0) return 'Financial Calculations';
   if (agentsInvoked.length === 1) {
@@ -330,6 +441,8 @@ function deriveWorkbookTitle(agentsInvoked: string[]): string {
       'depreciation-scheduler': 'Depreciation Schedule',
       'roi-calculator': 'ROI Analysis',
       'break-even-analyzer': 'Break-even Analysis',
+      'financial-ratio-calculator': 'Financial Ratios',
+      'amortization-scheduler': 'Amortization Schedule',
     };
     return labels[agentsInvoked[0]] ?? 'Financial Calculations';
   }

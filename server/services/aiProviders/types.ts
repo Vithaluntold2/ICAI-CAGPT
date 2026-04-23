@@ -28,8 +28,36 @@ export enum ProviderFeature {
 }
 
 export interface CompletionMessage {
-  role: 'system' | 'user' | 'assistant';
+  role: 'system' | 'user' | 'assistant' | 'tool';
   content: string;
+  /**
+   * Tool-call role identifier. Required when `role === 'tool'` so each
+   * adapter can pair the result with the originating call:
+   *   OpenAI/Azure : maps to `{ role: 'tool', tool_call_id, content }`.
+   *   Anthropic    : maps to a `user` turn whose content is
+   *                  `[{ type: 'tool_result', tool_use_id: toolCallId, content }]`.
+   *   Gemini       : maps to a `functionResponse` part; name comes from `toolName`.
+   * Consumers of the plain-text `content` (legacy providers, logs) are
+   * unaffected because `content` is always populated with the JSON
+   * result stringified — the structured fields are additive.
+   */
+  toolCallId?: string;
+  /**
+   * Tool name associated with the call. Optional for OpenAI/Azure
+   * (the id alone is enough) but REQUIRED by Anthropic when echoing
+   * the prior assistant turn, and by Gemini when emitting a
+   * `functionResponse`. Always populated by `completeWithToolLoop`.
+   */
+  toolName?: string;
+  /**
+   * Present when `role === 'assistant'` and the model emitted tool
+   * calls. Needed because Anthropic's API REJECTS a conversation
+   * where a `tool_use` assistant turn is followed by a user turn
+   * whose text contradicts it — the prior assistant turn must be
+   * echoed back verbatim in native shape. OpenAI is laxer but we
+   * echo consistently anyway to stay provider-agnostic.
+   */
+  toolCalls?: Array<{ id: string; name: string; input: Record<string, unknown> }>;
 }
 
 export interface CompletionRequest {
@@ -39,6 +67,24 @@ export interface CompletionRequest {
   maxTokens?: number;
   stream?: boolean;
   tools?: any[];
+  /**
+   * Forces / disables / constrains tool usage. When unset the provider decides.
+   *   'auto'                        — model may call tools or reply in text (default).
+   *   'required'                    — model MUST emit at least one tool call.
+   *   'none'                        — model may not call tools.
+   *   { type: 'tool', name: '...' } — model MUST call the named tool specifically.
+   *
+   * Mapped per provider:
+   *   Azure/OpenAI : `tool_choice: 'auto' | 'required' | 'none' | { type: 'function', function: { name } }`
+   *   Anthropic    : `tool_choice: { type: 'auto' } | { type: 'any' } | { type: 'tool', name }` (no 'none'; caller omits tools instead)
+   *   Gemini       : `toolConfig.functionCallingConfig.mode: 'AUTO' | 'ANY' | 'NONE'` plus `allowedFunctionNames` for name-pinning
+   *   Perplexity   : not supported; router must exclude when value !== 'auto'.
+   *
+   * When `toolChoice !== 'auto'` and the selected provider lacks the
+   * `supportsForcedToolCall` capability the router re-routes or the
+   * provider adapter throws a non-retryable ProviderError.
+   */
+  toolChoice?: 'auto' | 'required' | 'none' | { type: 'tool'; name: string };
   /**
    * Response format hint.
    *   'text'        — free-form output (default).

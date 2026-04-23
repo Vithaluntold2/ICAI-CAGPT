@@ -6,10 +6,15 @@
  * shared ToolRegistry, append the results to the conversation, and re-ask the model
  * until it stops requesting tools (or we hit MAX_TOOL_ITERATIONS).
  *
- * Pragmatic MVP: tool results are encoded as plain text `user` turns rather than
- * provider-native tool-result blocks (Anthropic `tool_result` content / OpenAI
- * `role: "tool"` messages). Modern LLMs parse this reliably. Upgrading to native
- * tool-result shapes is a future follow-up.
+ * Tool results are emitted as structured `role: 'tool'` messages with
+ * `toolCallId` + `toolName` fields; each provider adapter translates those
+ * into the native tool-result shape (OpenAI `role:'tool'`,
+ * Anthropic `content: [{type:'tool_result', tool_use_id}]`,
+ * Gemini `functionResponse`). This is required for Spreadsheet Mode and
+ * Agent 2 of the Two-Agent Solver where callers set
+ * `toolChoice: 'required'` — Anthropic rejects a forced-tool conversation
+ * whose prior assistant tool_use turn isn't echoed with a matching
+ * tool_result block.
  */
 
 import { toolRegistry } from "./tools/registry";
@@ -60,18 +65,25 @@ export async function completeWithToolLoop(
       }
     }
 
-    // Encode tool results as a plain-text user turn. This works across providers
-    // because the `messages` array only expects system|user|assistant roles.
-    const toolBlock = toolResults
-      .map(r => `[Tool result for ${r.name} (call_id=${r.toolCallId})]\n${r.output}`)
-      .join("\n\n");
-
+    // Echo the assistant's tool_use turn and append native tool_result
+    // turns. Adapters translate these per-provider; the `content` string
+    // stays set to the JSON result so legacy consumers still see a
+    // useful payload (e.g. log transcripts).
     request = {
       ...request,
       messages: [
         ...request.messages,
-        { role: "assistant" as const, content: response.content || "(tool_use)" },
-        { role: "user" as const, content: toolBlock },
+        {
+          role: "assistant" as const,
+          content: response.content ?? "",
+          toolCalls,
+        },
+        ...toolResults.map(r => ({
+          role: "tool" as const,
+          content: r.output,
+          toolCallId: r.toolCallId,
+          toolName: r.name,
+        })),
       ],
     };
   }

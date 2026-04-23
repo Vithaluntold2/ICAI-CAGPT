@@ -12,6 +12,9 @@ import { getFeatureFlags, getDisabledFeatures } from "./config/featureFlags";
 import { toolRegistry } from "./services/tools/registry";
 import { readWhiteboardTool } from "./services/tools/readWhiteboard.tool";
 import { updateChecklistTool } from "./services/tools/updateChecklist.tool";
+import { runSolverTool } from "./services/tools/runSolver.tool";
+import { buildSpreadsheetTool } from "./services/tools/buildSpreadsheet.tool";
+import { quoteCostTool } from "./services/tools/quoteCost.tool";
 
 // Register tools at module load (idempotent; ignore "already registered" if hot-reloaded)
 function safeRegister(tool: { name: string }, register: () => void) {
@@ -28,6 +31,9 @@ function safeRegister(tool: { name: string }, register: () => void) {
 }
 safeRegister(readWhiteboardTool, () => toolRegistry.register(readWhiteboardTool));
 safeRegister(updateChecklistTool, () => toolRegistry.register(updateChecklistTool));
+safeRegister(runSolverTool, () => toolRegistry.register(runSolverTool));
+safeRegister(buildSpreadsheetTool, () => toolRegistry.register(buildSpreadsheetTool));
+safeRegister(quoteCostTool, () => toolRegistry.register(quoteCostTool));
 
 // One-shot: purge the AI response cache on boot when PURGE_AI_CACHE_ON_BOOT=true.
 // We had stale 67-char stubs cached from an earlier interrupted stream that

@@ -42,6 +42,23 @@ export class GeminiProvider extends AIProvider {
 
   async generateCompletion(request: CompletionRequest): Promise<CompletionResponse> {
     try {
+      // Gemini does not yet have tool-calling wired through this adapter.
+      // If the caller explicitly asked for a forced tool call, bail out so
+      // the router can failover to a provider that supports it (Azure / OpenAI /
+      // Claude). `supportsForcedToolCall` on the capability registry is the
+      // primary guard — this is a belt-and-braces second check.
+      if (
+        request.toolChoice === 'required' ||
+        (typeof request.toolChoice === 'object' && request.toolChoice?.type === 'tool')
+      ) {
+        throw new ProviderError(
+          'Gemini provider does not support toolChoice=required yet',
+          AIProviderName.GEMINI,
+          'UNSUPPORTED_TOOL_CHOICE',
+          false,
+        );
+      }
+
       const modelName = request.model || this.defaultModel;
       const model = this.client.getGenerativeModel({ 
         model: modelName,
@@ -204,7 +221,14 @@ export class GeminiProvider extends AIProvider {
   }
 
   /**
-   * Convert CompletionMessage[] to Gemini's format
+   * Convert CompletionMessage[] to Gemini's format.
+   *
+   * Gemini doesn't participate in the tool-call loop today (see the
+   * defensive reject in generateCompletion for forced tool choice),
+   * but CompletionMessage may still carry `role:'tool'` or an
+   * assistant turn with `toolCalls` when a conversation is replayed
+   * cross-provider. Collapse both into plain text user/model turns
+   * so the message isn't silently dropped or rejected by the SDK.
    */
   private convertMessages(messages: CompletionMessage[]): {
     systemInstruction?: string;
@@ -217,10 +241,27 @@ export class GeminiProvider extends AIProvider {
       ? systemMessages.map(m => m.content).join('\n\n')
       : undefined;
 
-    const contents = conversationMessages.map(m => ({
-      role: m.role === 'assistant' ? 'model' : 'user',
-      parts: [{ text: m.content }],
-    }));
+    const contents = conversationMessages.map(m => {
+      if (m.role === 'tool') {
+        const name = m.toolName ? ` for ${m.toolName}` : '';
+        return {
+          role: 'user',
+          parts: [{ text: `[Tool result${name}]\n${m.content}` }],
+        };
+      }
+      if (m.role === 'assistant' && m.toolCalls && m.toolCalls.length > 0) {
+        const txt = m.content?.trim()
+          ? m.content
+          : m.toolCalls
+              .map(tc => `[tool_call ${tc.name}] ${JSON.stringify(tc.input)}`)
+              .join('\n');
+        return { role: 'model', parts: [{ text: txt }] };
+      }
+      return {
+        role: m.role === 'assistant' ? 'model' : 'user',
+        parts: [{ text: m.content }],
+      };
+    });
 
     return { systemInstruction, contents };
   }

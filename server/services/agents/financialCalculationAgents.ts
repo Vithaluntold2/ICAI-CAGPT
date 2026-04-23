@@ -806,6 +806,252 @@ export class BreakEvenAnalyzer extends EventEmitter implements AgentDefinition {
   }
 }
 
+/**
+ * Financial Ratio Calculator Agent
+ * Wraps financialSolverService.calculateFinancialRatios and emits a
+ * canonical ratios workbook (current, quick, D/E, ROE, ROA).
+ */
+export class FinancialRatioCalculator extends EventEmitter implements AgentDefinition {
+  id = 'financial-ratio-calculator';
+  name = 'Financial Ratio Calculator';
+  mode = 'financial-calculation' as const;
+  capabilities = ['calculation', 'ratio-analysis'];
+  version = '1.0.0';
+
+  async execute(input: AgentInput): Promise<AgentOutput> {
+    console.log('[FinancialRatioCalculator] Calculating ratios');
+
+    const currentAssets = (input.data.currentAssets as number) || 0;
+    const currentLiabilities = (input.data.currentLiabilities as number) || 0;
+    const totalAssets = (input.data.totalAssets as number) || 0;
+    const totalLiabilities = (input.data.totalLiabilities as number) || 0;
+    const inventory = (input.data.inventory as number) || 0;
+    const netIncome = (input.data.netIncome as number) || 0;
+    const equity = (input.data.equity as number) || 0;
+
+    // Import lazily to avoid circular imports at module load.
+    const { financialSolverService } = await import('../financialSolvers');
+    const ratios = financialSolverService.calculateFinancialRatios(
+      currentAssets,
+      currentLiabilities,
+      totalAssets,
+      totalLiabilities,
+      inventory,
+      netIncome,
+      equity,
+    );
+
+    // Layout (description present → headers on row 3, data starts row 4):
+    //   4  Inputs subheader
+    //   5  Current Assets        (B5)
+    //   6  Current Liabilities   (B6)
+    //   7  Total Assets          (B7)
+    //   8  Total Liabilities     (B8)
+    //   9  Inventory             (B9)
+    //   10 Net Income            (B10)
+    //   11 Equity                (B11)
+    //   12 Ratios subheader
+    //   13 Current Ratio         (C13 = B5/B6)
+    //   14 Quick Ratio           (C14 = (B5-B9)/B6)
+    //   15 Debt-to-Equity        (C15 = B8/B11)
+    //   16 Return on Equity      (C16 = B10/B11)
+    //   17 Return on Assets      (C17 = B10/B7)
+    const rows: CalcRow[] = [];
+    rows.push({ label: 'Inputs', kind: 'subheader' });
+    rows.push({ label: 'Current Assets', value: currentAssets, format: { type: 'currency', decimals: 0 } });
+    rows.push({ label: 'Current Liabilities', value: currentLiabilities, format: { type: 'currency', decimals: 0 } });
+    rows.push({ label: 'Total Assets', value: totalAssets, format: { type: 'currency', decimals: 0 } });
+    rows.push({ label: 'Total Liabilities', value: totalLiabilities, format: { type: 'currency', decimals: 0 } });
+    rows.push({ label: 'Inventory', value: inventory, format: { type: 'currency', decimals: 0 } });
+    rows.push({ label: 'Net Income', value: netIncome, format: { type: 'currency', decimals: 0 } });
+    rows.push({ label: 'Equity', value: equity, format: { type: 'currency', decimals: 0 } });
+
+    rows.push({ label: 'Ratios', kind: 'subheader' });
+    rows.push({
+      label: 'Current Ratio',
+      formula: '=IF(B6=0,0,B5/B6)',
+      format: { type: 'number', decimals: 2 },
+      kind: 'total',
+      note: 'Liquidity: CA / CL',
+    });
+    rows.push({
+      label: 'Quick Ratio',
+      formula: '=IF(B6=0,0,(B5-B9)/B6)',
+      format: { type: 'number', decimals: 2 },
+      kind: 'total',
+      note: 'Acid test: (CA - Inventory) / CL',
+    });
+    rows.push({
+      label: 'Debt-to-Equity',
+      formula: '=IF(B11=0,0,B8/B11)',
+      format: { type: 'number', decimals: 2 },
+      kind: 'total',
+      note: 'Leverage: TL / Equity',
+    });
+    rows.push({
+      label: 'Return on Equity (ROE)',
+      formula: '=IF(B11=0,0,B10/B11)',
+      format: { type: 'percentage', decimals: 2 },
+      kind: 'total',
+      note: 'Net Income / Equity',
+    });
+    rows.push({
+      label: 'Return on Assets (ROA)',
+      formula: '=IF(B7=0,0,B10/B7)',
+      format: { type: 'percentage', decimals: 2 },
+      kind: 'total',
+      note: 'Net Income / Total Assets',
+    });
+
+    const sheet = buildCalcSheet({
+      sheetName: 'Financial Ratios',
+      title: 'Financial Ratio Analysis',
+      description: 'Liquidity, leverage and profitability ratios',
+      rows,
+    });
+    const excelSpec = singleSheetWorkbook(
+      'Financial Ratios',
+      sheet,
+      'Generated from Financial Ratio Calculator agent',
+    );
+
+    return {
+      success: true,
+      data: {
+        ...ratios,
+        timestamp: new Date().toISOString(),
+        excelSpec,
+      },
+      metadata: {
+        agentId: this.id,
+        executionTime: Date.now() - input.timestamp,
+        confidence: 1.0,
+      },
+    };
+  }
+}
+
+/**
+ * Amortization Scheduler Agent
+ * Wraps financialSolverService.calculateAmortization and emits a full
+ * period-by-period amortization workbook with Excel PMT + running
+ * balance formulas.
+ */
+export class AmortizationScheduler extends EventEmitter implements AgentDefinition {
+  id = 'amortization-scheduler';
+  name = 'Amortization Scheduler';
+  mode = 'financial-calculation' as const;
+  capabilities = ['calculation', 'loan-amortization'];
+  version = '1.0.0';
+
+  async execute(input: AgentInput): Promise<AgentOutput> {
+    console.log('[AmortizationScheduler] Building amortization schedule');
+
+    const principal = (input.data.principal as number) || 0;
+    const annualRate = (input.data.annualRate as number) || 0;
+    const years = (input.data.years as number) || 0;
+    const paymentsPerYear = (input.data.paymentsPerYear as number) || 12;
+
+    const { financialSolverService } = await import('../financialSolvers');
+    const result = financialSolverService.calculateAmortization(
+      principal,
+      annualRate,
+      years,
+      paymentsPerYear,
+    );
+
+    // Cap rendered schedule rows at 480 (40 years monthly) to keep
+    // workbook size bounded; data payload retains the full schedule.
+    const maxRows = 480;
+    const schedule = result.schedule.slice(0, maxRows);
+    const truncated = result.schedule.length > schedule.length;
+
+    // Layout (description present → headers on row 3, data starts row 4):
+    //   4  Inputs subheader
+    //   5  Principal                (B5)
+    //   6  Annual Rate              (B6)
+    //   7  Years                    (B7)
+    //   8  Payments / Year          (B8)
+    //   9  Periodic Rate            (C9 = B6/B8)
+    //   10 Total Payments           (C10 = B7*B8)
+    //   11 Periodic Payment         (C11 = PMT(C9, C10, -B5))
+    //   12 Schedule subheader
+    //   Schedule header is encoded as a "data" row with only labels
+    //   so the standard LABEL/VALUE/FORMULA/NOTES columns stay intact.
+    const rows: CalcRow[] = [];
+    rows.push({ label: 'Inputs', kind: 'subheader' });
+    rows.push({ label: 'Principal', value: principal, format: { type: 'currency', decimals: 2 } });
+    rows.push({ label: 'Annual Rate', value: annualRate, format: { type: 'percentage', decimals: 4 } });
+    rows.push({ label: 'Years', value: years, format: { type: 'number', decimals: 0 } });
+    rows.push({ label: 'Payments / Year', value: paymentsPerYear, format: { type: 'number', decimals: 0 } });
+    rows.push({
+      label: 'Periodic Rate',
+      formula: '=IF(B8=0,0,B6/B8)',
+      format: { type: 'percentage', decimals: 6 },
+      note: 'Annual rate / payments per year',
+    });
+    rows.push({
+      label: 'Total Payments',
+      formula: '=B7*B8',
+      format: { type: 'number', decimals: 0 },
+    });
+    rows.push({
+      label: 'Periodic Payment',
+      formula: '=IF(OR(C9=0,C10=0),0,PMT(C9,C10,-B5))',
+      format: { type: 'currency', decimals: 2 },
+      kind: 'total',
+      note: 'Level payment per period',
+    });
+
+    rows.push({ label: `Schedule (${schedule.length} periods${truncated ? ' — truncated' : ''})`, kind: 'subheader' });
+    rows.push({
+      label: 'Period | Payment | Principal | Interest | Balance',
+      note: 'Values are pre-computed; balance runs down to zero',
+    });
+
+    for (const entry of schedule) {
+      rows.push({
+        label: `Period ${entry.period}`,
+        value: entry.payment,
+        format: { type: 'currency', decimals: 2 },
+        note: `Principal ${entry.principal.toFixed(2)} | Interest ${entry.interest.toFixed(2)} | Balance ${entry.balance.toFixed(2)}`,
+      });
+    }
+
+    const sheet = buildCalcSheet({
+      sheetName: 'Amortization',
+      title: 'Loan Amortization Schedule',
+      description: `${years}y @ ${(annualRate * 100).toFixed(2)}% with ${paymentsPerYear} payments/year`,
+      rows,
+    });
+    const excelSpec = singleSheetWorkbook(
+      'Amortization Schedule',
+      sheet,
+      'Generated from Amortization Scheduler agent',
+    );
+
+    return {
+      success: true,
+      data: {
+        principal,
+        annualRate,
+        years,
+        paymentsPerYear,
+        payment: result.payment,
+        schedule: result.schedule,
+        totalInterest: result.schedule.reduce((s, p) => s + p.interest, 0),
+        timestamp: new Date().toISOString(),
+        excelSpec,
+      },
+      metadata: {
+        agentId: this.id,
+        executionTime: Date.now() - input.timestamp,
+        confidence: 1.0,
+      },
+    };
+  }
+}
+
 // Export all agents
 export const financialCalculationAgents: AgentDefinition[] = [
   new NPVCalculator(),
@@ -813,4 +1059,6 @@ export const financialCalculationAgents: AgentDefinition[] = [
   new DepreciationScheduler(),
   new ROICalculator(),
   new BreakEvenAnalyzer(),
+  new FinancialRatioCalculator(),
+  new AmortizationScheduler(),
 ];

@@ -59,7 +59,7 @@ const templateUpload = multer({
 
 // Validation schemas
 const createContextSchema = z.object({
-  mode: z.enum(['deep-research', 'financial-calculation', 'workflow-visualization', 'audit-planning', 'scenario-simulator', 'deliverable-composer', 'forensic-intelligence', 'roundtable']),
+  mode: z.enum(['deep-research', 'financial-calculation', 'workflow-visualization', 'audit-planning', 'scenario-simulator', 'deliverable-composer', 'forensic-intelligence', 'roundtable', 'spreadsheet']),
   title: z.string().optional(),
   initialVariables: z.record(z.any()).optional(),
   userPreferences: z.record(z.any()).optional(),
@@ -77,7 +77,7 @@ const updateContextSchema = z.object({
 const createTemplateSchema = z.object({
   name: z.string().min(1),
   description: z.string(),
-  mode: z.enum(['deep-research', 'financial-calculation', 'workflow-visualization', 'audit-planning', 'scenario-simulator', 'deliverable-composer', 'forensic-intelligence', 'roundtable']),
+  mode: z.enum(['deep-research', 'financial-calculation', 'workflow-visualization', 'audit-planning', 'scenario-simulator', 'deliverable-composer', 'forensic-intelligence', 'roundtable', 'spreadsheet']),
   category: z.enum(['query', 'document', 'workflow', 'report', 'analysis', 'calculation']),
   content: z.object({
     prompt: z.string().optional(),

@@ -46,11 +46,47 @@ export class PerplexityProvider extends AIProvider {
 
   async generateCompletion(request: CompletionRequest): Promise<CompletionResponse> {
     try {
+      // Perplexity has no tool-calling support. Reject any forced-tool
+      // request so the router can failover. `supportsForcedToolCall`
+      // on the capability registry is the primary guard.
+      if (
+        request.toolChoice === 'required' ||
+        (typeof request.toolChoice === 'object' && request.toolChoice?.type === 'tool')
+      ) {
+        throw new ProviderError(
+          'Perplexity provider does not support tool calling',
+          AIProviderName.PERPLEXITY,
+          'UNSUPPORTED_TOOL_CHOICE',
+          false,
+        );
+      }
+
       const model = request.model || this.defaultModel;
-      
+
+      // Perplexity's OpenAI-compatible endpoint rejects `role:'tool'`
+      // messages (it never emits tool calls so it can't consume
+      // results). Down-cast any structured tool shapes to plain text
+      // user/assistant turns defensively — in practice the tool-loop
+      // never targets Perplexity, but cross-provider replays can.
+      const safeMessages = request.messages.map(m => {
+        if (m.role === 'tool') {
+          const name = m.toolName ? ` for ${m.toolName}` : '';
+          return { role: 'user', content: `[Tool result${name}]\n${m.content}` };
+        }
+        if (m.role === 'assistant' && m.toolCalls && m.toolCalls.length > 0) {
+          const txt = m.content?.trim()
+            ? m.content
+            : m.toolCalls
+                .map(tc => `[tool_call ${tc.name}] ${JSON.stringify(tc.input)}`)
+                .join('\n');
+          return { role: 'assistant', content: txt };
+        }
+        return { role: m.role, content: m.content };
+      });
+
       const response = await this.client.chat.completions.create({
         model,
-        messages: request.messages as any,
+        messages: safeMessages as any,
         temperature: request.temperature ?? 0.7,
         max_tokens: request.maxTokens || 2000,
         stream: false,

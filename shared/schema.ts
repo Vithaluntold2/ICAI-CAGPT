@@ -1856,3 +1856,95 @@ export const insertSearchHistorySchema = createInsertSchema(searchHistory).omit(
 
 export type SearchHistoryEntry = typeof searchHistory.$inferSelect;
 export type InsertSearchHistory = z.infer<typeof insertSearchHistorySchema>;
+
+// ============================================================================
+// COST / BUDGET / TELEMETRY — Step 5 + Step 12 of Spreadsheet Mode plan
+// ----------------------------------------------------------------------------
+// All monetary values are stored as INTEGER USD cents to avoid floating-point
+// drift. Display conversion (₹ / $ / € / £ / AED) happens at the UI layer.
+// ----------------------------------------------------------------------------
+// `conversationBudgets`  — per-conversation spend envelope for tool/LLM calls.
+//                           The orchestrator refuses further paid work once
+//                           `spentUsdCents >= budgetUsdCents` (if enforcement
+//                           is on). `reservedUsdCents` is a soft hold placed
+//                           by the cost-estimator for the currently-planned
+//                           step; it's released on completion or abort.
+// `toolCallTelemetry`    — one row per tool invocation (runSolver,
+//                           buildSpreadsheet, quoteCost, read_whiteboard,
+//                           solver round-trips). Primary use: debugging
+//                           "why did this conversation cost $X?" and
+//                           producing per-mode aggregate dashboards.
+// ============================================================================
+
+export const conversationBudgets = pgTable("conversation_budgets", {
+  conversationId: varchar("conversation_id")
+    .primaryKey()
+    .references(() => conversations.id, { onDelete: "cascade" }),
+  // Total envelope granted to this conversation (USD cents). 0 = unlimited.
+  budgetUsdCents: integer("budget_usd_cents").notNull().default(0),
+  // Realised spend so far — bumped on every completed tool/LLM call.
+  spentUsdCents: integer("spent_usd_cents").notNull().default(0),
+  // Soft hold placed by the cost estimator for in-flight work. Reset on
+  // success/failure; used only to prevent concurrent over-commits.
+  reservedUsdCents: integer("reserved_usd_cents").notNull().default(0),
+  // If true, orchestrator refuses paid ops when spent + reserved >= budget.
+  enforce: boolean("enforce").notNull().default(false),
+  // Currency hint for display only. Storage stays in USD cents.
+  displayCurrency: varchar("display_currency", { length: 8 }).notNull().default("INR"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  enforceIdx: index("conversation_budgets_enforce_idx").on(table.enforce),
+}));
+
+export const insertConversationBudgetSchema = createInsertSchema(conversationBudgets).omit({
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type ConversationBudget = typeof conversationBudgets.$inferSelect;
+export type InsertConversationBudget = z.infer<typeof insertConversationBudgetSchema>;
+
+export const toolCallTelemetry = pgTable("tool_call_telemetry", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  conversationId: varchar("conversation_id")
+    .notNull()
+    .references(() => conversations.id, { onDelete: "cascade" }),
+  // Optional message correlation so we can group "all tool calls for this
+  // assistant turn" on the UI.
+  messageId: varchar("message_id").references(() => messages.id, { onDelete: "set null" }),
+  // Canonical tool identifier: 'runSolver' | 'buildSpreadsheet' | 'quoteCost'
+  //  | 'read_whiteboard' | 'twoAgentSolver' | 'calcExecutor' | …
+  toolName: varchar("tool_name", { length: 64 }).notNull(),
+  // Optional sub-agent (e.g. 'npv-calculator') when tool_name is an agent
+  // dispatcher. Null for simple tools.
+  agentId: varchar("agent_id", { length: 64 }),
+  // 'ok' | 'error' | 'refused' | 'short_circuit'
+  outcome: varchar("outcome", { length: 16 }).notNull(),
+  // Wall-clock ms for the whole call (includes I/O + any LLM round-trips).
+  durationMs: integer("duration_ms").notNull().default(0),
+  // LLM tokens this tool call consumed, if any. 0 for pure JS solvers.
+  promptTokens: integer("prompt_tokens").notNull().default(0),
+  completionTokens: integer("completion_tokens").notNull().default(0),
+  // Estimated cost in USD cents (quoteCost pricing table).
+  costUsdCents: integer("cost_usd_cents").notNull().default(0),
+  // For multi-round-trip tools (twoAgentSolver, tool-loop chains). 1 for
+  // single-shot calls.
+  roundTrips: integer("round_trips").notNull().default(1),
+  // Free-form detail: inputs hash, sheet-count, error message, cache-hit
+  // flag, etc. Schema-less so future telemetry fields don't need migrations.
+  meta: jsonb("meta").default({}),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  conversationIdx: index("tool_call_telemetry_conversation_idx").on(table.conversationId, table.createdAt),
+  toolNameIdx: index("tool_call_telemetry_tool_name_idx").on(table.toolName, table.createdAt),
+  outcomeIdx: index("tool_call_telemetry_outcome_idx").on(table.outcome),
+}));
+
+export const insertToolCallTelemetrySchema = createInsertSchema(toolCallTelemetry).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type ToolCallTelemetry = typeof toolCallTelemetry.$inferSelect;
+export type InsertToolCallTelemetry = z.infer<typeof insertToolCallTelemetrySchema>;

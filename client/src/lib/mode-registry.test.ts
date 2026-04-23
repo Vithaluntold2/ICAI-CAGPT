@@ -3,7 +3,7 @@ import { describe, it, expect } from 'vitest';
 import { MODES, getMode, MODE_IDS } from './mode-registry';
 
 describe('mode-registry', () => {
-  it('lists 9 modes in canonical order', () => {
+  it('lists 11 modes in canonical order', () => {
     expect(MODE_IDS).toEqual([
       'standard',
       'deep-research',
@@ -11,9 +11,11 @@ describe('mode-registry', () => {
       'workflow',
       'audit-plan',
       'calculation',
+      'scenario-simulator',
       'forensic-intelligence',
       'deliverable-composer',
       'roundtable',
+      'spreadsheet',
     ]);
   });
 
@@ -32,5 +34,12 @@ describe('mode-registry', () => {
 
   it('getMode returns the matching entry', () => {
     expect(getMode('workflow')?.label).toBe('Workflow');
+  });
+
+  it('spreadsheet mode is registered with auditable-workbook description', () => {
+    const m = getMode('spreadsheet');
+    expect(m).toBeDefined();
+    expect(m!.label).toBe('Spreadsheet');
+    expect(m!.description.toLowerCase()).toContain('workbook');
   });
 });

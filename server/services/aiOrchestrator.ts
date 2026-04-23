@@ -1489,33 +1489,26 @@ export class AIOrchestrator {
         if (agentResult.results.depreciation) results.depreciation = agentResult.results.depreciation;
         if (agentResult.results.roi) results.roi = agentResult.results.roi;
         if (agentResult.results.breakEven) results.breakEven = agentResult.results.breakEven;
+        if (agentResult.results.ratios) results.financialRatios = agentResult.results.ratios;
+        if (agentResult.results.amortization) results.amortization = agentResult.results.amortization;
         if (agentResult.excelSpec) results._excelSpec = agentResult.excelSpec;
       }
     } catch (err) {
       console.warn('[Orchestrator] Calc agent execution failed — falling back to regex path:', err);
     }
 
-    // Financial Ratio calculations (Current Ratio, Quick Ratio, etc.)
-    if (query.toLowerCase().includes('current ratio') ||
-        query.toLowerCase().includes('quick ratio') ||
-        query.toLowerCase().includes('liquidity ratio')) {
-      const ratioParams = this.extractFinancialRatioParameters(query);
-      if (ratioParams) {
-        results.financialRatios = financialSolverService.calculateFinancialRatios(
-          ratioParams.currentAssets,
-          ratioParams.currentLiabilities,
-          ratioParams.totalAssets || ratioParams.currentAssets,
-          ratioParams.totalLiabilities || ratioParams.currentLiabilities,
-          ratioParams.inventory || 0,
-          ratioParams.netIncome || 0,
-          ratioParams.equity || 0,
-          ratioParams.historicalData
-        );
-      }
-    }
-    
-    // Tax calculations
-    if (routing.solversNeeded.includes('tax-calculator')) {
+    // Financial Ratio calculations — handled entirely by
+    // FinancialRatioCalculator agent (see calcExecutor.ts). The legacy
+    // regex+solver block was removed: the agent emits both the raw
+    // metrics and a canonical Excel spec, so a second in-place solver
+    // would only risk overwriting the canonical output.
+
+    // Tax calculations — LEGACY FALLBACK. Agent path above (TaxLiabilityCalculator)
+    // populates `results.taxCalculation` when it can parse the query; only
+    // re-run the regex-driven corporate-tax solver if the agent didn't fire,
+    // otherwise we'd overwrite the canonical agent output with a second,
+    // potentially inconsistent computation (the latent double-solve bug).
+    if (!results.taxCalculation && routing.solversNeeded.includes('tax-calculator')) {
       const taxCalc = this.extractTaxParameters(query);
       if (taxCalc?.jurisdiction) {
         results.taxCalculation = financialSolverService.calculateCorporateTax(
@@ -1606,27 +1599,10 @@ export class AIOrchestrator {
       }
     }
     
-    // Amortization calculations
-    if (query.includes('amortization') || query.includes('loan payment')) {
-      const loanParams = this.extractLoanParameters(query);
-      if (loanParams) {
-        const amortizationData = financialSolverService.calculateAmortization(
-          loanParams.principal,
-          loanParams.rate,
-          loanParams.years,
-          loanParams.paymentsPerYear
-        );
-        
-        results.amortization = {
-          principal: loanParams.principal,
-          annualRate: loanParams.rate,
-          years: loanParams.years,
-          payment: amortizationData.payment,
-          schedule: amortizationData.schedule
-        };
-      }
-    }
-    
+    // Amortization calculations — handled entirely by
+    // AmortizationScheduler agent (see calcExecutor.ts). The legacy
+    // regex+solver block was removed for the same reason as ratios.
+
     return Object.keys(results).length > 0 ? results : null;
   }
 

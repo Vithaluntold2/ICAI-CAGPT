@@ -12,6 +12,10 @@ dotenv.config({ path: '.env.test' });
 // Set test environment
 process.env.NODE_ENV = 'test';
 process.env.DATABASE_URL = process.env.DATABASE_URL || process.env.TEST_DATABASE_URL || 'postgresql://localhost:5432/lucaagent_test';
+// Local test Postgres typically runs without SSL. Default DB_SSL=false so
+// server/db.ts's pg Pool doesn't force an SSL handshake that the local server
+// rejects. CI/remote runs can still opt in by explicitly setting DB_SSL.
+process.env.DB_SSL = process.env.DB_SSL ?? 'false';
 
 // Mock external services by default
 vi.mock('@sentry/node', () => ({

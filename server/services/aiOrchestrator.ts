@@ -886,27 +886,46 @@ export class AIOrchestrator {
       }
     }
 
-    // Step 5.5: Format calculation results professionally if calculations were performed
-    if (calculationResults && Object.keys(calculationResults).length > 0) {
+    // Step 5.5: Format calculation results professionally if calculations were performed.
+    //
+    // SKIP this entirely when a calc agent has already emitted a
+    // canonical `_excelSpec`. Reasoning: the agent's spec is a
+    // fully-formed jurisdiction-specific workbook (e.g. Indian
+    // personal/corporate tax slabs), while `calculationFormatter`
+    // renders a GENERIC US C-Corp template ("Federal Tax Rate:
+    // 21%"). Applying the formatter on top produced confusing
+    // double output — user saw a US C-Corp tax breakdown above the
+    // real Indian slab sheet. When we have the agent spec, the
+    // spreadsheet panel is the authoritative calculation view and
+    // we let the LLM's own prose carry the chat narrative.
+    const agentSpecAlreadyProduced = !!(calculationResults && (calculationResults as any)._excelSpec);
+    if (
+      !agentSpecAlreadyProduced &&
+      calculationResults &&
+      Object.keys(calculationResults).length > 0
+    ) {
       try {
         console.log('[Orchestrator] Formatting calculation results professionally...');
-        
+
         // Format each calculation type
         const formattedOutputs: string[] = [];
-        
+
         for (const [calcType, calcData] of Object.entries(calculationResults)) {
+          // Skip internal/reserved keys — e.g. `_excelSpec`, which we
+          // already guarded above but also defensively here.
+          if (calcType.startsWith('_')) continue;
           if (calcData && typeof calcData === 'object') {
             const formatted = calculationFormatter.formatCalculation(
               calcType,
               calcData,
               enrichedQuery
             );
-            
+
             // Append formatted markdown to response
             formattedOutputs.push(formatted.markdown);
           }
         }
-        
+
         // If we have formatted outputs, prepend them to the AI response
         if (formattedOutputs.length > 0) {
           const calculationSection = `\n\n---\n\n# Calculation Results\n\n${formattedOutputs.join('\n\n')}\n\n---\n\n# Professional Analysis\n\n`;
@@ -917,6 +936,8 @@ export class AIOrchestrator {
         console.error('[Orchestrator] Calculation formatting failed:', error);
         // Don't fail request if formatting fails - AI response still valid
       }
+    } else if (agentSpecAlreadyProduced) {
+      console.log('[Orchestrator] Agent excelSpec present — skipping generic calculationFormatter (would overlay US C-Corp template on the jurisdiction-specific agent sheet)');
     }
     
     // Step 5.6: ADVANCED REASONING - Cognitive Monitoring & Validation
@@ -1484,13 +1505,24 @@ export class AIOrchestrator {
         // code (Excel generation + chat prompt enrichment) can see
         // them. We expose the spec under a reserved `_excelSpec` key
         // so caller knows the workbook is pre-rendered.
-        if (agentResult.results.npv) results.npv = agentResult.results.npv;
-        if (agentResult.results.tax) results.taxCalculation = agentResult.results.tax;
-        if (agentResult.results.depreciation) results.depreciation = agentResult.results.depreciation;
-        if (agentResult.results.roi) results.roi = agentResult.results.roi;
-        if (agentResult.results.breakEven) results.breakEven = agentResult.results.breakEven;
-        if (agentResult.results.ratios) results.financialRatios = agentResult.results.ratios;
-        if (agentResult.results.amortization) results.amortization = agentResult.results.amortization;
+        //
+        // CRITICAL: strip the `excelSpec` inner key from each agent's
+        // numeric payload BEFORE storing — otherwise the downstream
+        // `calculationFormatter` iterates its entries with
+        // `String(value)` which produces "[object Object]" in the
+        // chat body. The spec only belongs under `_excelSpec`.
+        const stripSpec = (data: any) => {
+          if (!data || typeof data !== 'object') return data;
+          const { excelSpec: _unused, ...rest } = data;
+          return rest;
+        };
+        if (agentResult.results.npv) results.npv = stripSpec(agentResult.results.npv);
+        if (agentResult.results.tax) results.taxCalculation = stripSpec(agentResult.results.tax);
+        if (agentResult.results.depreciation) results.depreciation = stripSpec(agentResult.results.depreciation);
+        if (agentResult.results.roi) results.roi = stripSpec(agentResult.results.roi);
+        if (agentResult.results.breakEven) results.breakEven = stripSpec(agentResult.results.breakEven);
+        if (agentResult.results.ratios) results.financialRatios = stripSpec(agentResult.results.ratios);
+        if (agentResult.results.amortization) results.amortization = stripSpec(agentResult.results.amortization);
         if (agentResult.excelSpec) results._excelSpec = agentResult.excelSpec;
       }
     } catch (err) {

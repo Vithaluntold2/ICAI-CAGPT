@@ -1,5 +1,5 @@
 import { eq, and, desc, sql as drizzleSql, count, isNull, gte, lte, between } from "drizzle-orm";
-import { db } from "./db";
+import { db, withDbRetry } from "./db";
 import { encryptApiKey, decryptApiKey, maskApiKey } from "./utils/encryption";
 import { 
   users, 
@@ -62,12 +62,18 @@ import type { IStorage } from "./storage";
 export class PostgresStorage implements IStorage {
   // User methods
   async getUser(id: string): Promise<User | undefined> {
-    const result = await db.select().from(users).where(eq(users.id, id)).limit(1);
+    const result = await withDbRetry(
+      () => db.select().from(users).where(eq(users.id, id)).limit(1),
+      'getUser',
+    );
     return result[0] || undefined;
   }
 
   async getUserByEmail(email: string): Promise<User | undefined> {
-    const result = await db.select().from(users).where(eq(users.email, email)).limit(1);
+    const result = await withDbRetry(
+      () => db.select().from(users).where(eq(users.email, email)).limit(1),
+      'getUserByEmail',
+    );
     return result[0] || undefined;
   }
 
@@ -341,7 +347,10 @@ export class PostgresStorage implements IStorage {
 
   // Conversation methods
   async getConversation(id: string): Promise<Conversation | undefined> {
-    const result = await db.select().from(conversations).where(eq(conversations.id, id)).limit(1);
+    const result = await withDbRetry(
+      () => db.select().from(conversations).where(eq(conversations.id, id)).limit(1),
+      'getConversation',
+    );
     return result[0] || undefined;
   }
 
@@ -358,23 +367,24 @@ export class PostgresStorage implements IStorage {
   }
 
   async getUserConversations(userId: string, profileId?: string | null): Promise<Conversation[]> {
-    try {
-      const conditions = [eq(conversations.userId, userId)];
-      if (profileId !== undefined) {
-        if (profileId === null) {
-          conditions.push(isNull(conversations.profileId));
-        } else {
-          conditions.push(eq(conversations.profileId, profileId));
-        }
+    const conditions = [eq(conversations.userId, userId)];
+    if (profileId !== undefined) {
+      if (profileId === null) {
+        conditions.push(isNull(conversations.profileId));
+      } else {
+        conditions.push(eq(conversations.profileId, profileId));
       }
-      
-      const result = await db
-        .select()
-        .from(conversations)
-        .where(and(...conditions))
-        .orderBy(desc(conversations.updatedAt));
-      
-      return result;
+    }
+    try {
+      return await withDbRetry(
+        () =>
+          db
+            .select()
+            .from(conversations)
+            .where(and(...conditions))
+            .orderBy(desc(conversations.updatedAt)),
+        'getUserConversations',
+      );
     } catch (error: any) {
       console.error('[Storage] getUserConversations error:', error?.message || error);
       console.error('[Storage] getUserConversations stack:', error?.stack);
@@ -403,11 +413,15 @@ export class PostgresStorage implements IStorage {
 
   // Message methods
   async getConversationMessages(conversationId: string): Promise<Message[]> {
-    return db
-      .select()
-      .from(messages)
-      .where(eq(messages.conversationId, conversationId))
-      .orderBy(messages.createdAt);
+    return withDbRetry(
+      () =>
+        db
+          .select()
+          .from(messages)
+          .where(eq(messages.conversationId, conversationId))
+          .orderBy(messages.createdAt),
+      'getConversationMessages',
+    );
   }
 
   async getMessage(messageId: string): Promise<Message | undefined> {

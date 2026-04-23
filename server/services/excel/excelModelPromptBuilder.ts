@@ -742,12 +742,22 @@ Return ONLY the JSON ExcelWorkbookSpec. No explanation.`;
   }
 
   /**
-   * Check if a query requires Excel model generation
+   * Check if a query requires Excel model generation.
+   *
+   * Routes two broad classes of query through the LLM Excel path
+   * (which has layout convention + JSON schema + smoke-test +
+   * self-heal gating):
+   *
+   *   1. Explicit Excel/workbook/spreadsheet asks.
+   *   2. Investment-appraisal prose (NPV / IRR / DCF / capex
+   *      proposals with year-by-year cash flows). The calc-agent
+   *      regex path can't parse prose cash flows cleanly, so for
+   *      these we defer to the LLM which can extract the structure.
    */
   isExcelModelRequest(query: string): boolean {
     const q = query.toLowerCase();
-    
-    const excelIndicators = [
+
+    const explicitExcelIndicators = [
       /\bexcel\b/,
       /\bspreadsheet\b/,
       /\bworkbook\b/,
@@ -763,10 +773,27 @@ Return ONLY the JSON ExcelWorkbookSpec. No explanation.`;
       /\bamortization schedule\b/,
       /\bdepreciation schedule\b/,
       /\bbudget template\b/,
-      /\bforecast model\b/
+      /\bforecast model\b/,
     ];
+    if (explicitExcelIndicators.some((p) => p.test(q))) return true;
 
-    return excelIndicators.some(pattern => pattern.test(q));
+    // Investment-appraisal queries. We want the LLM Excel path to
+    // handle these because the user typically supplies prose inputs
+    // (e.g. "Revenue: ₹6.5cr/yr, costs: ₹3.2cr/yr, life: 5 years,
+    // discount rate: 11%, terminal value: ₹1cr") that the calc-
+    // agent regex parser can't structure. Require NPV/IRR/DCF
+    // intent PLUS some signal that the user has concrete numeric
+    // inputs — to avoid tripping on casual mentions ("what's NPV?").
+    const npvIntent = /\b(npv|irr|xirr|discounted cash flow|dcf)\b/.test(q);
+    const capexIntent = /\b(capex|capital expenditure|capital budget|investment appraisal|investment decision)\b/.test(q);
+    const hasConcreteInputs =
+      /\b(?:₹|rs\.?|inr|usd|\$|€|£)\s*\d/.test(query) || // money amount
+      /\d+\s*(?:cr|crore|lakh|lac|million|billion|bn|m|k)\b/i.test(q) || // number + scale
+      /discount rate|wacc|hurdle rate/.test(q) ||
+      /cash\s*flow.*\d/.test(q);
+    if ((npvIntent || capexIntent) && hasConcreteInputs) return true;
+
+    return false;
   }
 }
 

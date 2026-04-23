@@ -898,11 +898,30 @@ Return the minimal JSON patch that fixes every error above.`;
     }> = [];
     try {
       const parsed = SafeJSONParser.parse(patchResp.content);
-      if (!Array.isArray(parsed)) {
-        console.warn('[ExcelModelGenerator] Self-heal patch was not an array; skipping.');
+      // The patch system prompt asks for a bare JSON array, but
+      // LLMs sometimes wrap it: `{ "patches": [...] }`, `{ "fixes":
+      // [...] }`, `{ "cells": [...] }`, or return a single patch
+      // object when there's only one fix. Accept all three shapes.
+      let arr: any;
+      if (Array.isArray(parsed)) {
+        arr = parsed;
+      } else if (parsed && typeof parsed === 'object') {
+        arr =
+          (parsed as any).patches ??
+          (parsed as any).fixes ??
+          (parsed as any).cells ??
+          (parsed as any).changes ??
+          // Single-patch object (has `cell` + `action`) — wrap in array
+          ((parsed as any).cell && (parsed as any).action ? [parsed] : null);
+      }
+      if (!Array.isArray(arr)) {
+        console.warn(
+          '[ExcelModelGenerator] Self-heal patch was not an array or recognised wrapper — content was:',
+          (patchResp.content || '').slice(0, 300),
+        );
         return null;
       }
-      patches = parsed as any;
+      patches = arr as any;
     } catch (err) {
       console.warn('[ExcelModelGenerator] Self-heal patch JSON parse failed:', err);
       return null;

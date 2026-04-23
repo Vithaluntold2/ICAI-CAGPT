@@ -5051,6 +5051,14 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
           // real clarify/generating phase. The loop yields between each
           // line in 200 ms increments; checking `preambleCancelled`
           // every iteration means worst-case drift is ~200 ms.
+          //
+          // No idle loop — after the scripted lines finish, the
+          // preamble goes SILENT. Earlier an idle loop kept re-emitting
+          // "Still analysing…" every 2s, which flooded the thinking
+          // block with identical lines (12+ times for slow queries).
+          // The last scripted message is neutral enough that sitting on
+          // it for a few seconds is acceptable; the real phase (clarify
+          // / generating) fires when processQuery returns.
           const thinkingMessages = modeThinkingMessages[chatMode] || modeThinkingMessages['standard'];
           let preambleCancelled = false;
           const runPreamble = async () => {
@@ -5097,6 +5105,16 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
                 console.log(
                   `[SSE][AgentWorkflow] Preemptive clarification detected for '${chatMode}' — skipping agent workflow, will ask user instead.`,
                 );
+                // Cancel the scripted preamble IMMEDIATELY. Without
+                // this, the preamble's remaining 200ms-spaced lines
+                // ("Gathering relevant information…", "Putting it
+                // together…") stream in AFTER the clarify event and
+                // overwrite the correct status label on the client —
+                // exactly the "showed Putting it together then asked a
+                // question" bug. Waiting on preamblePromise here makes
+                // sure no stale line can leak out after we emit clarify.
+                preambleCancelled = true;
+                await preamblePromise.catch(() => {});
                 sendThinking('clarify', 'Preparing a clarifying question…');
                 skipAgentWorkflow = true;
               }
@@ -5183,14 +5201,26 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
           // anchors the latch if the preemptive event somehow got lost
           // in the stream.)
           if (result.needsClarification || skipAgentWorkflow) {
+            console.log(
+              `[SSE] Emitting 'clarify' (orchestrator.needsClarification=${!!result.needsClarification}, skipAgentWorkflow=${skipAgentWorkflow})`,
+            );
             sendThinking('clarify', 'Preparing a clarifying question…');
-            await new Promise(resolve => setTimeout(resolve, 100));
+            // 400ms instead of 100ms — the client's ThinkingBlock needs
+            // enough time to render the status transition before the
+            // first chunk pins the label to "Asking a clarifying
+            // question…" via the client-side latch. 100ms was
+            // imperceptible on slower clients and the user reported
+            // still seeing the previous (preamble) label.
+            await new Promise(resolve => setTimeout(resolve, 400));
           } else {
+            console.log(
+              `[SSE] Emitting 'generating' (not a clarification per orchestrator + preemptive check)`,
+            );
             // Regular answer — neutral pre-stream label. The client's
             // onChunk classifier refines it to "Writing your response…"
             // / "Answering…" once content starts arriving.
             sendThinking('generating', 'Almost there…');
-            await new Promise(resolve => setTimeout(resolve, 100));
+            await new Promise(resolve => setTimeout(resolve, 250));
           }
           
           // Cache the response for future use — BUT only when the response is
@@ -5290,10 +5320,13 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
           try {
             const { classifyResponseKind } = await import('./services/responseClassifier');
             const kind = await classifyResponseKind(fullResponse);
+            console.log(
+              `[SSE] LLM response-kind classifier → ${kind} (first 80 chars: "${(fullResponse || '').slice(0, 80).replace(/\n/g, ' ')}")`,
+            );
             if (kind === 'clarify') {
               console.log(`[SSE] LLM classifier detected clarification — emitting clarify phase`);
               sendThinking('clarify', 'Preparing a clarifying question…');
-              await new Promise(resolve => setTimeout(resolve, 80));
+              await new Promise(resolve => setTimeout(resolve, 300));
             }
           } catch (err) {
             // Classifier hard-failed (shouldn't — it's already try/catched

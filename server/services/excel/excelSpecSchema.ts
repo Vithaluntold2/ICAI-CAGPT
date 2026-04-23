@@ -72,23 +72,18 @@ export const EXCEL_WORKBOOK_SPEC_SCHEMA = {
                   type: ['string', 'null'],
                   description: 'Excel formula starting with =. Must reference same-or-earlier-row col-B cells.',
                 },
-                formulaPattern: {
-                  anyOf: [
-                    {
-                      type: 'object',
-                      properties: {
-                        patternId: { type: 'string' },
-                        params: {
-                          type: 'object',
-                          additionalProperties: { type: 'string' },
-                        },
-                      },
-                      required: ['patternId', 'params'],
-                      additionalProperties: false,
-                    },
-                    { type: 'null' },
-                  ],
-                },
+                // `formulaPattern` is intentionally omitted from the
+                // strict schema — OpenAI strict mode cannot express a
+                // free-form key/value map for the `params` field (it
+                // requires every property to be enumerated upfront),
+                // and enumerating every possible pattern param would
+                // bloat the schema. The LLM can express every pattern
+                // it needs via the plain `formula` field instead;
+                // formula-pattern resolution still works at runtime
+                // when the LLM chooses to emit it, just not gated by
+                // the schema decoder. We keep this property absent
+                // rather than `null`-only so strict mode is happy
+                // AND the LLM doesn't waste tokens emitting nulls.
                 name: {
                   type: ['string', 'null'],
                   description: 'Named range for this cell (column B inputs only).',
@@ -115,19 +110,15 @@ export const EXCEL_WORKBOOK_SPEC_SCHEMA = {
                 },
                 comment: { type: ['string', 'null'] },
               },
-              required: ['cell', 'type', 'value', 'formula', 'formulaPattern', 'name', 'format', 'comment'],
+              required: ['cell', 'type', 'value', 'formula', 'name', 'format', 'comment'],
               additionalProperties: false,
             },
           },
-          columnWidths: {
-            anyOf: [
-              {
-                type: 'object',
-                additionalProperties: { type: 'number' },
-              },
-              { type: 'null' },
-            ],
-          },
+          // `columnWidths` is a free-form {A: 32, B: 18, …} map.
+          // OpenAI strict mode doesn't allow `additionalProperties`
+          // with a type schema, and enumerating every column letter
+          // blows up the schema. Omitted — the builder applies sane
+          // defaults.
           freezePanes: {
             anyOf: [
               {
@@ -147,7 +138,7 @@ export const EXCEL_WORKBOOK_SPEC_SCHEMA = {
             items: { type: 'string' },
           },
         },
-        required: ['name', 'purpose', 'tabColor', 'cells', 'columnWidths', 'freezePanes', 'mergedCells'],
+        required: ['name', 'purpose', 'tabColor', 'cells', 'freezePanes', 'mergedCells'],
         additionalProperties: false,
       },
     },

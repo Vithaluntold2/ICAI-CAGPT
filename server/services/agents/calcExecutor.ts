@@ -102,7 +102,35 @@ export async function runCalculationAgents(query: string): Promise<CalcExecutorR
   }
 
   // --- Tax ----------------------------------------------------------
-  const taxHit = /(income tax|tax liability|tax slab|old regime|new regime|compute tax|calculate.*tax)/i.test(query);
+  //
+  // Only fire the tax-liability calculator when the user is ASKING
+  // for a tax calculation, not merely mentioning tax as context.
+  // The previous regex matched any "new regime" / "old regime", so a
+  // query like "Compute NPV for capex. Tax regime: new (115BAA)"
+  // spuriously fired the tax agent and produced an Indian personal
+  // income-tax slab sheet on top of the NPV request.
+  //
+  // Require one of:
+  //   • Explicit verb: "compute/calculate/find tax", "tax liability",
+  //   • A slab-wise context: "tax slab", "slab-wise tax",
+  //   • "income tax" immediately followed by a money/number,
+  //   • "tax for income of X", "tax on X income".
+  // "new regime" / "old regime" alone is NOT enough — they're
+  // context markers, not calculation requests.
+  //
+  // Also skip tax if the query is primarily an NPV / DCF / capex
+  // evaluation (those have their own tax-shield handling and should
+  // not generate a separate personal-tax sheet).
+  const wantsNpv = /\b(npv|irr|net present value|discounted cash flow|capex|capital expenditure|capital budgeting|investment appraisal)\b/i.test(query);
+  const taxHit =
+    !wantsNpv &&
+    (
+      /\b(compute|calculate|find|what['’]?s)\b[^.?!]{0,40}\btax\b/i.test(query) ||
+      /\btax liability\b/i.test(query) ||
+      /\b(slab[- ]?wise|tax slab)\b/i.test(query) ||
+      /\bincome tax\s*(for|on|of)?\s*[₹$]?\s*\d/i.test(query) ||
+      /\btax\s*(for|on)\s*(income|salary)\s*(of)?\s*[₹$]?\s*\d/i.test(query)
+    );
   if (taxHit) {
     const income = parseIncomeAmount(query);
     const regime: 'old' | 'new' = /new regime/i.test(query) ? 'new' : 'old';

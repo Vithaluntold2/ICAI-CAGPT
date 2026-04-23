@@ -1561,12 +1561,72 @@ ${macro.code}
   }
 
   /**
-   * Extract spreadsheet preview data from workbook for UI display
-   * Includes formulas as visible text and cell styles
+   * Extract spreadsheet preview data from workbook for UI display.
+   *
+   * EVALUATES every formula via HyperFormula and returns COMPUTED
+   * values in the grid. The downloadable `.xlsx` already works —
+   * Excel calculates on open — but the in-app preview previously
+   * rendered raw formula text like `=MAX(0,MIN(B12,250000))*0.05`
+   * in every formula cell, which is what the user sees as "sheets
+   * showing formulae directly". We now:
+   *   1. Build a HyperFormula workbook mirroring this one.
+   *   2. Read the computed value for every cell.
+   *   3. Fall back to the formula text only when a cell errors out
+   *      (which is itself a signal the `.xlsx` download will be
+   *      broken — useful to surface in logs).
+   *
+   * The raw formula list is still collected into `formulas` so
+   * downstream consumers that need to list "formulas used" still
+   * have them.
    */
   extractSpreadsheetPreview(workbook: ExcelJS.Workbook): SpreadsheetPreviewData {
     const sheets: SheetPreview[] = [];
-    
+
+    // Pre-build a HyperFormula workbook so we can ask it for the
+    // value of every cell. HyperFormula expects a `{ sheetName:
+    // 2D-array }` map where formula cells start with `=`. Skip
+    // gracefully on any build failure — preview then falls back to
+    // the legacy "show formula text" path.
+    let hf: import('hyperformula').HyperFormula | null = null;
+    try {
+      const { HyperFormula } = require('hyperformula') as typeof import('hyperformula');
+      const sheetsForHf: Record<string, any[][]> = {};
+      workbook.worksheets.forEach((ws) => {
+        const rows: any[][] = [];
+        const maxRow = Math.min(ws.rowCount, 100);
+        const maxCol = Math.min(ws.columnCount, 26);
+        for (let r = 1; r <= maxRow; r++) {
+          const row: any[] = [];
+          const rr = ws.getRow(r);
+          for (let c = 1; c <= maxCol; c++) {
+            const cell = rr.getCell(c);
+            if (cell.formula) {
+              row.push(`=${cell.formula}`);
+            } else if (cell.value && typeof cell.value === 'object' && 'formula' in cell.value) {
+              row.push(`=${(cell.value as any).formula}`);
+            } else if (cell.value === null || cell.value === undefined) {
+              row.push(null);
+            } else if (typeof cell.value === 'object' && 'richText' in cell.value) {
+              row.push((cell.value as any).richText.map((rt: any) => rt.text).join(''));
+            } else if (typeof cell.value === 'object') {
+              row.push(null);
+            } else {
+              row.push(cell.value as any);
+            }
+          }
+          rows.push(row);
+        }
+        sheetsForHf[ws.name] = rows;
+      });
+      hf = HyperFormula.buildFromSheets(sheetsForHf, {
+        licenseKey: 'gpl-v3',
+        precisionRounding: 10,
+      });
+    } catch (err: any) {
+      console.warn('[excelOrchestrator] Preview HF evaluation unavailable, falling back to formula text:', err?.message ?? err);
+      hf = null;
+    }
+
     workbook.worksheets.forEach((worksheet) => {
       const data: (string | number | null)[][] = [];
       const styles: CellStylePreview[][] = [];
@@ -1606,17 +1666,55 @@ ${macro.code}
         for (let colIndex = 1; colIndex <= maxCol; colIndex++) {
           const cell = row.getCell(colIndex);
           
-          // Get cell value - show formula if present
+          // Get cell value. For formula cells, prefer the HyperFormula-
+          // computed value (so the preview shows a number, not the raw
+          // `=B7-B8` text). We still collect the formula string into
+          // `formulas` for the "formulas used" side list, and fall back
+          // to the formula text when HF errors out on that cell — that
+          // fallback both keeps the preview populated and acts as a
+          // signal that the downloadable .xlsx likely has a broken
+          // formula at that address.
           let cellValue: string | number | null = null;
-          if (cell.formula) {
-            // Show formula in preview with = prefix
-            cellValue = `=${cell.formula}`;
-            formulas.push(`${this.getColumnLetter(colIndex)}${rowIndex}: =${cell.formula}`);
+          const formulaString: string | null = cell.formula
+            ? `=${cell.formula}`
+            : cell.value && typeof cell.value === 'object' && 'formula' in cell.value
+              ? `=${(cell.value as any).formula}`
+              : null;
+          if (formulaString) {
+            formulas.push(
+              `${this.getColumnLetter(colIndex)}${rowIndex}: ${formulaString}`,
+            );
+            let evaluated: any = null;
+            if (hf) {
+              try {
+                const sheetId = hf.getSheetId(worksheet.name);
+                if (sheetId !== undefined) {
+                  evaluated = hf.getCellValue({
+                    sheet: sheetId,
+                    col: colIndex - 1,
+                    row: rowIndex - 1,
+                  });
+                }
+              } catch {
+                /* fall through to formula text */
+              }
+            }
+            if (
+              evaluated !== null &&
+              evaluated !== undefined &&
+              !(typeof evaluated === 'object' && 'type' in evaluated && (evaluated as any).type === 'ERROR')
+            ) {
+              cellValue =
+                typeof evaluated === 'number' || typeof evaluated === 'string' || typeof evaluated === 'boolean'
+                  ? (evaluated as any)
+                  : String(evaluated);
+            } else {
+              // HF errored or wasn't available — keep the formula text
+              // so the cell isn't mysteriously blank.
+              cellValue = formulaString;
+            }
           } else if (cell.value !== null && cell.value !== undefined) {
-            if (typeof cell.value === 'object' && 'formula' in cell.value) {
-              cellValue = `=${(cell.value as any).formula}`;
-              formulas.push(`${this.getColumnLetter(colIndex)}${rowIndex}: =${(cell.value as any).formula}`);
-            } else if (typeof cell.value === 'object' && 'richText' in cell.value) {
+            if (typeof cell.value === 'object' && 'richText' in cell.value) {
               // Handle rich text
               cellValue = (cell.value as any).richText.map((rt: any) => rt.text).join('');
             } else if (typeof cell.value === 'object') {
@@ -1668,6 +1766,16 @@ ${macro.code}
       });
     });
     
+    // Tear down HyperFormula once the preview is built. Holding
+    // instances around leaks memory over many previews.
+    if (hf) {
+      try {
+        hf.destroy();
+      } catch {
+        /* ignore */
+      }
+    }
+
     return {
       sheets,
       metadata: {

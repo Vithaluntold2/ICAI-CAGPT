@@ -1,14 +1,21 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react';
 import type { User } from './api';
+import { toast } from '@/hooks/use-toast';
 
 interface AuthContextType {
   user: User | null;
   setUser: (user: User | null) => void;
-  logout: () => void;
+  logout: () => Promise<void>;
   isLoading: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+const INACTIVITY_TIMEOUT_MS = 15 * 60 * 1000;
+const INACTIVITY_WARNING_MS = 60 * 1000;
+const ACTIVITY_THROTTLE_MS = 1000;
+const LAST_ACTIVITY_KEY = 'ca_last_activity';
+const ACTIVITY_EVENTS = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll', 'click'] as const;
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
@@ -68,9 +75,99 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const logout = () => {
+  const logout = async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+    } catch {
+      // Best-effort: clear client state even if the server call fails so the
+      // user isn't stuck in a half-logged-in UI.
+    }
     handleSetUser(null);
   };
+
+  // Auto-logout after INACTIVITY_TIMEOUT_MS of no user activity. Tracked via
+  // a shared localStorage timestamp so all open tabs reset and expire together.
+  const logoutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const warningTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastWriteRef = useRef(0);
+
+  useEffect(() => {
+    if (!user) return;
+
+    const clearTimers = () => {
+      if (logoutTimerRef.current) clearTimeout(logoutTimerRef.current);
+      if (warningTimerRef.current) clearTimeout(warningTimerRef.current);
+      logoutTimerRef.current = null;
+      warningTimerRef.current = null;
+    };
+
+    const performAutoLogout = async () => {
+      clearTimers();
+      await logout();
+      toast({
+        title: 'Signed out due to inactivity',
+        description: 'For your security, please sign in again to continue.',
+      });
+      window.location.href = '/auth';
+    };
+
+    const scheduleTimers = (lastActivity: number) => {
+      clearTimers();
+      const elapsed = Date.now() - lastActivity;
+      const remaining = INACTIVITY_TIMEOUT_MS - elapsed;
+      if (remaining <= 0) {
+        performAutoLogout();
+        return;
+      }
+      const warningIn = remaining - INACTIVITY_WARNING_MS;
+      if (warningIn > 0) {
+        warningTimerRef.current = setTimeout(() => {
+          toast({
+            title: 'You will be signed out in 1 minute',
+            description: 'Move your mouse or press a key to stay signed in.',
+          });
+        }, warningIn);
+      }
+      logoutTimerRef.current = setTimeout(performAutoLogout, remaining);
+    };
+
+    const recordActivity = () => {
+      const now = Date.now();
+      if (now - lastWriteRef.current < ACTIVITY_THROTTLE_MS) return;
+      lastWriteRef.current = now;
+      try {
+        localStorage.setItem(LAST_ACTIVITY_KEY, String(now));
+      } catch {
+        // localStorage may be unavailable (private mode quotas) — fall back to
+        // local timer only.
+      }
+      scheduleTimers(now);
+    };
+
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== LAST_ACTIVITY_KEY || !e.newValue) return;
+      const ts = parseInt(e.newValue, 10);
+      if (Number.isFinite(ts)) scheduleTimers(ts);
+    };
+
+    const stored = parseInt(localStorage.getItem(LAST_ACTIVITY_KEY) || '', 10);
+    const initial = Number.isFinite(stored) ? stored : Date.now();
+    if (!Number.isFinite(stored)) localStorage.setItem(LAST_ACTIVITY_KEY, String(initial));
+    scheduleTimers(initial);
+
+    for (const evt of ACTIVITY_EVENTS) {
+      window.addEventListener(evt, recordActivity, { passive: true });
+    }
+    window.addEventListener('storage', onStorage);
+
+    return () => {
+      clearTimers();
+      for (const evt of ACTIVITY_EVENTS) {
+        window.removeEventListener(evt, recordActivity);
+      }
+      window.removeEventListener('storage', onStorage);
+    };
+  }, [user]);
 
   return (
     <AuthContext.Provider value={{ user, setUser: handleSetUser, logout, isLoading }}>

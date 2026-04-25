@@ -926,8 +926,8 @@ export default function Chat() {
     setSelectedFile(null);
   };
 
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
+    await logout();
     setLocation('/');
   };
 

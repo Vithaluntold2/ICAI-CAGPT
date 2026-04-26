@@ -162,10 +162,10 @@ export function PanelBuilder({ open, onOpenChange, conversationId, onConversatio
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-full sm:max-w-4xl p-0 flex flex-col bg-background border-l border-border/70">
+      <SheetContent side="right" className="w-full sm:max-w-4xl p-0 flex flex-col bg-background border-l border-border/70 font-exo">
         <SheetHeader className="px-6 py-4 border-b border-border/70 bg-gradient-to-r from-aurora-teal/8 via-transparent to-transparent relative">
           <span aria-hidden className="absolute left-0 top-3 bottom-3 w-0.5 rounded bg-aurora-teal shadow-glow-teal" />
-          <SheetTitle>Panel Builder</SheetTitle>
+          <SheetTitle className="font-exo font-semibold tracking-tight">Panel Builder</SheetTitle>
           <SheetDescription className="text-foreground/75">
             Curate the expert agents for this roundtable. Spawn from a template or build a custom expert.
             Each agent runs independently with its own system prompt and attached knowledge.
@@ -178,7 +178,7 @@ export function PanelBuilder({ open, onOpenChange, conversationId, onConversatio
               <Sparkles className="w-6 h-6" />
             </div>
             <div className="space-y-1">
-              <p className="font-semibold text-base">No panel for this chat yet</p>
+              <p className="font-exo font-semibold text-base tracking-tight">No panel for this chat yet</p>
               <p className="text-sm text-foreground/75">
                 Create a panel to start adding expert agents and uploading reference material.
               </p>
@@ -205,7 +205,7 @@ export function PanelBuilder({ open, onOpenChange, conversationId, onConversatio
             {/* Left column: agent list + spawn templates */}
             <div className="w-80 border-r border-border/70 flex flex-col bg-muted/10">
               <div className="p-4 border-b border-border/70 space-y-2">
-                <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Roster</p>
+                <p className="font-exo text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Roster</p>
                 {panel.hydrated.agents.length === 0 && (
                   <p className="text-xs text-foreground/70">No agents yet. Spawn one below.</p>
                 )}
@@ -244,7 +244,7 @@ export function PanelBuilder({ open, onOpenChange, conversationId, onConversatio
 
                 <Separator />
                 <div className="p-3 space-y-2.5">
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Spawn from template</p>
+                  <p className="font-exo text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Spawn from template</p>
                   {templates.map((t) => (
                     <button
                       key={t.id}
@@ -364,7 +364,7 @@ function AgentEditor({
               <span className="w-9 h-9 rounded-md bg-muted/60 border border-border/60 flex items-center justify-center">
                 {renderAgentIcon(agent.name)}
               </span>
-              <h3 className="text-lg font-semibold">{agent.name}</h3>
+              <h3 className="font-exo text-lg font-semibold tracking-tight">{agent.name}</h3>
             </div>
             <p className="text-xs text-foreground/65">
               {agent.createdFromTemplate ? `Spawned from “${agent.createdFromTemplate}” template` : 'Custom agent'}
@@ -428,7 +428,7 @@ function AgentEditor({
         {/* Knowledge base section */}
         <div className="space-y-3">
           <div className="flex items-center justify-between">
-            <h4 className="text-sm font-semibold">Knowledge base</h4>
+            <h4 className="font-exo text-sm font-semibold tracking-tight">Knowledge base</h4>
             <span className="text-xs text-muted-foreground">
               {agent.kbDocIds.length} attached · {panelDocs.length} in panel
             </span>

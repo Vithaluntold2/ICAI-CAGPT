@@ -27,6 +27,7 @@ import roundtableBoardroomRoutes from "./routes/roundtableBoardroomRoutes";
 import searchRoutes from "./routes/searchRoutes";
 import guideRoutes from "./routes/guideRoutes";
 import costRoutes from "./routes/costRoutes";
+import suggestionsRoutes from "./routes/suggestionsRoutes";
 // test-mindmap routes loaded dynamically in development only
 import { 
   setupSecurityMiddleware,
@@ -245,6 +246,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Register cost / budget / telemetry routes — powers Spreadsheet Mode
   // cost-estimator UI (plan §7 step 8).
   app.use('/api/cost', costRoutes);
+
+  // Register dynamic chat suggestions — powers the empty-state chips in
+  // EmptyModeState (recent conversations + ICAI compliance calendar +
+  // curated Council circular highlights).
+  app.use('/api/suggestions', suggestionsRoutes);
   
   // Authentication routes (with rate limiting)
   app.post("/api/auth/register", authRateLimiter, async (req, res) => {

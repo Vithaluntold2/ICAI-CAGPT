@@ -1218,6 +1218,19 @@ export default function Chat() {
   const activeConversationTitle =
     conversations.find((c) => c.id === activeConversation)?.title ?? 'New conversation';
 
+  useEffect(() => {
+    if (conversationsLoading) return;
+    if (!activeConversation) return;
+
+    const stillExists = conversations.some((c) => c.id === activeConversation);
+    if (stillExists) return;
+
+    setActiveConversation(undefined);
+    setMessages([]);
+    queryClient.removeQueries({ queryKey: ['/api/conversations', activeConversation, 'messages'] });
+    queryClient.removeQueries({ queryKey: ['whiteboard', activeConversation] });
+  }, [activeConversation, conversations, conversationsLoading, queryClient]);
+
   // Map the legacy useChatView state (`'chat' | 'board'`) to the new
   // primitive's expected shape (`'chat' | 'whiteboard'`).
   const breadcrumbView: 'chat' | 'whiteboard' = view === 'board' ? 'whiteboard' : 'chat';

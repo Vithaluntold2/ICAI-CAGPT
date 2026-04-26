@@ -71,6 +71,29 @@ export function BoardroomThread({ conversationId, onConfigurePanel }: Props) {
     return m;
   }, [agents]);
 
+  // Phase 3: group child turns (parentTurnId set) under their parent so
+  // side-threads opened by `start_side_thread` render as a nested,
+  // collapsible block beneath the originating turn.
+  //
+  // NOTE: this hook MUST stay above the conditional early-returns below
+  // so the hook order remains stable across renders (React error #310).
+  const turnGroups = useMemo(() => {
+    const childMap = new Map<string, BoardroomTurnDTO[]>();
+    for (const t of board.turns) {
+      if (t.parentTurnId) {
+        const list = childMap.get(t.parentTurnId) ?? [];
+        list.push(t);
+        childMap.set(t.parentTurnId, list);
+      }
+    }
+    return board.turns
+      .filter((t) => !t.parentTurnId)
+      .map((parent) => ({
+        parent,
+        children: (childMap.get(parent.id) ?? []).slice().sort((a, b) => a.position - b.position),
+      }));
+  }, [board.turns]);
+
   // -- Empty states ---------------------------------------------------
 
   if (!conversationId) {
@@ -154,26 +177,6 @@ export function BoardroomThread({ conversationId, onConfigurePanel }: Props) {
   };
 
   const openCards = board.questionCards.filter((c) => c.status === 'open');
-
-  // Phase 3: group child turns (parentTurnId set) under their parent so
-  // side-threads opened by `start_side_thread` render as a nested,
-  // collapsible block beneath the originating turn.
-  const turnGroups = useMemo(() => {
-    const childMap = new Map<string, BoardroomTurnDTO[]>();
-    for (const t of board.turns) {
-      if (t.parentTurnId) {
-        const list = childMap.get(t.parentTurnId) ?? [];
-        list.push(t);
-        childMap.set(t.parentTurnId, list);
-      }
-    }
-    return board.turns
-      .filter((t) => !t.parentTurnId)
-      .map((parent) => ({
-        parent,
-        children: (childMap.get(parent.id) ?? []).slice().sort((a, b) => a.position - b.position),
-      }));
-  }, [board.turns]);
 
   return (
     <div className="flex h-full min-h-0 w-full">

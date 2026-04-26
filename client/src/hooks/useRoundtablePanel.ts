@@ -9,6 +9,18 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
+const ROUNDTABLE_PANEL_CHANGED = 'roundtable-panel-changed';
+
+interface RoundtablePanelChangedDetail {
+  conversationId?: string | null;
+  panelId?: string | null;
+}
+
+function broadcastRoundtablePanelChanged(detail: RoundtablePanelChangedDetail) {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent<RoundtablePanelChangedDetail>(ROUNDTABLE_PANEL_CHANGED, { detail }));
+}
+
 export type AgentModel = 'strong' | 'mini';
 
 export interface RoundtablePanelDTO {
@@ -94,6 +106,32 @@ export function useRoundtablePanel(conversationId: string | null) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const resolvePanelForConversation = useCallback(async () => {
+    if (!conversationId) {
+      setPanelId(null);
+      setHydrated(null);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const list = await jsonFetch<{ panels: RoundtablePanelDTO[] }>(
+        `${BASE}?conversationId=${encodeURIComponent(conversationId)}`,
+      );
+      const first = list.panels[0];
+      if (first) {
+        setPanelId(first.id);
+      } else {
+        setPanelId(null);
+        setHydrated(null);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
+    }
+  }, [conversationId]);
+
   const refresh = useCallback(async () => {
     if (!panelId) return;
     setLoading(true);
@@ -119,30 +157,40 @@ export function useRoundtablePanel(conversationId: string | null) {
         setHydrated(null);
         return;
       }
-      setLoading(true);
       try {
-        const list = await jsonFetch<{ panels: RoundtablePanelDTO[] }>(
-          `${BASE}?conversationId=${encodeURIComponent(conversationId)}`,
-        );
-        const first = list.panels[0];
-        if (cancelled) return;
-        if (first) {
-          setPanelId(first.id);
-        } else {
-          setPanelId(null);
-          setHydrated(null);
-        }
-      } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
-      } finally {
-        if (!cancelled) setLoading(false);
+        await resolvePanelForConversation();
+      } catch {
+        // resolvePanelForConversation already records hook error state.
       }
     }
     load();
     return () => {
       cancelled = true;
     };
-  }, [conversationId]);
+  }, [conversationId, resolvePanelForConversation]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onChanged = (event: Event) => {
+      const detail = (event as CustomEvent<RoundtablePanelChangedDetail>).detail;
+      const sameConversation = !!conversationId && detail?.conversationId === conversationId;
+      const samePanel = !!panelId && detail?.panelId === panelId;
+      if (!sameConversation && !samePanel) return;
+
+      if (sameConversation) {
+        void resolvePanelForConversation();
+        return;
+      }
+      if (samePanel) {
+        void refresh();
+      }
+    };
+
+    window.addEventListener(ROUNDTABLE_PANEL_CHANGED, onChanged as EventListener);
+    return () => {
+      window.removeEventListener(ROUNDTABLE_PANEL_CHANGED, onChanged as EventListener);
+    };
+  }, [conversationId, panelId, refresh, resolvePanelForConversation]);
 
   useEffect(() => {
     if (panelId) refresh();
@@ -158,6 +206,7 @@ export function useRoundtablePanel(conversationId: string | null) {
         body: JSON.stringify({ conversationId: targetConversationId, name: name ?? 'Untitled panel' }),
       });
       setPanelId(data.panel.id);
+      broadcastRoundtablePanelChanged({ conversationId: targetConversationId, panelId: data.panel.id });
       return data.panel;
     },
     [conversationId],
@@ -171,8 +220,9 @@ export function useRoundtablePanel(conversationId: string | null) {
         body: JSON.stringify({ name }),
       });
       await refresh();
+      broadcastRoundtablePanelChanged({ conversationId, panelId });
     },
-    [panelId, refresh],
+    [conversationId, panelId, refresh],
   );
 
   // ----- agent ops -----
@@ -184,8 +234,9 @@ export function useRoundtablePanel(conversationId: string | null) {
         { method: 'POST', body: JSON.stringify({ templateId }) },
       );
       await refresh();
+      broadcastRoundtablePanelChanged({ conversationId, panelId });
     },
-    [panelId, refresh],
+    [conversationId, panelId, refresh],
   );
 
   const createCustomAgent = useCallback(
@@ -203,8 +254,9 @@ export function useRoundtablePanel(conversationId: string | null) {
         body: JSON.stringify(input),
       });
       await refresh();
+      broadcastRoundtablePanelChanged({ conversationId, panelId });
     },
-    [panelId, refresh],
+    [conversationId, panelId, refresh],
   );
 
   const updateAgent = useCallback(
@@ -214,24 +266,27 @@ export function useRoundtablePanel(conversationId: string | null) {
         body: JSON.stringify(patch),
       });
       await refresh();
+      broadcastRoundtablePanelChanged({ conversationId, panelId });
     },
-    [refresh],
+    [conversationId, panelId, refresh],
   );
 
   const deleteAgent = useCallback(
     async (agentId: string) => {
       await jsonFetch(`${BASE}/agents/${agentId}`, { method: 'DELETE' });
       await refresh();
+      broadcastRoundtablePanelChanged({ conversationId, panelId });
     },
-    [refresh],
+    [conversationId, panelId, refresh],
   );
 
   const cloneAgent = useCallback(
     async (agentId: string) => {
       await jsonFetch(`${BASE}/agents/${agentId}/clone`, { method: 'POST' });
       await refresh();
+      broadcastRoundtablePanelChanged({ conversationId, panelId });
     },
-    [refresh],
+    [conversationId, panelId, refresh],
   );
 
   // ----- KB ops -----
@@ -243,8 +298,9 @@ export function useRoundtablePanel(conversationId: string | null) {
         body: JSON.stringify({ filename, contentText }),
       });
       await refresh();
+      broadcastRoundtablePanelChanged({ conversationId, panelId });
     },
-    [panelId, refresh],
+    [conversationId, panelId, refresh],
   );
 
   const uploadKbFile = useCallback(
@@ -262,16 +318,18 @@ export function useRoundtablePanel(conversationId: string | null) {
         throw new Error(`Upload failed: ${text || res.statusText}`);
       }
       await refresh();
+      broadcastRoundtablePanelChanged({ conversationId, panelId });
     },
-    [panelId, refresh],
+    [conversationId, panelId, refresh],
   );
 
   const deleteKbDoc = useCallback(
     async (docId: string) => {
       await jsonFetch(`${BASE}/kb/${docId}`, { method: 'DELETE' });
       await refresh();
+      broadcastRoundtablePanelChanged({ conversationId, panelId });
     },
-    [refresh],
+    [conversationId, panelId, refresh],
   );
 
   const attachDocToAgent = useCallback(
@@ -281,16 +339,18 @@ export function useRoundtablePanel(conversationId: string | null) {
         body: JSON.stringify({ docIds: [docId] }),
       });
       await refresh();
+      broadcastRoundtablePanelChanged({ conversationId, panelId });
     },
-    [refresh],
+    [conversationId, panelId, refresh],
   );
 
   const detachDocFromAgent = useCallback(
     async (agentId: string, docId: string) => {
       await jsonFetch(`${BASE}/agents/${agentId}/kb/${docId}`, { method: 'DELETE' });
       await refresh();
+      broadcastRoundtablePanelChanged({ conversationId, panelId });
     },
-    [refresh],
+    [conversationId, panelId, refresh],
   );
 
   return {

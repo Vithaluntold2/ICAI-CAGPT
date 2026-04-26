@@ -22,6 +22,8 @@ import ssoRoutes from "./routes/ssoRoutes";
 import contextRoutes from "./routes/context";
 import voiceRoutes from "./routes/voiceRoutes";
 import roundtableRoutes from "./routes/roundtableRoutes";
+import roundtablePanelRoutes from "./routes/roundtablePanelRoutes";
+import roundtableBoardroomRoutes from "./routes/roundtableBoardroomRoutes";
 import searchRoutes from "./routes/searchRoutes";
 import guideRoutes from "./routes/guideRoutes";
 import costRoutes from "./routes/costRoutes";
@@ -223,8 +225,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Register voice routes for STT/TTS with regional voices
   app.use('/api/voice', voiceRoutes);
   
-  // Register roundtable routes for AI multi-expert workflows
+  // Register roundtable routes for AI multi-expert workflows (legacy workflow)
   app.use('/api/roundtable', roundtableRoutes);
+
+  // Register roundtable panel routes — user-curated agent panels (Phase 1)
+  // Mounted on a child path so it lives alongside the legacy session API
+  // without overlapping any of its endpoints.
+  app.use('/api/roundtable/panels', roundtablePanelRoutes);
+
+  // Register roundtable boardroom routes — live runtime threads (Phase 2)
+  app.use('/api/roundtable/boardroom', roundtableBoardroomRoutes);
   
   // Register CA GPT Search routes — AI-powered search engine
   app.use('/api/search', searchRoutes);

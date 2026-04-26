@@ -120,6 +120,8 @@ import { AssistantTurn } from "@/components/chat/AssistantTurn";
 import { EmptyModeState } from "@/components/chat/EmptyModeState";
 import { ChatMessageBody } from "@/components/chat/ChatMessageBody";
 import { getMode, MODE_IDS, type ChatMode } from "@/lib/mode-registry";
+import { PanelBuilder } from "@/components/roundtable/PanelBuilder";
+import { BoardroomThread } from "@/components/roundtable/BoardroomThread";
 
 // Kickoff status shown BEFORE the agent has decided whether it's going to
 // ask a clarifying question or start producing the deliverable. We used to
@@ -303,6 +305,9 @@ export default function Chat() {
   const [themeMode, setThemeMode] = useState<'light' | 'dark' | 'system'>('system');
   const [speakControls, setSpeakControls] = useState<SpeakControls | null>(null);
   const [chatMode, setChatMode] = useState<string>('standard');
+  // Roundtable Panel Builder drawer — only used when chatMode === 'roundtable'.
+  // Kept local to avoid threading state through the shell.
+  const [panelBuilderOpen, setPanelBuilderOpen] = useState(false);
   const [cagptGPTsExpanded, setCagptGPTsExpanded] = useState(true);
   const [gptSectionHeight, setGptSectionHeight] = useState(240);
   const gptDragRef = useRef<{ startY: number; startHeight: number } | null>(null);
@@ -1307,8 +1312,43 @@ export default function Chat() {
           title={activeConversationTitle}
           view={breadcrumbView}
           onViewChange={setBreadcrumbView}
+          rightSlot={
+            chatMode === 'roundtable' ? (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 px-2 text-xs"
+                onClick={() => setPanelBuilderOpen(true)}
+                data-testid="open-panel-builder"
+              >
+                <UsersIcon className="w-3.5 h-3.5 mr-1" /> Configure panel
+              </Button>
+            ) : chatMode === 'deep-research' && messages.length > 0 ? (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 px-2 text-xs"
+                onClick={() => {
+                  setChatMode('roundtable');
+                  setPanelBuilderOpen(true);
+                }}
+                data-testid="promote-to-roundtable"
+                title="Switch to roundtable mode and start building a panel using the same conversation context."
+              >
+                <UsersIcon className="w-3.5 h-3.5 mr-1" /> Promote to Roundtable
+              </Button>
+            ) : undefined
+          }
         />
         {breadcrumbView === 'chat' ? (
+          chatMode === 'roundtable' ? (
+            <div className="flex-1 min-h-0">
+              <BoardroomThread
+                conversationId={activeConversation ?? null}
+                onConfigurePanel={() => setPanelBuilderOpen(true)}
+              />
+            </div>
+          ) : (
           <>
             <MessageColumn>
               {messages.length === 0 ? (
@@ -1440,6 +1480,7 @@ export default function Chat() {
               </div>
             </div>
           </>
+          )
         ) : (
           <div className="flex-1 min-h-0">
             {activeConversation ? (
@@ -1478,6 +1519,14 @@ export default function Chat() {
           onSignOut={handleLogout}
         />
       </AppShell>
+
+      {/* Roundtable Panel Builder — drawer that mounts only when needed.
+          Sheet renders via portal, so position in the JSX tree is stable. */}
+      <PanelBuilder
+        open={panelBuilderOpen}
+        onOpenChange={setPanelBuilderOpen}
+        conversationId={activeConversation ?? null}
+      />
 
       {/* Rename Dialog — preserved from legacy layout */}
       <Dialog open={renameDialogOpen} onOpenChange={setRenameDialogOpen}>

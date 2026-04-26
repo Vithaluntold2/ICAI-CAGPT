@@ -1824,6 +1824,232 @@ export type RoundtableSession = typeof roundtableSessions.$inferSelect;
 export type InsertRoundtableSession = z.infer<typeof insertRoundtableSessionSchema>;
 
 // ============================================================================
+// ROUNDTABLE PANELS - User-curated agent panels (custom-GPT-style)
+// ============================================================================
+// A "panel" is a user-built roster of expert agents scoped to a chat
+// conversation, mirroring how ChatGPT lets you build custom GPTs. The
+// classic 6-bot roster (Tax/Audit/IFRS/Forensic/Compliance/Moderator) is
+// no longer canonical — those become starter templates the user spawns
+// from. Existing roundtable_sessions table is left untouched; panels link
+// in via panelId on a future runtime turn table (Phase 2).
+
+export const roundtablePanels = pgTable("roundtable_panels", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  // Conversation this panel belongs to (nullable so a saved template can
+  // exist without being attached to a session yet).
+  conversationId: varchar("conversation_id"),
+  name: varchar("name", { length: 200 }).notNull().default("Untitled panel"),
+  description: text("description"),
+  // When true, this row is a reusable template not tied to a live session.
+  isTemplate: boolean("is_template").notNull().default(false),
+  // Free-form metadata for future use (UI prefs, default model, etc.)
+  metadata: jsonb("metadata").default({}),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  archivedAt: timestamp("archived_at"),
+}, (table) => ({
+  userIdIdx: index("roundtable_panels_user_id_idx").on(table.userId),
+  conversationIdx: index("roundtable_panels_conversation_idx").on(table.conversationId),
+  templateIdx: index("roundtable_panels_template_idx").on(table.userId, table.isTemplate),
+}));
+
+// Each agent in a panel is fully independent: own system prompt, own KB
+// attachments, own base-knowledge toggle. See repo memory spec.
+export const roundtablePanelAgents = pgTable("roundtable_panel_agents", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  panelId: varchar("panel_id").notNull().references(() => roundtablePanels.id, { onDelete: "cascade" }),
+  name: varchar("name", { length: 120 }).notNull(),
+  avatar: varchar("avatar", { length: 200 }),       // emoji or asset key
+  color: varchar("color", { length: 32 }),          // tailwind token / hex
+  systemPrompt: text("system_prompt").notNull(),
+  // When false, the agent is forbidden from drawing on training data and
+  // must answer only from attached KB (or refuse with "No source in panel KB").
+  useBaseKnowledge: boolean("use_base_knowledge").notNull().default(true),
+  // Preferred model strength: 'strong' = default flagship, 'mini' = cheap.
+  model: varchar("model", { length: 32 }).notNull().default("strong"),
+  // Optional tool allowlist (defaults applied at runtime when null).
+  toolAllowlist: jsonb("tool_allowlist").default([]),
+  // If spawned from a starter template, record which one for telemetry.
+  createdFromTemplate: varchar("created_from_template", { length: 60 }),
+  // Display order inside the panel.
+  position: integer("position").notNull().default(0),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  panelIdx: index("roundtable_panel_agents_panel_idx").on(table.panelId),
+  panelPositionIdx: index("roundtable_panel_agents_panel_position_idx").on(table.panelId, table.position),
+}));
+
+// Documents uploaded to a panel's session knowledge base. One doc may be
+// attached to many agents via roundtable_panel_agent_kb_docs.
+export const roundtableKbDocs = pgTable("roundtable_kb_docs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  panelId: varchar("panel_id").notNull().references(() => roundtablePanels.id, { onDelete: "cascade" }),
+  filename: varchar("filename", { length: 500 }).notNull(),
+  mimeType: varchar("mime_type", { length: 200 }),
+  sizeBytes: integer("size_bytes").notNull().default(0),
+  // Extracted plain text. Kept inline because session KBs are small and
+  // we want zero blob-store dependency for v1.
+  contentText: text("content_text").notNull().default(""),
+  // 'pending' | 'ready' | 'failed' — chunking + embedding state.
+  ingestStatus: varchar("ingest_status", { length: 20 }).notNull().default("pending"),
+  ingestError: text("ingest_error"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  panelIdx: index("roundtable_kb_docs_panel_idx").on(table.panelId),
+  statusIdx: index("roundtable_kb_docs_status_idx").on(table.ingestStatus),
+}));
+
+// Many-to-many: which agents can retrieve which docs.
+export const roundtablePanelAgentKbDocs = pgTable("roundtable_panel_agent_kb_docs", {
+  agentId: varchar("agent_id").notNull().references(() => roundtablePanelAgents.id, { onDelete: "cascade" }),
+  docId: varchar("doc_id").notNull().references(() => roundtableKbDocs.id, { onDelete: "cascade" }),
+  attachedAt: timestamp("attached_at").notNull().defaultNow(),
+}, (table) => ({
+  pk: uniqueIndex("roundtable_panel_agent_kb_docs_pk").on(table.agentId, table.docId),
+  docIdx: index("roundtable_panel_agent_kb_docs_doc_idx").on(table.docId),
+}));
+
+// Chunked text + embedding for retrieval. Reuses the same TEXT-fallback
+// embedding storage as conversation memory (Railway has no pgvector).
+export const roundtableKbChunks = pgTable("roundtable_kb_chunks", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  docId: varchar("doc_id").notNull().references(() => roundtableKbDocs.id, { onDelete: "cascade" }),
+  panelId: varchar("panel_id").notNull().references(() => roundtablePanels.id, { onDelete: "cascade" }),
+  chunkIndex: integer("chunk_index").notNull(),
+  text: text("text").notNull(),
+  // JSON-serialized number[] (matches embeddingService output). Nullable
+  // so chunks can exist before embedding succeeds.
+  embedding: text("embedding"),
+  tokenCount: integer("token_count").notNull().default(0),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  docIdx: index("roundtable_kb_chunks_doc_idx").on(table.docId),
+  panelIdx: index("roundtable_kb_chunks_panel_idx").on(table.panelId),
+  docChunkIdx: uniqueIndex("roundtable_kb_chunks_doc_chunk_idx").on(table.docId, table.chunkIndex),
+}));
+
+// Insert schemas
+export const insertRoundtablePanelSchema = createInsertSchema(roundtablePanels).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  archivedAt: true,
+});
+export const insertRoundtablePanelAgentSchema = createInsertSchema(roundtablePanelAgents).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export const insertRoundtableKbDocSchema = createInsertSchema(roundtableKbDocs).omit({
+  id: true,
+  createdAt: true,
+});
+export const insertRoundtableKbChunkSchema = createInsertSchema(roundtableKbChunks).omit({
+  id: true,
+  createdAt: true,
+});
+
+// Selection types
+export type RoundtablePanel = typeof roundtablePanels.$inferSelect;
+export type InsertRoundtablePanel = z.infer<typeof insertRoundtablePanelSchema>;
+export type RoundtablePanelAgent = typeof roundtablePanelAgents.$inferSelect;
+export type InsertRoundtablePanelAgent = z.infer<typeof insertRoundtablePanelAgentSchema>;
+export type RoundtableKbDoc = typeof roundtableKbDocs.$inferSelect;
+export type InsertRoundtableKbDoc = z.infer<typeof insertRoundtableKbDocSchema>;
+export type RoundtablePanelAgentKbDoc = typeof roundtablePanelAgentKbDocs.$inferSelect;
+export type RoundtableKbChunk = typeof roundtableKbChunks.$inferSelect;
+export type InsertRoundtableKbChunk = z.infer<typeof insertRoundtableKbChunkSchema>;
+
+// ============================================================================
+// ROUNDTABLE BOARDROOM (Phase 2): runtime threads, turns, question cards.
+// See repo memory spec /memories/repo/icai-cagpt-roundtable-spec.md (Layer 4).
+// ============================================================================
+
+export const roundtableThreads = pgTable("roundtable_threads", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  panelId: varchar("panel_id").notNull().references(() => roundtablePanels.id, { onDelete: "cascade" }),
+  conversationId: varchar("conversation_id"),
+  title: varchar("title", { length: 300 }).notNull().default("Boardroom session"),
+  // Phases are advisory, not gates: opening | independent-views |
+  // cross-examination | user-qa | synthesis | resolution
+  phase: varchar("phase", { length: 40 }).notNull().default("opening"),
+  currentTurnId: varchar("current_turn_id"),
+  metadata: jsonb("metadata").default({}),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  archivedAt: timestamp("archived_at"),
+}, (table) => ({
+  panelIdx: index("roundtable_threads_panel_idx").on(table.panelId),
+  conversationIdx: index("roundtable_threads_conversation_idx").on(table.conversationId),
+}));
+
+export const roundtableTurns = pgTable("roundtable_turns", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  threadId: varchar("thread_id").notNull().references(() => roundtableThreads.id, { onDelete: "cascade" }),
+  panelId: varchar("panel_id").notNull().references(() => roundtablePanels.id, { onDelete: "cascade" }),
+  // 'agent' | 'user' | 'system' | 'moderator'
+  speakerKind: varchar("speaker_kind", { length: 20 }).notNull(),
+  agentId: varchar("agent_id").references(() => roundtablePanelAgents.id, { onDelete: "set null" }),
+  parentTurnId: varchar("parent_turn_id"),
+  content: text("content").notNull().default(""),
+  // 'queued' | 'streaming' | 'completed' | 'cancelled' | 'failed'
+  status: varchar("status", { length: 20 }).notNull().default("queued"),
+  cancelReason: varchar("cancel_reason", { length: 120 }),
+  citations: jsonb("citations").default([]),
+  tokensInput: integer("tokens_input").notNull().default(0),
+  tokensOutput: integer("tokens_output").notNull().default(0),
+  // Cost stored as 1/100 cent for integer math precision.
+  costMicros: integer("cost_micros").notNull().default(0),
+  position: integer("position").notNull().default(0),
+  startedAt: timestamp("started_at").notNull().defaultNow(),
+  completedAt: timestamp("completed_at"),
+}, (table) => ({
+  threadIdx: index("roundtable_turns_thread_idx").on(table.threadId),
+  threadPositionIdx: index("roundtable_turns_thread_position_idx").on(table.threadId, table.position),
+  parentIdx: index("roundtable_turns_parent_idx").on(table.parentTurnId),
+  agentIdx: index("roundtable_turns_agent_idx").on(table.agentId),
+}));
+
+export const roundtableQuestionCards = pgTable("roundtable_question_cards", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  threadId: varchar("thread_id").notNull().references(() => roundtableThreads.id, { onDelete: "cascade" }),
+  parentTurnId: varchar("parent_turn_id").references(() => roundtableTurns.id, { onDelete: "set null" }),
+  fromAgentId: varchar("from_agent_id").references(() => roundtablePanelAgents.id, { onDelete: "set null" }),
+  toAgentId: varchar("to_agent_id").references(() => roundtablePanelAgents.id, { onDelete: "set null" }),
+  toUser: boolean("to_user").notNull().default(false),
+  text: text("text").notNull(),
+  // 'open' | 'answered' | 'redirected' | 'skipped'
+  status: varchar("status", { length: 20 }).notNull().default("open"),
+  answer: text("answer"),
+  answeredByAgentId: varchar("answered_by_agent_id").references(() => roundtablePanelAgents.id, { onDelete: "set null" }),
+  answeredByUser: boolean("answered_by_user").notNull().default(false),
+  answeredAt: timestamp("answered_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  threadIdx: index("roundtable_question_cards_thread_idx").on(table.threadId),
+  statusIdx: index("roundtable_question_cards_status_idx").on(table.status),
+}));
+
+export const insertRoundtableThreadSchema = createInsertSchema(roundtableThreads).omit({
+  id: true, createdAt: true, updatedAt: true, archivedAt: true,
+});
+export const insertRoundtableTurnSchema = createInsertSchema(roundtableTurns).omit({
+  id: true, startedAt: true, completedAt: true,
+});
+export const insertRoundtableQuestionCardSchema = createInsertSchema(roundtableQuestionCards).omit({
+  id: true, createdAt: true, answeredAt: true,
+});
+
+export type RoundtableThread = typeof roundtableThreads.$inferSelect;
+export type InsertRoundtableThread = z.infer<typeof insertRoundtableThreadSchema>;
+export type RoundtableTurn = typeof roundtableTurns.$inferSelect;
+export type InsertRoundtableTurn = z.infer<typeof insertRoundtableTurnSchema>;
+export type RoundtableQuestionCard = typeof roundtableQuestionCards.$inferSelect;
+export type InsertRoundtableQuestionCard = z.infer<typeof insertRoundtableQuestionCardSchema>;
+
+// ============================================================================
 // SEARCH HISTORY - AI-powered search engine for accounting/tax/finance
 // ============================================================================
 

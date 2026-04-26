@@ -1,0 +1,409 @@
+/**
+ * useBoardroomThread — client hook for the live boardroom runtime.
+ *
+ * Holds the thread state, the ordered turn list (with in-flight stream
+ * accumulation), the open question cards, and a websocket-equivalent
+ * EventSource subscription for live updates.
+ */
+
+import { useCallback, useEffect, useRef, useState } from 'react';
+
+const BASE = '/api/roundtable/boardroom';
+
+export interface BoardroomThreadDTO {
+  id: string;
+  panelId: string;
+  conversationId: string | null;
+  title: string;
+  phase: string;
+  currentTurnId: string | null;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+  archivedAt: string | null;
+}
+
+export interface BoardroomTurnDTO {
+  id: string;
+  threadId: string;
+  panelId: string;
+  speakerKind: 'agent' | 'user' | 'system' | 'moderator';
+  agentId: string | null;
+  parentTurnId: string | null;
+  content: string;
+  status: 'queued' | 'streaming' | 'completed' | 'cancelled' | 'failed';
+  cancelReason: string | null;
+  citations: Array<{ docId: string; chunkIndex: number }>;
+  position: number;
+  startedAt: string;
+  completedAt: string | null;
+}
+
+export interface BoardroomQuestionCardDTO {
+  id: string;
+  threadId: string;
+  parentTurnId: string | null;
+  fromAgentId: string | null;
+  toAgentId: string | null;
+  toUser: boolean;
+  text: string;
+  status: 'open' | 'answered' | 'redirected' | 'skipped';
+  answer: string | null;
+  answeredByAgentId: string | null;
+  answeredByUser: boolean;
+  answeredAt: string | null;
+  createdAt: string;
+}
+
+export type ParticipantState = 'speaking' | 'thinking' | 'listening';
+
+async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, {
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
+    ...init,
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`HTTP ${res.status}: ${text || res.statusText}`);
+  }
+  return res.json() as Promise<T>;
+}
+
+interface ThreadState {
+  thread: BoardroomThreadDTO | null;
+  turns: BoardroomTurnDTO[];
+  questionCards: BoardroomQuestionCardDTO[];
+  participantStates: Record<string, ParticipantState>;
+}
+
+const EMPTY: ThreadState = {
+  thread: null,
+  turns: [],
+  questionCards: [],
+  participantStates: {},
+};
+
+export function useBoardroomThread(panelId: string | null) {
+  const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
+  const [state, setState] = useState<ThreadState>(EMPTY);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const eventSourceRef = useRef<EventSource | null>(null);
+
+  // Resolve or list threads for this panel.
+  const refreshThreadList = useCallback(async (): Promise<BoardroomThreadDTO[]> => {
+    if (!panelId) return [];
+    const data = await jsonFetch<{ threads: BoardroomThreadDTO[] }>(
+      `${BASE}/threads?panelId=${encodeURIComponent(panelId)}`,
+    );
+    return data.threads;
+  }, [panelId]);
+
+  // Load full thread state.
+  const loadThread = useCallback(async (threadId: string) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await jsonFetch<{
+        thread: BoardroomThreadDTO;
+        turns: BoardroomTurnDTO[];
+        questionCards: BoardroomQuestionCardDTO[];
+      }>(`${BASE}/threads/${threadId}`);
+      setState((prev) => ({
+        thread: data.thread,
+        turns: data.turns,
+        questionCards: data.questionCards,
+        participantStates: prev.participantStates,
+      }));
+      setActiveThreadId(threadId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // On panel change, pick the most recent thread (or none).
+  useEffect(() => {
+    let cancelled = false;
+    if (!panelId) {
+      setActiveThreadId(null);
+      setState(EMPTY);
+      return;
+    }
+    refreshThreadList().then((threads) => {
+      if (cancelled) return;
+      if (threads.length > 0) {
+        loadThread(threads[0].id);
+      } else {
+        setActiveThreadId(null);
+        setState(EMPTY);
+      }
+    }).catch((err) => {
+      if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+    });
+    return () => { cancelled = true; };
+  }, [panelId, refreshThreadList, loadThread]);
+
+  // SSE subscription for the active thread.
+  useEffect(() => {
+    if (!activeThreadId) return;
+    const es = new EventSource(`${BASE}/threads/${activeThreadId}/stream`, {
+      withCredentials: true,
+    } as EventSourceInit);
+    eventSourceRef.current = es;
+
+    const onTurnStarted = (e: MessageEvent) => {
+      const d = JSON.parse(e.data);
+      setState((prev) => {
+        // Insert placeholder streaming turn if not yet present.
+        if (prev.turns.find((t) => t.id === d.turnId)) return prev;
+        const placeholder: BoardroomTurnDTO = {
+          id: d.turnId,
+          threadId: activeThreadId,
+          panelId: prev.thread?.panelId ?? '',
+          speakerKind: 'agent',
+          agentId: d.agentId,
+          parentTurnId: null,
+          content: '',
+          status: 'streaming',
+          cancelReason: null,
+          citations: [],
+          position: d.position ?? prev.turns.length,
+          startedAt: new Date().toISOString(),
+          completedAt: null,
+        };
+        return { ...prev, turns: [...prev.turns, placeholder] };
+      });
+    };
+    const onTurnToken = (e: MessageEvent) => {
+      const d = JSON.parse(e.data);
+      setState((prev) => ({
+        ...prev,
+        turns: prev.turns.map((t) =>
+          t.id === d.turnId ? { ...t, content: t.content + d.token } : t,
+        ),
+      }));
+    };
+    const onTurnCompleted = (e: MessageEvent) => {
+      const d = JSON.parse(e.data);
+      setState((prev) => {
+        const exists = prev.turns.find((t) => t.id === d.turnId);
+        const next: BoardroomTurnDTO = exists
+          ? { ...exists, content: d.content ?? exists.content, status: 'completed', citations: d.citations ?? [], completedAt: new Date().toISOString() }
+          : {
+              id: d.turnId,
+              threadId: activeThreadId,
+              panelId: prev.thread?.panelId ?? '',
+              speakerKind: d.speakerKind ?? 'agent',
+              agentId: d.agentId ?? null,
+              parentTurnId: null,
+              content: d.content ?? '',
+              status: 'completed',
+              cancelReason: null,
+              citations: d.citations ?? [],
+              position: d.position ?? prev.turns.length,
+              startedAt: new Date().toISOString(),
+              completedAt: new Date().toISOString(),
+            };
+        const turns = exists
+          ? prev.turns.map((t) => (t.id === d.turnId ? next : t))
+          : [...prev.turns, next];
+        return { ...prev, turns };
+      });
+    };
+    const onTurnCancelled = (e: MessageEvent) => {
+      const d = JSON.parse(e.data);
+      setState((prev) => ({
+        ...prev,
+        turns: prev.turns.map((t) =>
+          t.id === d.turnId ? { ...t, status: 'cancelled', cancelReason: d.reason } : t,
+        ),
+      }));
+    };
+    const onTurnFailed = (e: MessageEvent) => {
+      const d = JSON.parse(e.data);
+      setState((prev) => ({
+        ...prev,
+        turns: prev.turns.map((t) =>
+          t.id === d.turnId ? { ...t, status: 'failed', cancelReason: d.error } : t,
+        ),
+      }));
+    };
+    const onParticipant = (e: MessageEvent) => {
+      const d = JSON.parse(e.data);
+      setState((prev) => ({
+        ...prev,
+        participantStates: { ...prev.participantStates, [d.agentId]: d.state },
+      }));
+    };
+    const onPhase = (e: MessageEvent) => {
+      const d = JSON.parse(e.data);
+      setState((prev) => prev.thread ? { ...prev, thread: { ...prev.thread, phase: d.phase } } : prev);
+    };
+    const onQuestion = (e: MessageEvent) => {
+      const d = JSON.parse(e.data);
+      setState((prev) => {
+        if (prev.questionCards.find((c) => c.id === d.qid)) return prev;
+        const card: BoardroomQuestionCardDTO = {
+          id: d.qid,
+          threadId: activeThreadId,
+          parentTurnId: d.parentTurnId ?? null,
+          fromAgentId: d.fromAgentId,
+          toAgentId: d.toAgentId,
+          toUser: d.toUser ?? false,
+          text: d.text,
+          status: 'open',
+          answer: null,
+          answeredByAgentId: null,
+          answeredByUser: false,
+          answeredAt: null,
+          createdAt: new Date().toISOString(),
+        };
+        return { ...prev, questionCards: [...prev.questionCards, card] };
+      });
+    };
+    const onQuestionAnswered = (e: MessageEvent) => {
+      const d = JSON.parse(e.data);
+      setState((prev) => ({
+        ...prev,
+        questionCards: prev.questionCards.map((c) =>
+          c.id === d.qid ? { ...c, status: 'answered', answer: d.answer, answeredByUser: !!d.byUser } : c,
+        ),
+      }));
+    };
+    const onQuestionRedirected = (e: MessageEvent) => {
+      const d = JSON.parse(e.data);
+      setState((prev) => ({
+        ...prev,
+        questionCards: prev.questionCards.map((c) =>
+          c.id === d.qid ? { ...c, toAgentId: d.newToAgentId, toUser: false, status: 'open' } : c,
+        ),
+      }));
+    };
+    const onQuestionSkipped = (e: MessageEvent) => {
+      const d = JSON.parse(e.data);
+      setState((prev) => ({
+        ...prev,
+        questionCards: prev.questionCards.map((c) =>
+          c.id === d.qid ? { ...c, status: 'skipped' } : c,
+        ),
+      }));
+    };
+
+    es.addEventListener('turn-started', onTurnStarted);
+    es.addEventListener('turn-token', onTurnToken);
+    es.addEventListener('turn-completed', onTurnCompleted);
+    es.addEventListener('turn-cancelled', onTurnCancelled);
+    es.addEventListener('turn-failed', onTurnFailed);
+    es.addEventListener('participant-state', onParticipant);
+    es.addEventListener('phase-changed', onPhase);
+    es.addEventListener('question-card', onQuestion);
+    es.addEventListener('question-answered', onQuestionAnswered);
+    es.addEventListener('question-redirected', onQuestionRedirected);
+    es.addEventListener('question-skipped', onQuestionSkipped);
+
+    return () => {
+      es.close();
+      eventSourceRef.current = null;
+    };
+  }, [activeThreadId]);
+
+  // ----- mutations -----
+  const createThread = useCallback(
+    async (input: { title?: string; conversationId?: string | null }) => {
+      if (!panelId) throw new Error('No panel');
+      const data = await jsonFetch<{ thread: BoardroomThreadDTO }>(`${BASE}/threads`, {
+        method: 'POST',
+        body: JSON.stringify({ panelId, ...input }),
+      });
+      await loadThread(data.thread.id);
+      return data.thread;
+    },
+    [panelId, loadThread],
+  );
+
+  const interject = useCallback(async (text: string) => {
+    if (!activeThreadId) throw new Error('No active thread');
+    await jsonFetch(`${BASE}/threads/${activeThreadId}/interject`, {
+      method: 'POST',
+      body: JSON.stringify({ text }),
+    });
+  }, [activeThreadId]);
+
+  const tagAgent = useCallback(async (agentId: string, text: string) => {
+    if (!activeThreadId) throw new Error('No active thread');
+    await jsonFetch(`${BASE}/threads/${activeThreadId}/tag`, {
+      method: 'POST',
+      body: JSON.stringify({ agentId, text }),
+    });
+  }, [activeThreadId]);
+
+  const cancelTurn = useCallback(async (turnId: string) => {
+    if (!activeThreadId) throw new Error('No active thread');
+    await jsonFetch(`${BASE}/threads/${activeThreadId}/cancel-turn`, {
+      method: 'POST',
+      body: JSON.stringify({ turnId }),
+    });
+  }, [activeThreadId]);
+
+  const setPhase = useCallback(async (phase: string) => {
+    if (!activeThreadId) throw new Error('No active thread');
+    await jsonFetch(`${BASE}/threads/${activeThreadId}/phase`, {
+      method: 'POST',
+      body: JSON.stringify({ phase }),
+    });
+  }, [activeThreadId]);
+
+  const answerQuestion = useCallback(async (qid: string, answer: string) => {
+    if (!activeThreadId) throw new Error('No active thread');
+    await jsonFetch(`${BASE}/threads/${activeThreadId}/answer-question`, {
+      method: 'POST',
+      body: JSON.stringify({ qid, answer }),
+    });
+  }, [activeThreadId]);
+
+  const redirectQuestion = useCallback(async (qid: string, toAgentId: string) => {
+    if (!activeThreadId) throw new Error('No active thread');
+    await jsonFetch(`${BASE}/threads/${activeThreadId}/redirect-question`, {
+      method: 'POST',
+      body: JSON.stringify({ qid, toAgentId }),
+    });
+  }, [activeThreadId]);
+
+  const skipQuestion = useCallback(async (qid: string) => {
+    if (!activeThreadId) throw new Error('No active thread');
+    await jsonFetch(`${BASE}/threads/${activeThreadId}/skip-question`, {
+      method: 'POST',
+      body: JSON.stringify({ qid }),
+    });
+  }, [activeThreadId]);
+
+  const kickoff = useCallback(async () => {
+    if (!activeThreadId) throw new Error('No active thread');
+    await jsonFetch(`${BASE}/threads/${activeThreadId}/kickoff`, { method: 'POST' });
+  }, [activeThreadId]);
+
+  return {
+    activeThreadId,
+    setActiveThreadId,
+    thread: state.thread,
+    turns: state.turns,
+    questionCards: state.questionCards,
+    participantStates: state.participantStates,
+    loading,
+    error,
+    createThread,
+    interject,
+    tagAgent,
+    cancelTurn,
+    setPhase,
+    answerQuestion,
+    redirectQuestion,
+    skipQuestion,
+    kickoff,
+    refreshThreadList,
+    loadThread,
+  };
+}

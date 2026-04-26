@@ -106,6 +106,30 @@ export function useRoundtablePanel(conversationId: string | null) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const pickBestPanel = useCallback(
+    (panels: RoundtablePanelDTO[]): RoundtablePanelDTO | undefined => {
+      if (panels.length === 0) return undefined;
+
+      // If we already have a selected panel and it still exists for this
+      // conversation, keep it to avoid UI jumping across sibling panels.
+      if (panelId) {
+        const existing = panels.find((p) => p.id === panelId);
+        if (existing) return existing;
+      }
+
+      // Multiple panels can exist for one conversation in older data. Pick
+      // the freshest row so boardroom and builder resolve the same target.
+      return panels
+        .slice()
+        .sort((a, b) => {
+          const at = new Date(a.updatedAt).getTime();
+          const bt = new Date(b.updatedAt).getTime();
+          return bt - at;
+        })[0];
+    },
+    [panelId],
+  );
+
   const resolvePanelForConversation = useCallback(async () => {
     if (!conversationId) {
       setPanelId(null);
@@ -118,9 +142,9 @@ export function useRoundtablePanel(conversationId: string | null) {
       const list = await jsonFetch<{ panels: RoundtablePanelDTO[] }>(
         `${BASE}?conversationId=${encodeURIComponent(conversationId)}`,
       );
-      const first = list.panels[0];
-      if (first) {
-        setPanelId(first.id);
+      const resolved = pickBestPanel(list.panels);
+      if (resolved) {
+        setPanelId(resolved.id);
       } else {
         setPanelId(null);
         setHydrated(null);
@@ -130,7 +154,7 @@ export function useRoundtablePanel(conversationId: string | null) {
     } finally {
       setLoading(false);
     }
-  }, [conversationId]);
+  }, [conversationId, pickBestPanel]);
 
   const refresh = useCallback(async () => {
     if (!panelId) return;

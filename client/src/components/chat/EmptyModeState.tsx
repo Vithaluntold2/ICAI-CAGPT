@@ -24,6 +24,35 @@ interface SuggestionsResponse {
   generatedAt: string;
 }
 
+const VALID_SOURCES: SuggestionSource[] = ['recent', 'calendar', 'circular'];
+
+function normalizeSuggestions(input: unknown): DynamicSuggestion[] {
+  if (!Array.isArray(input)) return [];
+
+  const out: DynamicSuggestion[] = [];
+  for (const raw of input) {
+    if (!raw || typeof raw !== 'object') continue;
+    const candidate = raw as Partial<DynamicSuggestion>;
+    const source = VALID_SOURCES.includes(candidate.source as SuggestionSource)
+      ? (candidate.source as SuggestionSource)
+      : 'circular';
+
+    if (typeof candidate.id !== 'string') continue;
+    if (typeof candidate.prompt !== 'string' || !candidate.prompt.trim()) continue;
+    if (typeof candidate.label !== 'string' || !candidate.label.trim()) continue;
+
+    out.push({
+      id: candidate.id,
+      prompt: candidate.prompt,
+      label: candidate.label,
+      source,
+      hint: typeof candidate.hint === 'string' ? candidate.hint : undefined,
+    });
+  }
+
+  return out;
+}
+
 const SOURCE_META: Record<SuggestionSource, {
   icon: LucideIcon;
   badge: string;
@@ -68,7 +97,7 @@ export function EmptyModeState({ mode, onPickStarter }: EmptyModeStateProps) {
       .then(async (r) => (r.ok ? ((await r.json()) as SuggestionsResponse) : null))
       .then((body) => {
         if (cancelled) return;
-        setDynamic(body?.suggestions ?? []);
+        setDynamic(normalizeSuggestions(body?.suggestions));
       })
       .catch(() => {
         if (!cancelled) setDynamic([]);
@@ -133,7 +162,7 @@ function SuggestionChip({
   suggestion: DynamicSuggestion;
   onPick: (prompt: string) => void;
 }) {
-  const meta = SOURCE_META[suggestion.source];
+  const meta = SOURCE_META[suggestion.source] ?? SOURCE_META.circular;
   const SourceIcon = meta.icon;
 
   return (

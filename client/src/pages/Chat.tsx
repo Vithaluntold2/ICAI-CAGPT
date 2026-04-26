@@ -280,6 +280,7 @@ export default function Chat() {
   // submits, via ChatInputBox's onSend callback.
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedProfileFilter, setSelectedProfileFilter] = useState<string>("all");
+  const [pendingRoundtableConversationId, setPendingRoundtableConversationId] = useState<string | null>(null);
   const [renameDialogOpen, setRenameDialogOpen] = useState(false);
   const [renameConvId, setRenameConvId] = useState<string>("");
   const [renameValue, setRenameValue] = useState("");
@@ -1219,8 +1220,17 @@ export default function Chat() {
     conversations.find((c) => c.id === activeConversation)?.title ?? 'New conversation';
 
   useEffect(() => {
+    if (!pendingRoundtableConversationId) return;
+    const exists = conversations.some((c) => c.id === pendingRoundtableConversationId);
+    if (exists) {
+      setPendingRoundtableConversationId(null);
+    }
+  }, [conversations, pendingRoundtableConversationId]);
+
+  useEffect(() => {
     if (conversationsLoading) return;
     if (!activeConversation) return;
+    if (pendingRoundtableConversationId === activeConversation) return;
 
     const stillExists = conversations.some((c) => c.id === activeConversation);
     if (stillExists) return;
@@ -1229,7 +1239,7 @@ export default function Chat() {
     setMessages([]);
     queryClient.removeQueries({ queryKey: ['/api/conversations', activeConversation, 'messages'] });
     queryClient.removeQueries({ queryKey: ['whiteboard', activeConversation] });
-  }, [activeConversation, conversations, conversationsLoading, queryClient]);
+  }, [activeConversation, conversations, conversationsLoading, pendingRoundtableConversationId, queryClient]);
 
   // Map the legacy useChatView state (`'chat' | 'board'`) to the new
   // primitive's expected shape (`'chat' | 'whiteboard'`).
@@ -1539,7 +1549,11 @@ export default function Chat() {
         open={panelBuilderOpen}
         onOpenChange={setPanelBuilderOpen}
         conversationId={activeConversation ?? null}
-        onConversationCreated={(id) => setActiveConversation(id)}
+        onConversationCreated={(id) => {
+          setPendingRoundtableConversationId(id);
+          setActiveConversation(id);
+          queryClient.invalidateQueries({ queryKey: ['/api/conversations'] });
+        }}
       />
 
       {/* Rename Dialog — preserved from legacy layout */}

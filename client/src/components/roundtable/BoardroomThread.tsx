@@ -74,7 +74,17 @@ export function BoardroomThread({ conversationId, onConfigurePanel }: Props) {
   // -- Empty states ---------------------------------------------------
 
   if (!conversationId) {
-    return <EmptyShell title="Start a conversation to launch a boardroom." />;
+    return (
+      <EmptyShell
+        title="Start a conversation to launch a boardroom."
+        description="Open panel builder to create a roundtable conversation and attach agents."
+        action={
+          <Button onClick={onConfigurePanel} data-testid="boardroom-empty-open-builder">
+            Configure panel
+          </Button>
+        }
+      />
+    );
   }
   if (panel.loading && !panel.hydrated) {
     return <EmptyShell title="Loading panel…" spinner />;

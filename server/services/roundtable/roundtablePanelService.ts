@@ -37,6 +37,25 @@ export async function createPanel(
   userId: string,
   data: Pick<InsertRoundtablePanel, 'name' | 'description' | 'conversationId' | 'isTemplate' | 'metadata'>,
 ): Promise<RoundtablePanel> {
+  // Idempotency guard: one live (non-template) panel per conversation/user.
+  // If one already exists, return the latest instead of creating a sibling
+  // row that can desync Builder vs Boardroom resolution.
+  if (data.conversationId && !(data.isTemplate ?? false)) {
+    const existing = await db
+      .select()
+      .from(roundtablePanels)
+      .where(and(
+        eq(roundtablePanels.userId, userId),
+        eq(roundtablePanels.conversationId, data.conversationId),
+        eq(roundtablePanels.isTemplate, false),
+      ))
+      .orderBy(desc(roundtablePanels.updatedAt))
+      .limit(1);
+    if (existing[0]) {
+      return existing[0];
+    }
+  }
+
   const [panel] = await db
     .insert(roundtablePanels)
     .values({
@@ -49,6 +68,13 @@ export async function createPanel(
     })
     .returning();
   return panel;
+}
+
+async function touchPanel(panelId: string): Promise<void> {
+  await db
+    .update(roundtablePanels)
+    .set({ updatedAt: new Date() })
+    .where(eq(roundtablePanels.id, panelId));
 }
 
 export async function getPanel(userId: string, panelId: string): Promise<RoundtablePanel | null> {
@@ -146,6 +172,7 @@ export async function createAgent(
       position,
     })
     .returning();
+  await touchPanel(panelId);
   return agent;
 }
 
@@ -186,6 +213,7 @@ export async function updateAgent(
     .set({ ...patch, updatedAt: new Date() })
     .where(eq(roundtablePanelAgents.id, agentId))
     .returning();
+  await touchPanel(owned.agent.panelId);
   return updated ?? null;
 }
 
@@ -193,6 +221,7 @@ export async function deleteAgent(userId: string, agentId: string): Promise<bool
   const owned = await ownedAgent(userId, agentId);
   if (!owned) return false;
   await db.delete(roundtablePanelAgents).where(eq(roundtablePanelAgents.id, agentId));
+  await touchPanel(owned.agent.panelId);
   return true;
 }
 
@@ -200,7 +229,7 @@ export async function cloneAgent(userId: string, agentId: string): Promise<Round
   const owned = await ownedAgent(userId, agentId);
   if (!owned) return null;
   const src = owned.agent;
-  return createAgent(userId, src.panelId, {
+  const cloned = await createAgent(userId, src.panelId, {
     name: `${src.name} (copy)`,
     avatar: src.avatar ?? undefined,
     color: src.color ?? undefined,
@@ -210,6 +239,8 @@ export async function cloneAgent(userId: string, agentId: string): Promise<Round
     toolAllowlist: (src.toolAllowlist as string[]) ?? [],
     createdFromTemplate: src.createdFromTemplate ?? undefined,
   });
+  await touchPanel(src.panelId);
+  return cloned;
 }
 
 // ----------------------------------------------------------------------
@@ -234,6 +265,7 @@ export async function createKbDoc(
       ingestStatus: 'pending',
     })
     .returning();
+  await touchPanel(panelId);
   return doc;
 }
 
@@ -264,6 +296,7 @@ export async function deleteKbDoc(userId: string, docId: string): Promise<boolea
   const owned = await ownedDoc(userId, docId);
   if (!owned) return false;
   await db.delete(roundtableKbDocs).where(eq(roundtableKbDocs.id, docId));
+  await touchPanel(owned.panelId);
   return true;
 }
 
@@ -305,6 +338,7 @@ export async function attachDocsToAgent(
     .insert(roundtablePanelAgentKbDocs)
     .values(valid.map((docId: string) => ({ agentId, docId })))
     .onConflictDoNothing();
+  await touchPanel(owned.agent.panelId);
   return true;
 }
 
@@ -321,6 +355,7 @@ export async function detachDocFromAgent(
       eq(roundtablePanelAgentKbDocs.agentId, agentId),
       eq(roundtablePanelAgentKbDocs.docId, docId),
     ));
+  await touchPanel(owned.agent.panelId);
   return true;
 }
 

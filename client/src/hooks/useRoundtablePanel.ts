@@ -110,13 +110,6 @@ export function useRoundtablePanel(conversationId: string | null) {
     (panels: RoundtablePanelDTO[]): RoundtablePanelDTO | undefined => {
       if (panels.length === 0) return undefined;
 
-      // If we already have a selected panel and it still exists for this
-      // conversation, keep it to avoid UI jumping across sibling panels.
-      if (panelId) {
-        const existing = panels.find((p) => p.id === panelId);
-        if (existing) return existing;
-      }
-
       // Multiple panels can exist for one conversation in older data. Pick
       // the freshest row so boardroom and builder resolve the same target.
       return panels
@@ -127,7 +120,7 @@ export function useRoundtablePanel(conversationId: string | null) {
           return bt - at;
         })[0];
     },
-    [panelId],
+    [],
   );
 
   const resolvePanelForConversation = useCallback(async () => {

@@ -156,8 +156,9 @@ export function PanelBuilder({ open, onOpenChange, conversationId, onConversatio
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-full sm:max-w-3xl p-0 flex flex-col">
-        <SheetHeader className="px-6 py-4 border-b">
+      <SheetContent side="right" className="w-full sm:max-w-4xl p-0 flex flex-col bg-background border-l border-border/70">
+        <SheetHeader className="px-6 py-4 border-b border-border/70 bg-gradient-to-r from-aurora-teal/8 via-transparent to-transparent relative">
+          <span aria-hidden className="absolute left-0 top-3 bottom-3 w-0.5 rounded bg-aurora-teal shadow-glow-teal" />
           <SheetTitle>Panel Builder</SheetTitle>
           <SheetDescription>
             Curate the expert agents for this roundtable. Spawn from a template or build a custom expert.
@@ -166,15 +167,17 @@ export function PanelBuilder({ open, onOpenChange, conversationId, onConversatio
         </SheetHeader>
 
         {!panel.panelId && (
-          <div className="flex-1 flex flex-col items-center justify-center p-8 gap-4 text-center">
-            <Sparkles className="w-10 h-10 text-muted-foreground" />
+          <div className="flex-1 flex flex-col items-center justify-center p-8 gap-4 text-center bg-gradient-to-b from-background to-muted/15">
+            <div className="w-12 h-12 rounded-xl bg-gradient-aurora/80 text-white flex items-center justify-center shadow-glow-teal">
+              <Sparkles className="w-6 h-6" />
+            </div>
             <div className="space-y-1">
-              <p className="font-medium">No panel for this chat yet</p>
+              <p className="font-semibold text-base">No panel for this chat yet</p>
               <p className="text-sm text-muted-foreground">
                 Create a panel to start adding expert agents and uploading reference material.
               </p>
             </div>
-            <Button onClick={handleCreatePanel} disabled={creatingPanel}>
+            <Button onClick={handleCreatePanel} disabled={creatingPanel} className="bg-aurora-teal/80 hover:bg-aurora-teal text-white border border-aurora-teal/30">
               {creatingPanel ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Plus className="w-4 h-4 mr-2" />}
               Create panel
             </Button>
@@ -190,24 +193,29 @@ export function PanelBuilder({ open, onOpenChange, conversationId, onConversatio
         {panel.panelId && panel.hydrated && (
           <div className="flex flex-1 overflow-hidden">
             {/* Left column: agent list + spawn templates */}
-            <div className="w-72 border-r flex flex-col">
-              <div className="p-4 border-b space-y-2">
-                <p className="text-xs font-medium uppercase text-muted-foreground">Roster</p>
+            <div className="w-80 border-r border-border/70 flex flex-col bg-muted/10">
+              <div className="p-4 border-b border-border/70 space-y-2">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Roster</p>
                 {panel.hydrated.agents.length === 0 && (
                   <p className="text-xs text-muted-foreground">No agents yet. Spawn one below.</p>
                 )}
               </div>
 
               <ScrollArea className="flex-1">
-                <div className="p-2 space-y-1">
+                <div className="p-2.5 space-y-1.5">
                   {panel.hydrated.agents.map((a) => (
                     <button
                       key={a.id}
                       onClick={() => setSelectedAgentId(a.id)}
-                      className={`w-full text-left px-3 py-2 rounded-md hover:bg-muted transition-colors ${
-                        selectedAgentId === a.id ? 'bg-muted' : ''
+                      className={`relative w-full text-left px-3 py-2.5 rounded-lg border transition-colors ${
+                        selectedAgentId === a.id
+                          ? 'bg-gradient-to-r from-aurora-teal/12 to-transparent border-aurora-teal/40 text-foreground'
+                          : 'border-border/70 bg-background/50 hover:bg-muted/50 hover:border-border'
                       }`}
                     >
+                      {selectedAgentId === a.id && (
+                        <span aria-hidden className="absolute left-0.5 top-2 bottom-2 w-0.5 rounded bg-aurora-teal shadow-glow-teal" />
+                      )}
                       <div className="flex items-center gap-2">
                         <span className="text-lg">{a.avatar ?? '🤖'}</span>
                         <div className="flex-1 min-w-0">
@@ -223,13 +231,13 @@ export function PanelBuilder({ open, onOpenChange, conversationId, onConversatio
                 </div>
 
                 <Separator />
-                <div className="p-3 space-y-2">
-                  <p className="text-xs font-medium uppercase text-muted-foreground">Spawn from template</p>
+                <div className="p-3 space-y-2.5">
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Spawn from template</p>
                   {templates.map((t) => (
                     <button
                       key={t.id}
                       onClick={() => handleSpawnTemplate(t)}
-                      className="w-full text-left px-3 py-2 rounded-md border hover:bg-muted text-xs"
+                      className="w-full text-left px-3 py-2.5 rounded-lg border border-border/70 bg-background/60 hover:bg-gradient-to-r hover:from-aurora-teal/8 hover:to-transparent hover:border-aurora-teal/30 text-xs transition-colors"
                     >
                       <div className="flex items-center gap-2">
                         <span className="text-base">{t.avatar}</span>
@@ -238,7 +246,7 @@ export function PanelBuilder({ open, onOpenChange, conversationId, onConversatio
                       <p className="text-muted-foreground mt-1 leading-snug">{t.description}</p>
                     </button>
                   ))}
-                  <Button variant="outline" size="sm" className="w-full" onClick={handleCreateCustom}>
+                  <Button variant="outline" size="sm" className="w-full border-border/70 bg-background/40 hover:bg-muted/40" onClick={handleCreateCustom}>
                     <Plus className="w-4 h-4 mr-1" /> Custom agent
                   </Button>
                 </div>
@@ -246,7 +254,7 @@ export function PanelBuilder({ open, onOpenChange, conversationId, onConversatio
             </div>
 
             {/* Right column: agent editor + KB panel */}
-            <div className="flex-1 overflow-hidden flex flex-col">
+            <div className="flex-1 overflow-hidden flex flex-col bg-background">
               {selectedAgent ? (
                 <AgentEditor
                   key={selectedAgent.id}
@@ -336,7 +344,7 @@ function AgentEditor({
   return (
     <ScrollArea className="flex-1">
       <div className="p-6 space-y-6">
-        <div className="flex items-start justify-between gap-2">
+        <div className="flex items-start justify-between gap-2 pb-3 border-b border-border/60">
           <div className="space-y-0.5">
             <div className="flex items-center gap-2">
               <span className="text-2xl">{agent.avatar ?? '🤖'}</span>
@@ -347,10 +355,10 @@ function AgentEditor({
             </p>
           </div>
           <div className="flex gap-1">
-            <Button size="icon" variant="ghost" onClick={onClone} title="Clone agent">
+            <Button size="icon" variant="ghost" onClick={onClone} title="Clone agent" className="hover:bg-muted/70">
               <Copy className="w-4 h-4" />
             </Button>
-            <Button size="icon" variant="ghost" onClick={onDelete} title="Delete agent">
+            <Button size="icon" variant="ghost" onClick={onDelete} title="Delete agent" className="hover:bg-destructive/10 hover:text-destructive">
               <Trash2 className="w-4 h-4" />
             </Button>
           </div>
@@ -381,7 +389,7 @@ function AgentEditor({
             </p>
           </div>
 
-          <div className="flex items-center justify-between rounded-md border p-3">
+          <div className="flex items-center justify-between rounded-lg border border-border/70 bg-muted/20 p-3.5">
             <div className="space-y-0.5">
               <Label className="text-sm">Use base training knowledge</Label>
               <p className="text-xs text-muted-foreground">
@@ -411,7 +419,7 @@ function AgentEditor({
           </div>
 
           {/* Quick paste */}
-          <div className="rounded-md border p-3 space-y-2">
+          <div className="rounded-lg border border-border/70 bg-muted/15 p-3 space-y-2">
             <p className="text-xs font-medium">Paste text</p>
             <Input
               placeholder="Title (e.g. UAE Free Zone Manual.txt)"
@@ -427,6 +435,7 @@ function AgentEditor({
             <Button
               size="sm"
               variant="secondary"
+              className="bg-aurora-teal/20 hover:bg-aurora-teal/30 text-foreground border border-aurora-teal/30"
               disabled={!textTitle.trim() || !textBody.trim() || busy}
               onClick={async () => {
                 setBusy(true);
@@ -450,7 +459,7 @@ function AgentEditor({
           </div>
 
           {/* File upload */}
-          <div className="rounded-md border p-3 space-y-2">
+          <div className="rounded-lg border border-border/70 bg-muted/15 p-3 space-y-2">
             <p className="text-xs font-medium">Upload file (text/csv/json/md/html, ≤ 5 MB)</p>
             <input
               type="file"
@@ -483,8 +492,8 @@ function AgentEditor({
           </div>
 
           {/* Panel docs list with attach toggles */}
-          <div className="rounded-md border">
-            <div className="px-3 py-2 border-b text-xs font-medium">Panel documents</div>
+          <div className="rounded-lg border border-border/70 overflow-hidden">
+            <div className="px-3 py-2 border-b border-border/60 text-xs font-medium bg-muted/25">Panel documents</div>
             {panelDocs.length === 0 && (
               <div className="px-3 py-4 text-xs text-muted-foreground">No docs uploaded yet.</div>
             )}

@@ -183,7 +183,11 @@ export function PanelBuilder({ open, onOpenChange, conversationId, onConversatio
                 Create a panel to start adding expert agents and uploading reference material.
               </p>
             </div>
-            <Button onClick={handleCreatePanel} disabled={creatingPanel} className="bg-aurora-teal/80 hover:bg-aurora-teal text-white border border-aurora-teal/30">
+            <Button
+              onClick={handleCreatePanel}
+              disabled={creatingPanel}
+              className="!bg-gradient-aurora !text-white !border-transparent shadow-glow-teal hover:opacity-95"
+            >
               {creatingPanel ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Plus className="w-4 h-4 mr-2" />}
               Create panel
             </Button>

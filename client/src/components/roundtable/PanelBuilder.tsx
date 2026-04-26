@@ -44,6 +44,12 @@ import {
   Upload,
   AlertCircle,
   Loader2,
+  UserRound,
+  Gavel,
+  ShieldCheck,
+  Landmark,
+  Search,
+  ClipboardCheck,
 } from 'lucide-react';
 
 interface PanelBuilderProps {
@@ -160,7 +166,7 @@ export function PanelBuilder({ open, onOpenChange, conversationId, onConversatio
         <SheetHeader className="px-6 py-4 border-b border-border/70 bg-gradient-to-r from-aurora-teal/8 via-transparent to-transparent relative">
           <span aria-hidden className="absolute left-0 top-3 bottom-3 w-0.5 rounded bg-aurora-teal shadow-glow-teal" />
           <SheetTitle>Panel Builder</SheetTitle>
-          <SheetDescription>
+          <SheetDescription className="text-foreground/75">
             Curate the expert agents for this roundtable. Spawn from a template or build a custom expert.
             Each agent runs independently with its own system prompt and attached knowledge.
           </SheetDescription>
@@ -173,7 +179,7 @@ export function PanelBuilder({ open, onOpenChange, conversationId, onConversatio
             </div>
             <div className="space-y-1">
               <p className="font-semibold text-base">No panel for this chat yet</p>
-              <p className="text-sm text-muted-foreground">
+              <p className="text-sm text-foreground/75">
                 Create a panel to start adding expert agents and uploading reference material.
               </p>
             </div>
@@ -182,7 +188,7 @@ export function PanelBuilder({ open, onOpenChange, conversationId, onConversatio
               Create panel
             </Button>
             {!conversationId && (
-              <p className="text-xs text-muted-foreground max-w-md flex items-center gap-2">
+              <p className="text-xs text-foreground/70 max-w-md flex items-center gap-2">
                 <AlertCircle className="w-3 h-3" />
                 A new roundtable conversation will be created automatically.
               </p>
@@ -197,7 +203,7 @@ export function PanelBuilder({ open, onOpenChange, conversationId, onConversatio
               <div className="p-4 border-b border-border/70 space-y-2">
                 <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Roster</p>
                 {panel.hydrated.agents.length === 0 && (
-                  <p className="text-xs text-muted-foreground">No agents yet. Spawn one below.</p>
+                  <p className="text-xs text-foreground/70">No agents yet. Spawn one below.</p>
                 )}
               </div>
 
@@ -217,10 +223,12 @@ export function PanelBuilder({ open, onOpenChange, conversationId, onConversatio
                         <span aria-hidden className="absolute left-0.5 top-2 bottom-2 w-0.5 rounded bg-aurora-teal shadow-glow-teal" />
                       )}
                       <div className="flex items-center gap-2">
-                        <span className="text-lg">{a.avatar ?? '🤖'}</span>
+                        <span className="w-8 h-8 rounded-md bg-muted/60 border border-border/60 flex items-center justify-center">
+                          {renderAgentIcon(a.name)}
+                        </span>
                         <div className="flex-1 min-w-0">
                           <div className="text-sm font-medium truncate">{a.name}</div>
-                          <div className="text-xs text-muted-foreground flex items-center gap-1">
+                          <div className="text-xs text-foreground/65 flex items-center gap-1">
                             {!a.useBaseKnowledge && <Badge variant="secondary" className="text-[10px] px-1 py-0">KB-only</Badge>}
                             <span>{a.kbDocIds.length} doc{a.kbDocIds.length === 1 ? '' : 's'}</span>
                           </div>
@@ -240,10 +248,12 @@ export function PanelBuilder({ open, onOpenChange, conversationId, onConversatio
                       className="w-full text-left px-3 py-2.5 rounded-lg border border-border/70 bg-background/60 hover:bg-gradient-to-r hover:from-aurora-teal/8 hover:to-transparent hover:border-aurora-teal/30 text-xs transition-colors"
                     >
                       <div className="flex items-center gap-2">
-                        <span className="text-base">{t.avatar}</span>
+                        <span className="w-6 h-6 rounded-md bg-muted/60 border border-border/60 flex items-center justify-center">
+                          {renderTemplateIcon(t.name)}
+                        </span>
                         <span className="font-medium">{t.name}</span>
                       </div>
-                      <p className="text-muted-foreground mt-1 leading-snug">{t.description}</p>
+                      <p className="text-foreground/70 mt-1 leading-snug">{t.description}</p>
                     </button>
                   ))}
                   <Button variant="outline" size="sm" className="w-full border-border/70 bg-background/40 hover:bg-muted/40" onClick={handleCreateCustom}>
@@ -347,10 +357,12 @@ function AgentEditor({
         <div className="flex items-start justify-between gap-2 pb-3 border-b border-border/60">
           <div className="space-y-0.5">
             <div className="flex items-center gap-2">
-              <span className="text-2xl">{agent.avatar ?? '🤖'}</span>
+              <span className="w-9 h-9 rounded-md bg-muted/60 border border-border/60 flex items-center justify-center">
+                {renderAgentIcon(agent.name)}
+              </span>
               <h3 className="text-lg font-semibold">{agent.name}</h3>
             </div>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs text-foreground/65">
               {agent.createdFromTemplate ? `Spawned from “${agent.createdFromTemplate}” template` : 'Custom agent'}
             </p>
           </div>
@@ -495,7 +507,7 @@ function AgentEditor({
           <div className="rounded-lg border border-border/70 overflow-hidden">
             <div className="px-3 py-2 border-b border-border/60 text-xs font-medium bg-muted/25">Panel documents</div>
             {panelDocs.length === 0 && (
-              <div className="px-3 py-4 text-xs text-muted-foreground">No docs uploaded yet.</div>
+              <div className="px-3 py-4 text-xs text-foreground/65">No docs uploaded yet.</div>
             )}
             <ul className="divide-y">
               {panelDocs.map((d) => {
@@ -546,4 +558,19 @@ function AgentEditor({
       </div>
     </ScrollArea>
   );
+}
+
+function renderAgentIcon(name: string) {
+  const lower = name.toLowerCase();
+  if (lower.includes('moderator')) return <UserRound className="w-4 h-4 text-aurora-teal-soft" />;
+  if (lower.includes('tax')) return <Landmark className="w-4 h-4 text-foreground/80" />;
+  if (lower.includes('audit')) return <ShieldCheck className="w-4 h-4 text-foreground/80" />;
+  if (lower.includes('ifrs')) return <Gavel className="w-4 h-4 text-foreground/80" />;
+  if (lower.includes('forensic')) return <Search className="w-4 h-4 text-foreground/80" />;
+  if (lower.includes('compliance')) return <ClipboardCheck className="w-4 h-4 text-foreground/80" />;
+  return <UserRound className="w-4 h-4 text-foreground/80" />;
+}
+
+function renderTemplateIcon(name: string) {
+  return renderAgentIcon(name);
 }

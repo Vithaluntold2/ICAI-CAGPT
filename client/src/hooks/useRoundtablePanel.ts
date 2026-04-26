@@ -150,11 +150,12 @@ export function useRoundtablePanel(conversationId: string | null) {
 
   // ----- panel-level ops -----
   const createPanelForConversation = useCallback(
-    async (name?: string) => {
-      if (!conversationId) throw new Error('No active conversation');
+    async (name?: string, explicitConversationId?: string) => {
+      const targetConversationId = explicitConversationId ?? conversationId;
+      if (!targetConversationId) throw new Error('No active conversation');
       const data = await jsonFetch<{ panel: RoundtablePanelDTO }>(BASE, {
         method: 'POST',
-        body: JSON.stringify({ conversationId, name: name ?? 'Untitled panel' }),
+        body: JSON.stringify({ conversationId: targetConversationId, name: name ?? 'Untitled panel' }),
       });
       setPanelId(data.panel.id);
       return data.panel;

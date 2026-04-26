@@ -1526,6 +1526,7 @@ export default function Chat() {
         open={panelBuilderOpen}
         onOpenChange={setPanelBuilderOpen}
         conversationId={activeConversation ?? null}
+        onConversationCreated={(id) => setActiveConversation(id)}
       />
 
       {/* Rename Dialog — preserved from legacy layout */}

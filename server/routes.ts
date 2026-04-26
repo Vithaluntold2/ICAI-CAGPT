@@ -949,7 +949,8 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
         return res.status(401).json({ error: "Not authenticated" });
       }
       
-      const { title, preview, profileId } = req.body;
+      const { title, preview, profileId, chatMode: rawChatMode } = req.body;
+      const chatMode = normalizeChatMode(rawChatMode);
       
       // Validate profileId ownership if provided
       if (profileId) {
@@ -966,7 +967,8 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
         userId,
         title,
         preview,
-        profileId: profileId || null
+        profileId: profileId || null,
+        chatMode,
       });
       
       res.json({ conversation });

@@ -50,9 +50,10 @@ interface PanelBuilderProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   conversationId: string | null;
+  onConversationCreated?: (conversationId: string) => void;
 }
 
-export function PanelBuilder({ open, onOpenChange, conversationId }: PanelBuilderProps) {
+export function PanelBuilder({ open, onOpenChange, conversationId, onConversationCreated }: PanelBuilderProps) {
   const { toast } = useToast();
   const panel = useRoundtablePanel(conversationId);
   const [templates, setTemplates] = useState<AgentTemplateDTO[]>([]);
@@ -84,17 +85,34 @@ export function PanelBuilder({ open, onOpenChange, conversationId }: PanelBuilde
   }, [selectedAgentId, panel.hydrated]);
 
   async function handleCreatePanel() {
-    if (!conversationId) {
-      toast({
-        title: 'Open a chat first',
-        description: 'Roundtable panels are scoped to a conversation. Start a chat in roundtable mode and try again.',
-        variant: 'destructive',
-      });
-      return;
-    }
     setCreatingPanel(true);
     try {
-      await panel.createPanelForConversation('Roundtable panel');
+      let targetConversationId = conversationId;
+      if (!targetConversationId) {
+        const res = await fetch('/api/conversations', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: 'Roundtable conversation',
+            preview: 'New roundtable conversation',
+            chatMode: 'roundtable',
+          }),
+        });
+        if (!res.ok) {
+          const text = await res.text().catch(() => '');
+          throw new Error(text || `HTTP ${res.status}: Failed to create conversation`);
+        }
+        const payload = await res.json() as { conversation?: { id?: string } };
+        const createdId = payload.conversation?.id;
+        if (!createdId) {
+          throw new Error('Conversation created without id');
+        }
+        targetConversationId = createdId;
+        onConversationCreated?.(createdId);
+      }
+
+      await panel.createPanelForConversation('Roundtable panel', targetConversationId);
     } catch (err) {
       toast({
         title: 'Failed to create panel',
@@ -156,14 +174,14 @@ export function PanelBuilder({ open, onOpenChange, conversationId }: PanelBuilde
                 Create a panel to start adding expert agents and uploading reference material.
               </p>
             </div>
-            <Button onClick={handleCreatePanel} disabled={creatingPanel || !conversationId}>
+            <Button onClick={handleCreatePanel} disabled={creatingPanel}>
               {creatingPanel ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Plus className="w-4 h-4 mr-2" />}
               Create panel
             </Button>
             {!conversationId && (
               <p className="text-xs text-muted-foreground max-w-md flex items-center gap-2">
                 <AlertCircle className="w-3 h-3" />
-                Start a chat in Roundtable mode first; the panel will attach to that conversation.
+                A new roundtable conversation will be created automatically.
               </p>
             )}
           </div>

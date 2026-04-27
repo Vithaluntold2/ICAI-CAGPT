@@ -70,8 +70,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(newUser);
     if (newUser) {
       localStorage.setItem('ca_user', JSON.stringify(newUser));
+      // Reset the inactivity baseline on login. Without this, a stale
+      // `ca_last_activity` from the previous session (kept around to sync
+      // across tabs) makes the new session look already-expired and fires
+      // an immediate auto-logout the moment the inactivity effect runs.
+      try {
+        localStorage.setItem(LAST_ACTIVITY_KEY, String(Date.now()));
+      } catch {
+        // localStorage unavailable — the in-memory timer will still seed
+        // itself with Date.now() inside the effect.
+      }
     } else {
       localStorage.removeItem('ca_user');
+      // Clear the activity baseline on logout so it can't leak into the
+      // next login attempt. The next session will re-seed it to "now".
+      try {
+        localStorage.removeItem(LAST_ACTIVITY_KEY);
+      } catch {
+        // ignore
+      }
     }
   };
 

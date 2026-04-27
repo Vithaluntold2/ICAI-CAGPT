@@ -1,19 +1,15 @@
 // client/src/components/shell/IconRail.tsx
-import { PanelLeftClose, PanelLeft, Search, Plus, Settings } from 'lucide-react';
+import { Search, Plus, Settings } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import logoImg from '@assets/icai-ca-india-logo.png';
 
 interface IconRailProps {
-  sidebarOpen?: boolean;
-  onToggleSidebar?: () => void;
   onOpenSearch?: () => void;
   onNewChat?: () => void;
   onOpenSettings?: () => void;
 }
 
 export function IconRail({
-  sidebarOpen = true,
-  onToggleSidebar,
   onOpenSearch,
   onNewChat,
   onOpenSettings,
@@ -29,17 +25,6 @@ export function IconRail({
       >
         <img src={logoImg} alt="CA-GPT" className="h-8 w-auto object-contain" />
       </div>
-      <RailButton
-        label={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
-        active={sidebarOpen}
-        onClick={onToggleSidebar}
-      >
-        {sidebarOpen ? (
-          <PanelLeftClose className="w-4 h-4" strokeWidth={1.75} />
-        ) : (
-          <PanelLeft className="w-4 h-4" strokeWidth={1.75} />
-        )}
-      </RailButton>
       <RailButton label="Search" onClick={onOpenSearch}>
         <Search className="w-4 h-4" strokeWidth={1.75} />
       </RailButton>

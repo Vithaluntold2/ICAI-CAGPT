@@ -53,8 +53,6 @@ export function AppShell({
         className="absolute top-0 left-0 right-0 h-0.5 bg-gradient-aurora z-50 pointer-events-none"
       />
       <IconRail
-        sidebarOpen={sidebarOpen}
-        onToggleSidebar={onToggleSidebar}
         onOpenSearch={onOpenSearch}
         onNewChat={onNewChat}
         onOpenSettings={onOpenSettings}

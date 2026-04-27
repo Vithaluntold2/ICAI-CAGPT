@@ -169,7 +169,11 @@ export const ROUNDTABLE_AGENT_TEMPLATES: RoundtableAgentTemplate[] = [
       'When the discussion converges and no new substantive disagreement remains, your job is ' +
       'to propose advancing to synthesis or resolution — do not just observe convergence in prose.',
     useBaseKnowledge: true,
-    model: 'mini',
+    // Promoted from `mini` → `strong` because the Moderator owns the
+    // final board-memo deliverable. Under-investing here yielded
+    // synthesis-format copy-paste in resolution phase rather than the
+    // structured Background/Issue/Analysis/Recommendation template.
+    model: 'strong',
   },
 ];
 

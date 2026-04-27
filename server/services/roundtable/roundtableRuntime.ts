@@ -1221,30 +1221,34 @@ function phaseInstructionFor(phase: string, agent: RoundtablePanelAgent): string
         : 'SYNTHESIS PHASE: defer to the Moderator unless they directly address you. If you cede, do so via cede_floor — do not write empty filler.';
     case 'resolution':
       return isModerator
-        ? `RESOLUTION PHASE: produce the FINAL BOARD MEMO. Use this exact structured Markdown format with H2 sections — the chair will export this as the deliverable:
+        ? `RESOLUTION PHASE — FINAL BOARD MEMO.
+
+⚠ CRITICAL: This output IS the deliverable the chair downloads. It is NOT a synthesis recap. Do NOT use the synthesis "(1) Consensus / (2) Dissent / (3) Open questions" structure here — that belongs in synthesis phase only. If you copy that structure in resolution, the deliverable is broken.
+
+REQUIRED OUTPUT FORMAT — use these EXACT H2 headings, in this order, verbatim. No other top-level structure is acceptable:
 
 ## Background
-2-3 sentences on the situation (entity, transaction, scale).
+2-3 sentences on the situation: entity name, transaction, scale, deadline.
 
 ## Issue
-The specific question the board is being asked to decide.
+The specific question the board is being asked to decide. One sentence.
 
 ## Analysis
-The panel\'s reasoning, with cited standards/statutes and computed numbers (materiality, restated amounts, journal entries shown as Dr/Cr lines).
+The panel's reasoning, with cited standards/statutes (Ind AS X.Y, §92C, SA-705.7, etc.) and the computed numbers carried forward from synthesis (materiality benchmarks with multipliers, restated amounts, the Dr/Cr journal entry as inline lines).
 
 ## Recommendation
-ONE sentence — clear, defensible, executable.
+ONE sentence — clear, defensible, executable. Imperative voice ("Restate revenue to ₹3.5 cr and engage TPO post-restatement").
 
 ## Risks & Mitigations
-Numbered list of the 2-4 most important risks of the recommendation, each with a one-line mitigation.
+Numbered list (2-4 items). Each item: one-line risk + one-line mitigation. Use the Devil's Advocate's "single sensitivity that would flip the conclusion" as one of the risks.
 
 ## Implementation
-Numbered list of immediate next steps (who, what, by when), within the chair\'s stated timeline.
+Numbered list (3-6 items) of immediate next steps. For each: WHO does WHAT BY WHEN, fitting inside the chair's stated timeline.
 
 ## Disclosures
-Specific Ind AS / SA / SEBI disclosures required by this recommendation, with paragraph references.
+Specific Ind AS / SA / SEBI disclosures required by this recommendation, with paragraph references (e.g., Ind AS 8.42 restatement note, Ind AS 24 related-party, Ind AS 37.86 contingent liability, SEBI LODR Reg 30 if material).
 
-This is the conclusion — the discussion ends here. Do not propose further phase transitions.`
+After producing the memo, the discussion ENDS. Do not propose further phase transitions. Do not summarise. Do not add an epilogue.`
         : 'RESOLUTION PHASE: the Moderator is producing the final memo. Cede the floor unless the Moderator directly addresses you for a fact-check.';
     default:
       return '';

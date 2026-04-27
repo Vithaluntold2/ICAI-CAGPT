@@ -95,6 +95,11 @@ export function useBoardroomThread(panelId: string | null) {
   /** When non-null, the loop is waiting on the chair to answer the
    *  referenced open question card. Cleared by `resumed` / answer. */
   const [awaitingChairCardId, setAwaitingChairCardId] = useState<string | null>(null);
+  /** Server-supplied reason when the runtime auto-paused (e.g.,
+   *  "providers-degraded" when the circuit breaker tripped on
+   *  consecutive infra failures). Lets the UI render a precise
+   *  message instead of a generic "paused". */
+  const [pauseReason, setPauseReason] = useState<string | null>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
 
   // Resolve or list threads for this panel.
@@ -298,11 +303,15 @@ export function useBoardroomThread(panelId: string | null) {
       }));
     };
 
-    const onPaused = () => {
+    const onPaused = (e: MessageEvent) => {
       setPaused(true);
+      let d: { reason?: string } = {};
+      try { d = JSON.parse(e.data); } catch { /* ignore */ }
+      setPauseReason(d.reason ?? 'user');
     };
     const onResumed = () => {
       setPaused(false);
+      setPauseReason(null);
       setAwaitingChairCardId(null);
     };
     const onLoopIdle = (e: MessageEvent) => {
@@ -460,12 +469,14 @@ export function useBoardroomThread(panelId: string | null) {
     if (!activeThreadId) throw new Error('No active thread');
     await jsonFetch(`${BASE}/threads/${activeThreadId}/pause`, { method: 'POST' });
     setPaused(true);
+    setPauseReason('user');
   }, [activeThreadId]);
 
   const resume = useCallback(async () => {
     if (!activeThreadId) throw new Error('No active thread');
     await jsonFetch(`${BASE}/threads/${activeThreadId}/resume`, { method: 'POST' });
     setPaused(false);
+    setPauseReason(null);
     setAwaitingChairCardId(null);
   }, [activeThreadId]);
 
@@ -479,6 +490,7 @@ export function useBoardroomThread(panelId: string | null) {
     loading,
     error,
     paused,
+    pauseReason,
     awaitingChairCardId,
     createThread,
     interject,

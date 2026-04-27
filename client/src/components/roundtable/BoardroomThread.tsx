@@ -257,11 +257,28 @@ export function BoardroomThread({ conversationId, onConfigurePanel }: Props) {
         </div>
       </header>
 
-      {/* Pause / chair-waiting banner — visible signal when the loop has
-       *  stopped so the user knows the system isn't broken, just waiting. */}
+      {/* Pause / chair-waiting / degraded-providers banner — visible signal
+       *  when the loop has stopped so the user knows what's happening and
+       *  what (if anything) they need to do. */}
       {(board.paused || board.awaitingChairCardId) && (
-        <div className="flex-shrink-0 flex items-center gap-2 px-4 py-2 border-b border-border/70 bg-amber-500/10 text-xs">
-          {board.paused ? (
+        <div
+          className={`flex-shrink-0 flex items-center gap-2 px-4 py-2 border-b border-border/70 text-xs ${
+            board.pauseReason === 'providers-degraded'
+              ? 'bg-destructive/10'
+              : 'bg-amber-500/10'
+          }`}
+        >
+          {board.paused && board.pauseReason === 'providers-degraded' ? (
+            <>
+              <AlertTriangle className="w-3.5 h-3.5 text-destructive" />
+              <span className="font-medium text-destructive">
+                AI providers degraded.
+              </span>
+              <span className="text-destructive/80">
+                Three turns failed in a row (likely rate-limit or quota). Wait a minute, then click Resume to retry — or check provider keys / fallback configuration.
+              </span>
+            </>
+          ) : board.paused ? (
             <>
               <PauseCircle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
               <span className="font-medium text-amber-900 dark:text-amber-200">

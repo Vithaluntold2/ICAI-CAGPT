@@ -209,9 +209,17 @@ interface ThreadRuntime {
    *  until the user explicitly resumes (or answers a pending chair
    *  question if that's what triggered the pause). */
   paused: boolean;
+  /** Circuit breaker counter: increments on each turn that fails for
+   *  infrastructure reasons (provider exhaustion / empty after retry).
+   *  Resets to 0 on any successful (status=completed, non-empty) turn.
+   *  When it crosses CIRCUIT_BREAKER_THRESHOLD, the thread auto-pauses
+   *  with a degraded-providers signal so the user knows to wait. */
+  consecutiveFailures: number;
   /** Last activity timestamp for GC. */
   lastActivity: number;
 }
+
+const CIRCUIT_BREAKER_THRESHOLD = 3;
 
 const runtimes = new Map<string, ThreadRuntime>();
 const RUNTIME_TTL_MS = 2 * 60 * 60 * 1000;
@@ -228,6 +236,7 @@ function getRuntime(threadId: string): ThreadRuntime {
       loopRunning: false,
       loopPending: false,
       paused: false,
+      consecutiveFailures: 0,
       lastActivity: Date.now(),
     };
     runtimes.set(threadId, r);
@@ -930,6 +939,22 @@ async function runRelevanceLoop(userId: string, threadId: string): Promise<void>
   const r = getRuntime(threadId);
   if (r.paused) {
     emit(threadId, 'loop-idle', { reason: 'paused' });
+    return;
+  }
+
+  // ── Circuit breaker ───────────────────────────────────────────
+  // If multiple turns in a row failed for infrastructure reasons
+  // (provider rate-limited / exhausted), stop running the loop and
+  // pause the thread. The user gets a clear UI banner and decides
+  // when to resume — better than silently re-picking the same agent
+  // and watching it fail forever.
+  if (r.consecutiveFailures >= CIRCUIT_BREAKER_THRESHOLD) {
+    r.paused = true;
+    emit(threadId, 'paused', { reason: 'providers-degraded' });
+    emit(threadId, 'loop-idle', { reason: 'providers-degraded' });
+    // Don't reset the counter here — only a successful turn (after
+    // resume) clears it, which prevents auto-pause from happening
+    // again on the very next attempt if the provider is still down.
     return;
   }
 
@@ -1747,11 +1772,19 @@ async function runAgentTurn(
     await debitBudget(owned.thread.conversationId, totalCostMicros);
 
     if (finalStatus === 'cancelled') {
+      // Circuit breaker: an empty-after-retry turn counts as a failure.
+      // A real cede via cede_floor short-circuited above and never reaches
+      // here, so this path is reserved for transient infra issues.
+      if (isEmpty) {
+        r.consecutiveFailures += 1;
+      }
       emit(threadId, 'turn-cancelled', {
         turnId: turn.id,
         reason: finalCancelReason ?? 'aborted',
       });
     } else {
+      // Real productive turn — reset the failure counter.
+      r.consecutiveFailures = 0;
       emit(threadId, 'turn-completed', {
         turnId: turn.id,
         agentId: agent.id,
@@ -1774,6 +1807,8 @@ async function runAgentTurn(
     if (msg === 'aborted') {
       emit(threadId, 'turn-cancelled', { turnId: turn.id, reason: 'aborted' });
     } else {
+      // Infra failure → bump the circuit breaker counter.
+      r.consecutiveFailures += 1;
       emit(threadId, 'turn-failed', { turnId: turn.id, error: msg });
     }
     emit(threadId, 'participant-state', { agentId: agent.id, state: 'listening' });

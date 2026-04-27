@@ -102,6 +102,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     handleSetUser(null);
   };
 
+  // Belt-and-braces logout-on-close. The server-side session cookie is
+  // already a session-only cookie (no maxAge), so most browsers delete it
+  // on window close. But Chrome with "continue where you left off"
+  // restores session cookies on relaunch — so we also fire a sendBeacon
+  // to /api/auth/logout on `pagehide` to actively destroy the server
+  // session row. sendBeacon (unlike fetch) is guaranteed to send during
+  // unload and includes cookies on same-origin requests.
+  useEffect(() => {
+    if (!user) return;
+    const onPageHide = (e: PageTransitionEvent) => {
+      // bfcache restores: don't kill the session, the user is coming back.
+      if (e.persisted) return;
+      try {
+        navigator.sendBeacon?.('/api/auth/logout');
+      } catch {
+        // Browser may not support sendBeacon, or may block during unload.
+        // Either way the session-only cookie is the primary defence.
+      }
+    };
+    window.addEventListener('pagehide', onPageHide);
+    return () => window.removeEventListener('pagehide', onPageHide);
+  }, [user]);
+
   // Auto-logout after INACTIVITY_TIMEOUT_MS of no user activity. Tracked via
   // a shared localStorage timestamp so all open tabs reset and expire together.
   const logoutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);

@@ -1329,6 +1329,7 @@ export default function Chat() {
         onNewChat={handleNewChat}
         onOpenSettings={() => setLocation('/settings')}
         onOpenSearch={() => setCommandOpen(true)}
+        onSignOut={handleLogout}
       >
         <ChatBreadcrumb
           mode={currentMode}

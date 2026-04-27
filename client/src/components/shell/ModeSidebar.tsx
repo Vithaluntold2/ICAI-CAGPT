@@ -1,6 +1,6 @@
 // client/src/components/shell/ModeSidebar.tsx
 import { useState, useMemo } from 'react';
-import { Sun, Moon, Monitor, PanelLeftClose, PanelLeft } from 'lucide-react';
+import { Sun, Moon, Monitor, PanelLeftClose, PanelLeft, LogOut } from 'lucide-react';
 
 const THEME_SEGMENTS: Array<{ id: ThemeMode; label: string; Icon: typeof Sun }> = [
   { id: 'light', label: 'Light', Icon: Sun },
@@ -43,6 +43,10 @@ interface ModeSidebarProps {
   onShareConversation?: (id: string) => void;
   onUnshareConversation?: (id: string) => void;
   onDeleteConversation?: (id: string) => void;
+  /** Sign-out handler. When provided, a Sign-out button appears in the
+   *  sidebar footer (visible in both expanded and collapsed states) so
+   *  users don't have to find the action inside the ⌘K command menu. */
+  onSignOut?: () => void;
 }
 
 export function ModeSidebar({
@@ -63,6 +67,7 @@ export function ModeSidebar({
   onShareConversation,
   onUnshareConversation,
   onDeleteConversation,
+  onSignOut,
 }: ModeSidebarProps) {
   const [expanded, setExpanded] = useState<ChatMode | null>(activeMode ?? null);
 
@@ -253,10 +258,22 @@ export function ModeSidebar({
               ))}
             </div>
           )}
+          {onSignOut && (
+            <button
+              type="button"
+              title="Sign out"
+              aria-label="Sign out"
+              onClick={onSignOut}
+              data-testid="sidebar-sign-out"
+              className="w-6 h-6 flex items-center justify-center rounded text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
+            >
+              <LogOut className="w-3 h-3" strokeWidth={1.75} />
+            </button>
+          )}
         </footer>
       ) : (
         /* Expanded: full user row */
-        <footer className="px-3.5 py-2.5 border-t border-border flex items-center gap-2.5 text-[12px] text-muted-foreground">
+        <footer className="px-3.5 py-2.5 border-t border-border flex items-center gap-2 text-[12px] text-muted-foreground">
           <div className="w-[26px] h-[26px] rounded-full bg-gradient-to-br from-violet-600 to-cyan-600 flex items-center justify-center text-white text-[11px] font-bold font-display shrink-0">
             {userInitial}
           </div>
@@ -270,6 +287,18 @@ export function ModeSidebar({
           </div>
           {onChangeTheme && (
             <ThemeToggle mode={themeMode} onChange={onChangeTheme} />
+          )}
+          {onSignOut && (
+            <button
+              type="button"
+              title="Sign out"
+              aria-label="Sign out"
+              onClick={onSignOut}
+              data-testid="sidebar-sign-out"
+              className="w-7 h-7 flex items-center justify-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors shrink-0"
+            >
+              <LogOut className="w-3.5 h-3.5" strokeWidth={1.75} />
+            </button>
           )}
         </footer>
       )}

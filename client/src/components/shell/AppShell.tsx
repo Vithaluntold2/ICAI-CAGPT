@@ -32,6 +32,7 @@ interface AppShellProps {
   onOpenSearch?: () => void;
   onNewChat?: () => void;
   onOpenSettings?: () => void;
+  onSignOut?: () => void;
   /** Rendered inside the main pane — should include its own header. */
   children: ReactNode;
 }

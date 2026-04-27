@@ -1003,17 +1003,25 @@ async function runRelevanceLoop(userId: string, threadId: string): Promise<void>
   }
 
   // ── Normal propose-and-pick path ───────────────────────────────
-  // In synthesis/resolution phases, the wrap-up belongs to the Moderator.
-  // Specialists were ceding-on-pick because their phase-aware prompt told
-  // them to defer — wasting LLM calls and producing ugly cancelled bubbles.
-  // Restrict the propose pool to the Moderator (specialists can still
-  // respond if directly addressed via address-routing, which runs above).
+  // In synthesis/resolution phases the wrap-up belongs to the Moderator,
+  // and the Devil's Advocate gets one final concession turn ("if the
+  // panel's case has survived my strongest attack, here's what would
+  // flip it"). Specialists were ceding-on-pick because their phase-aware
+  // prompt told them to defer — wasting LLM calls and producing ugly
+  // cancelled bubbles. Restrict the propose pool to governance agents;
+  // specialists can still respond if directly addressed via address-
+  // routing, which runs above.
   const phase = owned.thread.phase;
   const isLatePhase = phase === 'synthesis' || phase === 'resolution';
-  const moderatorOnly = isLatePhase
-    ? agents.filter((a) => a.createdFromTemplate === 'moderator-bot' || /moderator/i.test(a.name))
+  const governanceAgents = isLatePhase
+    ? agents.filter((a) => {
+        const tpl = a.createdFromTemplate ?? '';
+        return tpl === 'moderator-bot'
+          || tpl === 'devil-advocate-bot'
+          || /moderator|advocate|critic/i.test(a.name);
+      })
     : [];
-  const proposingAgents = isLatePhase && moderatorOnly.length > 0 ? moderatorOnly : agents;
+  const proposingAgents = isLatePhase && governanceAgents.length > 0 ? governanceAgents : agents;
 
   const threadContext = await loadRecentThreadContext(threadId, 10);
 

@@ -69,28 +69,37 @@ export async function createPanel(
     })
     .returning();
 
-  // Every live panel needs a Moderator — it routes the discussion, suggests
-  // phase transitions, and synthesises consensus. Without one, agents have
-  // no chair-substitute to defer to and the loop tends to converge into
-  // parallel monologues. Skip for template panels (those are user-curated
-  // reusable presets — the user composes them deliberately).
+  // Every live panel needs two governance agents:
+  //   - Moderator: routes the discussion, proposes phase transitions,
+  //     produces the final memo.
+  //   - Devil's Advocate: steel-mans the rejected option in cross-
+  //     examination so the panel never locks a recommendation without
+  //     hearing the strongest case against it.
+  // Without these the loop converges into parallel monologues and
+  // produces echo-chamber consensus.
+  // Skip for template panels (user-curated reusable presets — composition
+  // is deliberate).
   if (!panel.isTemplate) {
-    const moderatorTemplate = getTemplate('moderator-bot');
-    if (moderatorTemplate) {
+    const governanceTemplates = ['moderator-bot', 'devil-advocate-bot'];
+    let position = 0;
+    for (const templateId of governanceTemplates) {
+      const tpl = getTemplate(templateId);
+      if (!tpl) continue;
       await db
         .insert(roundtablePanelAgents)
         .values({
           panelId: panel.id,
-          name: moderatorTemplate.name,
-          avatar: moderatorTemplate.avatar,
-          color: moderatorTemplate.color,
-          systemPrompt: moderatorTemplate.systemPrompt,
-          useBaseKnowledge: moderatorTemplate.useBaseKnowledge,
-          model: moderatorTemplate.model,
+          name: tpl.name,
+          avatar: tpl.avatar,
+          color: tpl.color,
+          systemPrompt: tpl.systemPrompt,
+          useBaseKnowledge: tpl.useBaseKnowledge,
+          model: tpl.model,
           toolAllowlist: [],
-          createdFromTemplate: moderatorTemplate.id,
-          position: 0,
+          createdFromTemplate: tpl.id,
+          position,
         });
+      position++;
     }
   }
 

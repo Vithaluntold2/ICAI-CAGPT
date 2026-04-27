@@ -388,7 +388,38 @@ const AGENT_TOOLS = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'propose_phase_transition',
+      description:
+        "Propose advancing the discussion to the next phase. Use this whenever you would otherwise write 'I propose we move to phase X' / 'let\\'s transition to' / 'we should now close this phase' in prose. The chair sees your proposal as a card with Accept/Reject buttons, and ALL agents pause until the chair decides — preventing the loop from running over the same ground. Typically called by the Moderator, but any panelist may use it when they believe the current phase has reached its natural end. Acceptable phases (in order): opening, independent-views, cross-examination, user-qa, synthesis, resolution.",
+      parameters: {
+        type: 'object',
+        properties: {
+          to_phase: {
+            type: 'string',
+            enum: ['opening', 'independent-views', 'cross-examination', 'user-qa', 'synthesis', 'resolution'],
+            description: 'The phase you propose advancing to. Must be one of the six valid phases.',
+          },
+          rationale: {
+            type: 'string',
+            description: 'One or two sentences on why the current phase is complete and why this transition is the right next step.',
+          },
+        },
+        required: ['to_phase', 'rationale'],
+        additionalProperties: false,
+      },
+    },
+  },
 ];
+
+// Sentinel prefix used to mark phase-proposal cards in the existing
+// roundtable_question_cards table. Avoids a schema migration: the card
+// text starts with `[PROPOSAL:phase=<target>]` followed by the rationale,
+// and the client renders Accept/Reject instead of the answer input when
+// it sees this prefix.
+export const PHASE_PROPOSAL_PREFIX = '[PROPOSAL:phase=';
 
 const MAX_AGENT_TOOL_ITERATIONS = 3;
 const MAX_SIDE_THREADS_PER_TURN = 1;
@@ -1045,19 +1076,52 @@ function buildAgentSystemPrompt(
     baseGate,
     'Stay in character. Speak in the first person. Keep your contribution focused and under ~250 words unless the chair asks for depth.',
     '',
-    'Available tools (PREFER calling these over writing rhetorical disagreement in prose):',
-    '  • ask_panelist({to_agent_name, question})       — open question card; relevance loop routes the next speaker. Use whenever you would otherwise write "I need to know X from <other agent>" or "<other agent> should clarify Y".',
-    '  • start_side_thread({to_agent_name, question})  — nested clarification answered immediately under your turn. Use sparingly (max one per turn) and only when their answer is a prerequisite you cannot proceed without.',
-    '  • cede_floor({reason})                          — yield without speaking when the topic is genuinely outside your specialty AND another panelist on the roster covers it.',
+    'Available tools (PREFER calling these over writing rhetorical disagreement / suggestions in prose):',
+    '  • ask_panelist({to_agent_name, question})              — open question card; relevance loop routes the next speaker. Use whenever you would otherwise write "I need to know X from <other agent>" or "<other agent> should clarify Y".',
+    '  • start_side_thread({to_agent_name, question})         — nested clarification answered immediately under your turn. Use sparingly (max one per turn) and only when their answer is a prerequisite you cannot proceed without.',
+    '  • propose_phase_transition({to_phase, rationale})      — formally propose advancing the discussion to the next phase. Creates a chair-targeted card with Accept/Reject; ALL agents pause until the chair decides. Use this whenever you would write "I propose we close this phase", "let\'s move to synthesis", or "we should transition to" — prose suggestions are invisible to the runtime and will be ignored.',
+    '  • cede_floor({reason})                                 — yield without speaking when the topic is genuinely outside your specialty AND another panelist on the roster covers it.',
     '',
     'Tool usage rules:',
     '  - You may pair AT MOST one tool call with your spoken contribution.',
     '  - Do NOT embed pseudo-questions in prose ("I wonder if Tax could clarify…") — call ask_panelist instead.',
+    '  - Do NOT embed phase-transition suggestions in prose ("let\'s move to synthesis") — call propose_phase_transition instead, otherwise the chair will not see them as actionable and the loop will keep running.',
     '  - When the chair explicitly asks you to "ask them directly", "challenge each other", or to surface dependencies on another specialty, you SHOULD use ask_panelist for at least one concrete question.',
     '  - to_agent_name MUST exactly match a name from the PANEL ROSTER above (or "chair").',
     rosterBlock,
     kbBlock,
   ].join('\n');
+}
+
+/**
+ * Per-phase user-prompt directive. Phases are otherwise just labels;
+ * this is where their semantics actually surface to the model. The
+ * Moderator gets stronger nudges to drive transitions; specialists get
+ * stronger nudges to stay in lane and not over-talk in synthesis /
+ * resolution where the wrap-up belongs to the chair-substitute.
+ */
+function phaseInstructionFor(phase: string, agent: RoundtablePanelAgent): string {
+  const isModerator = agent.createdFromTemplate === 'moderator-bot' || /moderator/i.test(agent.name);
+  switch (phase) {
+    case 'opening':
+      return 'OPENING PHASE: panelists introduce their position on the chair\'s prompt. State your view in 2-4 sentences. Do not yet challenge other panelists in detail — that\'s for cross-examination.';
+    case 'independent-views':
+      return 'INDEPENDENT VIEWS PHASE: each specialist commits to a position and surfaces the assumptions behind it. Stay narrow to your own specialty for now.';
+    case 'cross-examination':
+      return 'CROSS-EXAMINATION PHASE: actively probe other panelists\' positions. Use ask_panelist or start_side_thread to surface dependencies and disagreements. Do not just restate your own view.';
+    case 'user-qa':
+      return 'USER Q&A PHASE: the chair leads. Only speak if directly addressed or if you have a critical safety/compliance flag the chair clearly missed.';
+    case 'synthesis':
+      return isModerator
+        ? 'SYNTHESIS PHASE: produce a structured wrap-up of the panel\'s position so far — Sections: (1) Consensus, (2) Key dissent if any, (3) Open questions still unresolved. Do not introduce new analysis. After your synthesis, propose_phase_transition({to_phase: "resolution"}) if the panel agrees.'
+        : 'SYNTHESIS PHASE: defer to the Moderator unless they directly address you. If you cede, do so via cede_floor — do not write empty filler.';
+    case 'resolution':
+      return isModerator
+        ? 'RESOLUTION PHASE: produce the FINAL board-ready output. Structure as: (1) One-sentence recommendation, (2) Rationale (3-5 sentences), (3) Recommended immediate next steps (numbered). This is the conclusion — the discussion ends here. Do not propose further phase transitions.'
+        : 'RESOLUTION PHASE: the Moderator is producing the final wrap-up. Cede the floor unless the Moderator directly addresses you for a fact-check.';
+    default:
+      return '';
+  }
 }
 
 /**
@@ -1179,8 +1243,10 @@ async function runAgentTurn(
     };
 
     const systemPrompt = buildAgentSystemPrompt(agent, snippets, allAgents);
+    const phaseDirective = phaseInstructionFor(owned.thread.phase, agent);
     const userPrompt = [
       `Current phase: ${owned.thread.phase}.`,
+      phaseDirective,
       'Recent thread (most recent last):',
       threadContext || '(empty)',
       '',
@@ -1252,6 +1318,53 @@ async function runAgentTurn(
           if (call.name === 'cede_floor') {
             cededReason = String((call.input as any)?.reason ?? '').slice(0, 240) || 'no specialty match';
             resultPayload = { ok: true };
+          } else if (call.name === 'propose_phase_transition') {
+            // Materialise the proposal as a chair-targeted question card.
+            // The card text starts with `[PROPOSAL:phase=<target>]` so the
+            // client can render it with one-click Accept/Reject buttons
+            // instead of the freeform answer input. The chair-waiting gate
+            // in runRelevanceLoop will halt all agents until the chair acts.
+            const toPhase = String((call.input as any)?.to_phase ?? '').trim();
+            const rationale = String((call.input as any)?.rationale ?? '').trim();
+            const allowedPhases = ['opening', 'independent-views', 'cross-examination', 'user-qa', 'synthesis', 'resolution'];
+            if (!allowedPhases.includes(toPhase)) {
+              resultPayload = { ok: false, error: `Unknown phase: ${toPhase}. Use one of: ${allowedPhases.join(', ')}` };
+            } else if (toPhase === owned.thread.phase) {
+              resultPayload = { ok: false, error: `Already in phase '${toPhase}' — propose a different one or cede the floor instead.` };
+            } else if (!rationale) {
+              resultPayload = { ok: false, error: 'rationale is required so the chair understands why' };
+            } else {
+              const cardText = `${PHASE_PROPOSAL_PREFIX}${toPhase}] ${rationale}`;
+              const [card] = await db
+                .insert(roundtableQuestionCards)
+                .values({
+                  threadId,
+                  parentTurnId: turn.id,
+                  fromAgentId: agent.id,
+                  toAgentId: null,
+                  toUser: true,
+                  text: cardText,
+                  status: 'open',
+                })
+                .returning();
+              cardIds.push(card.id);
+              if (!questionId) questionId = card.id;
+              emit(threadId, 'question-card', {
+                qid: card.id,
+                fromAgentId: agent.id,
+                toAgentId: null,
+                toUser: true,
+                text: cardText,
+                parentTurnId: turn.id,
+                sideThread: false,
+              });
+              resultPayload = {
+                ok: true,
+                question_card_id: card.id,
+                will_run_inline: false,
+                note: 'Chair will see Accept/Reject. All agents are now paused on the chair-waiting gate.',
+              };
+            }
           } else if (call.name === 'ask_panelist' || call.name === 'start_side_thread') {
             const targetName = String((call.input as any)?.to_agent_name ?? '').trim();
             const question = String((call.input as any)?.question ?? '').trim();

@@ -482,6 +482,12 @@ export function BoardroomThread({ conversationId, onConfigurePanel }: Props) {
                     onAnswer={(answer) => board.answerQuestion(card.id, answer)}
                     onRedirect={(toAgentId) => board.redirectQuestion(card.id, toAgentId)}
                     onSkip={() => board.skipQuestion(card.id)}
+                    onAcceptPhase={async (toPhase) => {
+                      // Order matters: advance the phase first so the
+                      // post-card-answer relevance loop runs in the new phase.
+                      await board.setPhase(toPhase);
+                      await board.answerQuestion(card.id, `accepted: advanced to ${toPhase}`);
+                    }}
                   />
                 ))
               )}
@@ -810,6 +816,29 @@ function TurnBubble({
   );
 }
 
+// Sentinel from server's roundtableRuntime.ts. When a question card's text
+// starts with this prefix, it represents a propose_phase_transition tool
+// call rather than a freeform question — and gets a different UI affordance.
+const PHASE_PROPOSAL_PREFIX = '[PROPOSAL:phase=';
+const PHASE_LABELS: Record<string, string> = {
+  opening: 'Opening',
+  'independent-views': 'Independent Views',
+  'cross-examination': 'Cross-Examination',
+  'user-qa': 'User Q&A',
+  synthesis: 'Synthesis',
+  resolution: 'Resolution',
+};
+
+function parsePhaseProposal(text: string): { toPhase: string; rationale: string } | null {
+  if (!text.startsWith(PHASE_PROPOSAL_PREFIX)) return null;
+  const closeIdx = text.indexOf(']', PHASE_PROPOSAL_PREFIX.length);
+  if (closeIdx < 0) return null;
+  const toPhase = text.slice(PHASE_PROPOSAL_PREFIX.length, closeIdx).trim();
+  const rationale = text.slice(closeIdx + 1).trim();
+  if (!PHASE_LABELS[toPhase]) return null;
+  return { toPhase, rationale };
+}
+
 function QuestionCard({
   card,
   agents,
@@ -817,6 +846,7 @@ function QuestionCard({
   onAnswer,
   onRedirect,
   onSkip,
+  onAcceptPhase,
 }: {
   card: BoardroomQuestionCardDTO;
   agents: Array<{ id: string; name: string }>;
@@ -824,6 +854,7 @@ function QuestionCard({
   onAnswer: (answer: string) => Promise<void> | void;
   onRedirect: (toAgentId: string) => Promise<void> | void;
   onSkip: () => Promise<void> | void;
+  onAcceptPhase?: (toPhase: string) => Promise<void> | void;
 }) {
   const [answer, setAnswer] = useState('');
   const [redirectTo, setRedirectTo] = useState<string>('');
@@ -833,6 +864,51 @@ function QuestionCard({
     : card.toAgentId
     ? agentById.get(card.toAgentId)?.name ?? 'Someone'
     : 'Open';
+
+  // Phase-proposal cards get a distinct treatment: stronger visual weight,
+  // Accept/Reject buttons (no freeform answer). Detected by prefix.
+  const proposal = parsePhaseProposal(card.text);
+  if (proposal && onAcceptPhase) {
+    return (
+      <div
+        className="rounded-lg border-2 border-aurora-teal/50 bg-aurora-teal/8 dark:bg-aurora-teal/10 p-3 shadow-glow-teal"
+        data-testid={`boardroom-qcard-proposal-${card.id}`}
+      >
+        <div className="text-[10px] font-mono uppercase tracking-[0.16em] text-aurora-teal mb-1.5">
+          Phase proposal
+        </div>
+        <div className="text-xs flex items-center gap-2 mb-2">
+          <span className="font-medium">{fromName}</span>
+          <span className="text-muted-foreground">proposes →</span>
+          <span className="font-semibold text-foreground">{PHASE_LABELS[proposal.toPhase]}</span>
+        </div>
+        {proposal.rationale && (
+          <div className="text-sm mb-3 leading-snug text-foreground/90">{proposal.rationale}</div>
+        )}
+        <div className="flex gap-2">
+          <Button
+            size="sm"
+            className="h-7 text-xs bg-aurora-teal hover:bg-aurora-teal/90 text-white border-transparent flex-1"
+            onClick={() => onAcceptPhase(proposal.toPhase)}
+            data-testid={`boardroom-qcard-proposal-accept-${card.id}`}
+          >
+            <CheckCircle2 className="w-3.5 h-3.5 mr-1" />
+            Accept · advance to {PHASE_LABELS[proposal.toPhase]}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 text-xs"
+            onClick={() => onSkip()}
+            data-testid={`boardroom-qcard-proposal-reject-${card.id}`}
+          >
+            Reject
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       className="rounded-lg border border-amber-500/30 bg-amber-500/5 dark:bg-amber-950/20 p-3"

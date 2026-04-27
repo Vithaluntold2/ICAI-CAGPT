@@ -9,9 +9,12 @@
  *    "Start session" button), tag stays as a pill chip inside the composer.
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
+import rehypeHighlight from 'rehype-highlight';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
@@ -852,11 +855,17 @@ function TurnBubble({
           )}
         </div>
         <div
-          className={`rounded-lg px-3 py-2 text-sm whitespace-pre-wrap leading-relaxed ${
+          className={`rounded-lg px-3.5 py-2.5 text-sm leading-relaxed ${
             isUser ? 'bg-aurora-cyan/10 text-foreground' : 'bg-muted'
           }`}
         >
-          {turn.content || (isStreaming ? <span className="opacity-60">…</span> : <span className="opacity-60 italic">(no response generated)</span>)}
+          {turn.content ? (
+            <TurnMarkdown content={turn.content} />
+          ) : isStreaming ? (
+            <span className="opacity-60">…</span>
+          ) : (
+            <span className="opacity-60 italic">(no response generated)</span>
+          )}
         </div>
         {turn.citations && turn.citations.length > 0 && (
           <div className="mt-1 flex flex-wrap gap-1">
@@ -1025,6 +1034,40 @@ function QuestionCard({
     </div>
   );
 }
+
+// ----------------------------------------------------------------------
+// TurnMarkdown — rich rendering for in-thread turn content.
+// Mirrors the standard chat's ChatMessageBody pipeline (markdown + GFM
+// tables + math + syntax-highlighted code) but in a leaner package
+// suited to the boardroom's tighter bubbles. Lets agents emit headings,
+// bold, lists, journal-entry tables, math formulas, and code blocks
+// without the chair seeing raw markdown syntax.
+// ----------------------------------------------------------------------
+
+const TurnMarkdown = React.memo(function TurnMarkdown({ content }: { content: string }) {
+  return (
+    <div className="prose prose-sm dark:prose-invert max-w-none
+      prose-p:my-1.5 prose-p:leading-relaxed
+      prose-headings:font-exo prose-headings:tracking-tight prose-headings:mt-2.5 prose-headings:mb-1
+      prose-h1:text-base prose-h2:text-[15px] prose-h3:text-[13.5px] prose-h4:text-[13px]
+      prose-strong:text-foreground prose-strong:font-semibold
+      prose-ul:my-1.5 prose-ol:my-1.5 prose-li:my-0.5 prose-li:leading-relaxed
+      prose-code:text-[12px] prose-code:font-mono prose-code:bg-foreground/10 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:before:content-none prose-code:after:content-none
+      prose-pre:bg-foreground/5 prose-pre:border prose-pre:border-border prose-pre:p-3 prose-pre:rounded-md prose-pre:my-2
+      prose-table:my-2 prose-table:text-[12.5px]
+      prose-th:font-semibold prose-th:text-foreground prose-th:bg-foreground/5
+      prose-blockquote:border-l-2 prose-blockquote:border-aurora-teal/40 prose-blockquote:pl-3 prose-blockquote:not-italic prose-blockquote:text-foreground/85
+      prose-hr:my-3"
+    >
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm, remarkMath]}
+        rehypePlugins={[rehypeKatex, rehypeHighlight]}
+      >
+        {content}
+      </ReactMarkdown>
+    </div>
+  );
+});
 
 // ----------------------------------------------------------------------
 // FinalMemoCard — surfaces the Moderator's resolution-phase output as

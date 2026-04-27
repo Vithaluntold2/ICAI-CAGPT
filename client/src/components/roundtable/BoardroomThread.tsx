@@ -766,7 +766,31 @@ function TurnBubble({
   const isStreaming = turn.status === 'streaming';
   const isCancelled = turn.status === 'cancelled';
   const isFailed = turn.status === 'failed';
+  // Distinguish a polite cede ("ceded: <reason>") from an aborted/stopped
+  // turn. A cede is the agent intentionally yielding the floor (e.g. in
+  // synthesis phase a specialist defers to the Moderator) — render it as
+  // a faded inline note instead of an empty "(no content)" bubble that
+  // looks like a bug.
+  const cancelReason = turn.cancelReason ?? '';
+  const isCeded = isCancelled && cancelReason.startsWith('ceded:');
   const Icon = isUser ? User : resolveAgentIcon({ templateId: agentTemplateId, name: agentName });
+
+  if (isCeded) {
+    const reasonText = cancelReason.slice('ceded:'.length).trim();
+    return (
+      <div
+        className="flex items-center gap-2 px-3 py-1.5 text-[11px] text-muted-foreground/80 italic"
+        data-testid={`boardroom-turn-${turn.id}`}
+      >
+        <Icon className="w-3 h-3 shrink-0 opacity-60" strokeWidth={1.75} />
+        <span>
+          <span className="font-medium not-italic">{agentName ?? 'Agent'}</span> yielded the floor
+          {reasonText ? <span> — {reasonText}</span> : null}
+        </span>
+      </div>
+    );
+  }
+
   return (
     <div className={`flex gap-3 ${isUser ? 'flex-row-reverse' : ''}`} data-testid={`boardroom-turn-${turn.id}`}>
       <div
@@ -784,9 +808,9 @@ function TurnBubble({
               <Loader2 className="w-3 h-3 animate-spin" /> streaming
             </span>
           )}
-          {isCancelled && (
+          {isCancelled && !isCeded && (
             <span className="ml-2 inline-flex items-center gap-1 text-muted-foreground">
-              <XCircle className="w-3 h-3" /> cancelled
+              <XCircle className="w-3 h-3" /> stopped
             </span>
           )}
           {isFailed && (
@@ -800,7 +824,7 @@ function TurnBubble({
             isUser ? 'bg-aurora-cyan/10 text-foreground' : 'bg-muted'
           }`}
         >
-          {turn.content || (isStreaming ? <span className="opacity-60">…</span> : '(no content)')}
+          {turn.content || (isStreaming ? <span className="opacity-60">…</span> : <span className="opacity-60 italic">(no response generated)</span>)}
         </div>
         {turn.citations && turn.citations.length > 0 && (
           <div className="mt-1 flex flex-wrap gap-1">

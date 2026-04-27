@@ -911,17 +911,6 @@ function parsePhaseProposal(text: string): { toPhase: string; rationale: string 
   return { toPhase, rationale };
 }
 
-// Minimal HTML escape for values interpolated into the print container's
-// header (entity name etc.). Body content goes through ReactMarkdown +
-// renderToStaticMarkup which handles escaping itself.
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
 
 function QuestionCard({
   card,
@@ -1107,6 +1096,8 @@ function FinalMemoCard({
   agents: Array<{ id: string; name: string; createdFromTemplate?: string | null }>;
   threadTitle: string;
 }) {
+  const memoBodyRef = useRef<HTMLDivElement>(null);
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
   const memo = useMemo(() => {
     if (phase !== 'resolution') return null;
     // Find the latest completed Moderator turn. Walk in reverse for cheap
@@ -1156,91 +1147,106 @@ function FinalMemoCard({
     URL.revokeObjectURL(url);
   };
 
-  // PDF generation: html2pdf.js (already in deps) takes a hidden, light-
-  // themed printable element built from the memo content + a header
-  // (entity, panel, date) and produces an A4 portrait file. We render
-  // the printable element off-screen during generation so the user
-  // sees no flicker. The on-screen card stays in its dark/light theme;
-  // PDF output is always light + serif for a clean board-pack look.
-  const handleDownloadPdf = async () => {
-    const [html2pdfMod, { renderToStaticMarkup }] = await Promise.all([
-      import('html2pdf.js'),
-      import('react-dom/server'),
+  // PDF generation — mirrors DocumentArtifact's pattern exactly:
+  // 1. PRIMARY: server route POST /export-memo → puppeteer + KaTeX
+  //    pipeline (buildDocumentPdfBuffer) produces a real vector PDF
+  //    with proper text, tables, and math rendering.
+  // 2. FALLBACK: client-side pdfmake + html-to-pdfmake. Vector PDF
+  //    too (not html2canvas raster) so output quality is acceptable
+  //    even without the server route.
+  const downloadPdfClientSide = async () => {
+    if (!memoBodyRef.current) {
+      throw new Error('Memo body not rendered');
+    }
+    const [{ default: htmlToPdfmake }, pdfmakeMod, vfsMod] = await Promise.all([
+      import('html-to-pdfmake'),
+      import('pdfmake/build/pdfmake'),
+      import('pdfmake/build/vfs_fonts'),
     ]);
-    const html2pdf: any = (html2pdfMod as any).default ?? html2pdfMod;
 
-    // Render the same Markdown pipeline used on-screen, but to an HTML
-    // string we can drop into the print container. This guarantees the
-    // PDF body matches what the user sees (tables, math, code) without
-    // a second Markdown parser.
-    const bodyHtml = renderToStaticMarkup(
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={[rehypeKatex, rehypeHighlight]}
-      >
-        {memo}
-      </ReactMarkdown>,
-    );
+    const pdfmake: any = (pdfmakeMod as any).default ?? pdfmakeMod;
+    const vfs: any = (vfsMod as any).default ?? vfsMod;
+    pdfmake.vfs = vfs.pdfMake?.vfs ?? vfs.vfs ?? vfs;
 
-    // Build a one-shot DOM node off-screen with print-friendly styling.
-    const container = document.createElement('div');
-    container.style.position = 'fixed';
-    container.style.left = '-10000px';
-    container.style.top = '0';
-    container.style.width = '170mm'; // A4 portrait minus margins
-    container.style.padding = '0';
-    container.style.background = '#ffffff';
-    container.style.color = '#0f172a';
-    container.style.fontFamily = 'Georgia, "Times New Roman", serif';
-    container.style.fontSize = '11pt';
-    container.style.lineHeight = '1.5';
+    const html = memoBodyRef.current.innerHTML;
+    const body = htmlToPdfmake(html, {
+      defaultStyles: {
+        h1: { fontSize: 18, bold: true, marginTop: 14, marginBottom: 6 },
+        h2: { fontSize: 15, bold: true, marginTop: 12, marginBottom: 5 },
+        h3: { fontSize: 13, bold: true, marginTop: 10, marginBottom: 4 },
+        p: { marginBottom: 6, lineHeight: 1.35 },
+        ul: { marginBottom: 6 },
+        ol: { marginBottom: 6 },
+        li: { marginBottom: 2 },
+        table: { marginTop: 6, marginBottom: 6 },
+        th: { bold: true, fillColor: '#f4f4f4' },
+        code: { font: 'Courier', fontSize: 10 },
+        pre: { font: 'Courier', fontSize: 10, background: '#f6f8fa' },
+        blockquote: { italics: true, color: '#374151', marginLeft: 8 },
+        a: { color: '#1a56db', decoration: 'underline' },
+      },
+    });
 
-    // Inline style block so html2canvas captures consistent typography
-    // without relying on the app's stylesheet (prose tokens, dark mode).
-    container.innerHTML = `
-      <style>
-        .memo-header { border-bottom: 2px solid #0f172a; padding-bottom: 8mm; margin-bottom: 8mm; }
-        .memo-kicker { font-family: 'Helvetica', sans-serif; font-size: 8pt; letter-spacing: 0.16em; text-transform: uppercase; color: #475569; margin-bottom: 2mm; }
-        .memo-title { font-family: 'Helvetica', sans-serif; font-size: 18pt; font-weight: 700; color: #0f172a; margin: 0; line-height: 1.2; }
-        .memo-meta { font-family: 'Helvetica', sans-serif; font-size: 9pt; color: #64748b; margin-top: 3mm; }
-        .memo-body h1 { font-family: 'Helvetica', sans-serif; font-size: 14pt; font-weight: 700; color: #0f172a; margin: 6mm 0 2mm; padding-bottom: 1.5mm; border-bottom: 1px solid #cbd5e1; }
-        .memo-body h2 { font-family: 'Helvetica', sans-serif; font-size: 12pt; font-weight: 700; color: #0f172a; margin: 5mm 0 2mm; padding-bottom: 1mm; border-bottom: 1px solid #cbd5e1; }
-        .memo-body h3 { font-family: 'Helvetica', sans-serif; font-size: 11pt; font-weight: 700; color: #1e293b; margin: 4mm 0 1.5mm; }
-        .memo-body p { margin: 2mm 0; }
-        .memo-body ul, .memo-body ol { margin: 2mm 0 2mm 6mm; padding: 0; }
-        .memo-body li { margin: 1mm 0; }
-        .memo-body strong { color: #0f172a; }
-        .memo-body code { font-family: 'Courier New', monospace; font-size: 10pt; background: #f1f5f9; padding: 1px 4px; border-radius: 2px; }
-        .memo-body pre { font-family: 'Courier New', monospace; font-size: 9.5pt; background: #f8fafc; border: 1px solid #e2e8f0; padding: 3mm; border-radius: 2px; margin: 3mm 0; white-space: pre-wrap; }
-        .memo-body table { border-collapse: collapse; width: 100%; margin: 3mm 0; font-size: 10pt; }
-        .memo-body th { background: #f1f5f9; font-weight: 700; text-align: left; padding: 2mm; border: 1px solid #cbd5e1; }
-        .memo-body td { padding: 2mm; border: 1px solid #e2e8f0; vertical-align: top; }
-        .memo-body blockquote { border-left: 2px solid #94a3b8; margin: 3mm 0; padding-left: 3mm; color: #475569; }
-        .memo-body hr { border: 0; border-top: 1px solid #cbd5e1; margin: 5mm 0; }
-      </style>
-      <div class="memo-header">
-        <div class="memo-kicker">Final Board Memo &middot; CA&middot;GPT Roundtable</div>
-        <h1 class="memo-title">${escapeHtml(threadTitle)}</h1>
-        <div class="memo-meta">Generated ${new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}</div>
-      </div>
-      <div class="memo-body">${bodyHtml}</div>
-    `;
-    document.body.appendChild(container);
+    const docDefinition = {
+      pageSize: 'A4',
+      pageMargins: [48, 56, 48, 56] as [number, number, number, number],
+      info: { title: threadTitle, creator: 'CA-GPT' },
+      content: [
+        { text: threadTitle, fontSize: 20, bold: true, marginBottom: 4 },
+        {
+          text: [
+            { text: 'Final Board Memo · CA-GPT Roundtable · ', color: '#666' },
+            { text: `Generated ${new Date().toLocaleDateString()}`, color: '#666' },
+          ],
+          fontSize: 9,
+          marginBottom: 14,
+        },
+        { canvas: [{ type: 'line', x1: 0, y1: 0, x2: 500, y2: 0, lineWidth: 0.5, lineColor: '#ddd' }], marginBottom: 10 },
+        body,
+      ],
+      defaultStyle: { fontSize: 11, lineHeight: 1.35, color: '#111' },
+    };
 
+    pdfmake.createPdf(docDefinition).download(filenamePdf);
+  };
+
+  const handleDownloadPdf = async () => {
+    if (downloadingPdf) return;
+    setDownloadingPdf(true);
     try {
-      await html2pdf()
-        .set({
-          margin: [15, 15, 15, 15], // mm
-          filename: filenamePdf,
-          image: { type: 'jpeg', quality: 0.98 },
-          html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
-          jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-          pagebreak: { mode: ['css', 'legacy'] },
-        })
-        .from(container)
-        .save();
+      // Server pipeline first — buildDocumentPdfBuffer renders via
+      // headless Chrome for a true vector PDF with KaTeX-rendered math
+      // and proper table layout. Same pipeline as DocumentArtifact.
+      const res = await fetch('/api/roundtable/boardroom/export-memo', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: threadTitle, content: memo }),
+      });
+      if (res.ok) {
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filenamePdf;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        return;
+      }
+      console.warn('[BoardroomMemo] Server PDF export failed, falling back to client-side', res.status);
+      await downloadPdfClientSide();
+    } catch (err) {
+      console.error('[BoardroomMemo] PDF export error:', err);
+      // Last-ditch attempt with client-side pipeline.
+      try {
+        await downloadPdfClientSide();
+      } catch (fallbackErr) {
+        console.error('[BoardroomMemo] Client-side fallback also failed:', fallbackErr);
+      }
     } finally {
-      document.body.removeChild(container);
+      setDownloadingPdf(false);
     }
   };
 
@@ -1282,13 +1288,21 @@ function FinalMemoCard({
             size="sm"
             className="h-7 px-2 text-xs bg-aurora-teal hover:bg-aurora-teal/90 text-white border-transparent"
             onClick={handleDownloadPdf}
+            disabled={downloadingPdf}
             data-testid="boardroom-final-memo-download-pdf"
           >
-            <Download className="w-3.5 h-3.5 mr-1" /> .pdf
+            {downloadingPdf ? (
+              <><Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> .pdf</>
+            ) : (
+              <><Download className="w-3.5 h-3.5 mr-1" /> .pdf</>
+            )}
           </Button>
         </div>
       </header>
-      <div className="px-5 py-4 prose prose-sm dark:prose-invert max-w-none prose-headings:font-exo prose-headings:tracking-tight prose-h2:text-base prose-h2:mt-4 prose-h2:mb-1.5 prose-h2:text-aurora-teal prose-h2:font-semibold prose-h2:border-b prose-h2:border-border/50 prose-h2:pb-1 prose-p:text-sm prose-p:leading-relaxed prose-li:text-sm prose-strong:text-foreground">
+      <div
+        ref={memoBodyRef}
+        className="px-5 py-4 prose prose-sm dark:prose-invert max-w-none prose-headings:font-exo prose-headings:tracking-tight prose-h2:text-base prose-h2:mt-4 prose-h2:mb-1.5 prose-h2:text-aurora-teal prose-h2:font-semibold prose-h2:border-b prose-h2:border-border/50 prose-h2:pb-1 prose-p:text-sm prose-p:leading-relaxed prose-li:text-sm prose-strong:text-foreground"
+      >
         <ReactMarkdown remarkPlugins={[remarkGfm]}>{memo}</ReactMarkdown>
       </div>
     </div>

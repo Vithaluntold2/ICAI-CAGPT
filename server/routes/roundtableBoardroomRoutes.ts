@@ -27,6 +27,7 @@ import {
   pauseThread,
   resumeThread,
 } from '../services/roundtable/roundtableRuntime';
+import { buildDocumentPdfBuffer } from '../services/whiteboard/exportDocumentPdf';
 
 const router = express.Router();
 router.use(requireAuth);
@@ -244,6 +245,41 @@ router.post('/threads/:threadId/resume', async (req: Request, res: Response) => 
     res.json({ ok: true });
   } catch (err) {
     res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+// -----------------------------------------------------------------------
+// Memo export — convert raw Markdown (the resolution-phase Moderator
+// turn) into a high-quality vector PDF via puppeteer + KaTeX. Reuses
+// the same buildDocumentPdfBuffer pipeline as the Deliverable Composer,
+// so output quality is identical (real text, real tables, real math —
+// not a html2canvas raster). Client can fall back to pdfmake if this
+// route fails (e.g. headless Chrome unavailable on the host).
+// -----------------------------------------------------------------------
+
+const exportMemoSchema = z.object({
+  title: z.string().min(1).max(300),
+  content: z.string().min(1),
+});
+
+router.post('/export-memo', async (req: Request, res: Response) => {
+  try {
+    const body = exportMemoSchema.parse(req.body);
+    const buffer = await buildDocumentPdfBuffer({
+      title: body.title,
+      content: body.content,
+      mode: 'roundtable-boardroom',
+    });
+    const safeName = body.title.replace(/[^a-zA-Z0-9-_ ]/g, '').replace(/\s+/g, '_').slice(0, 60) || 'Boardroom';
+    const dateStamp = new Date().toISOString().slice(0, 10);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${safeName}-memo-${dateStamp}.pdf"`,
+    );
+    res.send(buffer);
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
   }
 });
 

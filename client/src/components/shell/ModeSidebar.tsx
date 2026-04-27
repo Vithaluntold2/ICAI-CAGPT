@@ -233,7 +233,7 @@ export function ModeSidebar({
             {userInitial}
           </div>
           {onChangeTheme && (
-            <div className="flex flex-row items-center gap-0.5">
+            <div className="flex flex-col items-center gap-1">
               {THEME_SEGMENTS.map(({ id, label, Icon }) => (
                 <button
                   key={id}
@@ -242,10 +242,10 @@ export function ModeSidebar({
                   onClick={() => onChangeTheme(id)}
                   aria-label={`Switch to ${label} theme`}
                   className={cn(
-                    'w-[15px] h-[15px] flex items-center justify-center rounded transition-colors',
+                    'w-6 h-6 flex items-center justify-center rounded transition-colors',
                     themeMode === id
-                      ? 'text-aurora-teal-soft'
-                      : 'text-muted-foreground hover:text-foreground',
+                      ? 'bg-aurora-teal/15 text-aurora-teal-soft'
+                      : 'text-muted-foreground hover:bg-foreground/5 hover:text-foreground',
                   )}
                 >
                   <Icon className="w-3 h-3" strokeWidth={1.75} />

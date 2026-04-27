@@ -199,7 +199,18 @@ const createSessionStore = () => {
 
 export { sessionStore };
 
-// Session configuration with hardened security
+// Session configuration with hardened security.
+//
+// Cookie is intentionally a SESSION COOKIE (no `maxAge` / `expires`) so the
+// browser deletes it when the user closes the window — preventing the "I
+// closed the tab two days ago and I'm still logged in" surprise. The
+// 15-minute inactivity logout (auth.tsx) and the 30-day server-side TTL
+// in connect-pg-simple still apply for active sessions.
+//
+// Note: some browsers (e.g. Chrome with "continue where you left off")
+// restore session cookies on relaunch. The client also fires a
+// navigator.sendBeacon to /api/auth/logout on `pagehide` as belt-and-
+// braces — see auth.tsx.
 const sessionConfig: session.SessionOptions = {
   secret: SESSION_SECRET,
   resave: false,
@@ -208,11 +219,13 @@ const sessionConfig: session.SessionOptions = {
   cookie: {
     httpOnly: true, // Prevents client-side JavaScript access
     secure: process.env.NODE_ENV === 'production', // HTTPS only in production
-    maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+    // No maxAge → session cookie. Deleted on browser close.
     sameSite: process.env.NODE_ENV === 'production' ? 'none' as const : 'lax' as const, // Allow cross-site in production for OAuth
   },
   store: sessionStore,
-  rolling: true, // Reset maxAge on every request (keeps active sessions alive)
+  // rolling=false because rolling on a session cookie has no effect (no
+  // maxAge to reset) and would just churn the store on every request.
+  rolling: false,
 };
 
 // In production, enforce secure cookies

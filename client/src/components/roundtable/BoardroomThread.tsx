@@ -10,6 +10,8 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
@@ -43,6 +45,9 @@ import {
   User,
   Settings2,
   X,
+  Copy,
+  Download,
+  FileText,
   type LucideIcon,
 } from 'lucide-react';
 import { useRoundtablePanel } from '@/hooks/useRoundtablePanel';
@@ -350,6 +355,16 @@ export function BoardroomThread({ conversationId, onConfigurePanel }: Props) {
             {turnGroups.map(({ parent, children }) => (
               <TurnGroup key={parent.id} parent={parent} children={children} agentById={agentById} />
             ))}
+            {/* Final memo: rendered when the Moderator has produced a
+             *  completed turn while the thread is in resolution phase.
+             *  The memo IS the deliverable — surfaced as a downloadable
+             *  card so the chair doesn't have to copy/paste from chat. */}
+            <FinalMemoCard
+              turns={board.turns}
+              phase={board.thread?.phase ?? 'opening'}
+              agents={agents}
+              threadTitle={panel.hydrated?.panel?.name ?? 'Boardroom'}
+            />
           </div>
 
           {/* Composer */}
@@ -989,6 +1004,114 @@ function QuestionCard({
         <Button variant="ghost" size="sm" className="h-6 text-[11px] px-2" onClick={() => onSkip()}>
           Skip
         </Button>
+      </div>
+    </div>
+  );
+}
+
+// ----------------------------------------------------------------------
+// FinalMemoCard — surfaces the Moderator's resolution-phase output as
+// the boardroom's deliverable, with copy + download actions. The
+// resolution-phase prompt enforces a structured Markdown format
+// (## Background / ## Issue / ## Analysis / ## Recommendation / etc.)
+// so this is just rendering, not parsing.
+// ----------------------------------------------------------------------
+
+function FinalMemoCard({
+  turns,
+  phase,
+  agents,
+  threadTitle,
+}: {
+  turns: BoardroomTurnDTO[];
+  phase: string;
+  agents: Array<{ id: string; name: string; createdFromTemplate?: string | null }>;
+  threadTitle: string;
+}) {
+  const memo = useMemo(() => {
+    if (phase !== 'resolution') return null;
+    // Find the latest completed Moderator turn. Walk in reverse for cheap
+    // first-match.
+    const moderatorIds = new Set(
+      agents
+        .filter((a) => (a.createdFromTemplate ?? '') === 'moderator-bot' || /moderator/i.test(a.name))
+        .map((a) => a.id),
+    );
+    if (moderatorIds.size === 0) return null;
+    for (let i = turns.length - 1; i >= 0; i--) {
+      const t = turns[i];
+      if (
+        t.status === 'completed'
+        && t.speakerKind === 'agent'
+        && t.agentId
+        && moderatorIds.has(t.agentId)
+        && t.content
+        && t.content.includes('## ')
+      ) {
+        return t.content;
+      }
+    }
+    return null;
+  }, [turns, phase, agents]);
+
+  if (!memo) return null;
+
+  const safeTitle = threadTitle.replace(/[^a-zA-Z0-9-_ ]/g, '').replace(/\s+/g, '_').slice(0, 60) || 'Boardroom';
+  const filename = `${safeTitle}-memo-${new Date().toISOString().slice(0, 10)}.md`;
+
+  const handleCopy = async () => {
+    try { await navigator.clipboard.writeText(memo); } catch { /* clipboard may be unavailable */ }
+  };
+
+  const handleDownload = () => {
+    const blob = new Blob([memo], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <div
+      className="mt-6 rounded-lg border-2 border-aurora-teal/40 bg-card shadow-glow-teal overflow-hidden"
+      data-testid="boardroom-final-memo"
+    >
+      <header className="flex items-center gap-2 px-4 py-2.5 border-b border-border/70 bg-gradient-to-r from-aurora-teal/8 via-transparent to-transparent">
+        <div className="w-7 h-7 rounded-md bg-gradient-aurora text-white flex items-center justify-center shadow-glow-teal">
+          <FileText className="w-4 h-4" />
+        </div>
+        <div className="flex flex-col leading-tight">
+          <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-aurora-teal">
+            Final board memo
+          </span>
+          <span className="font-exo text-sm font-semibold tracking-tight">{threadTitle}</span>
+        </div>
+        <div className="ml-auto flex items-center gap-1.5">
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 px-2 text-xs"
+            onClick={handleCopy}
+            data-testid="boardroom-final-memo-copy"
+          >
+            <Copy className="w-3.5 h-3.5 mr-1" /> Copy
+          </Button>
+          <Button
+            size="sm"
+            className="h-7 px-2 text-xs bg-aurora-teal hover:bg-aurora-teal/90 text-white border-transparent"
+            onClick={handleDownload}
+            data-testid="boardroom-final-memo-download"
+          >
+            <Download className="w-3.5 h-3.5 mr-1" /> Download .md
+          </Button>
+        </div>
+      </header>
+      <div className="px-5 py-4 prose prose-sm dark:prose-invert max-w-none prose-headings:font-exo prose-headings:tracking-tight prose-h2:text-base prose-h2:mt-4 prose-h2:mb-1.5 prose-h2:text-aurora-teal prose-h2:font-semibold prose-h2:border-b prose-h2:border-border/50 prose-h2:pb-1 prose-p:text-sm prose-p:leading-relaxed prose-li:text-sm prose-strong:text-foreground">
+        <ReactMarkdown remarkPlugins={[remarkGfm]}>{memo}</ReactMarkdown>
       </div>
     </div>
   );

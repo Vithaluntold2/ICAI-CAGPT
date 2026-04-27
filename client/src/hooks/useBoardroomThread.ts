@@ -324,21 +324,62 @@ export function useBoardroomThread(panelId: string | null) {
     [panelId, loadThread],
   );
 
-  const interject = useCallback(async (text: string) => {
-    if (!activeThreadId) throw new Error('No active thread');
-    await jsonFetch(`${BASE}/threads/${activeThreadId}/interject`, {
-      method: 'POST',
-      body: JSON.stringify({ text }),
+  // Optimistically merge a server-returned turn so it shows even if the SSE
+  // stream for a freshly-created thread hasn't connected yet (race: server
+  // emits `turn-completed` for the user turn synchronously, but the new
+  // EventSource needs a round-trip to subscribe).
+  const mergeTurn = useCallback((turn: BoardroomTurnDTO) => {
+    setState((prev) => {
+      if (prev.turns.find((t) => t.id === turn.id)) return prev;
+      return { ...prev, turns: [...prev.turns, turn] };
     });
-  }, [activeThreadId]);
+  }, []);
 
-  const tagAgent = useCallback(async (agentId: string, text: string) => {
-    if (!activeThreadId) throw new Error('No active thread');
-    await jsonFetch(`${BASE}/threads/${activeThreadId}/tag`, {
-      method: 'POST',
-      body: JSON.stringify({ agentId, text }),
-    });
-  }, [activeThreadId]);
+  // Thread-id-explicit variant — safe to call right after createThread
+  // without waiting for activeThreadId state to flush.
+  const interjectInThread = useCallback(
+    async (threadId: string, text: string): Promise<BoardroomTurnDTO> => {
+      const data = await jsonFetch<{ turn: BoardroomTurnDTO }>(
+        `${BASE}/threads/${threadId}/interject`,
+        { method: 'POST', body: JSON.stringify({ text }) },
+      );
+      mergeTurn(data.turn);
+      return data.turn;
+    },
+    [mergeTurn],
+  );
+
+  const interject = useCallback(
+    async (text: string) => {
+      if (!activeThreadId) throw new Error('No active thread');
+      return interjectInThread(activeThreadId, text);
+    },
+    [activeThreadId, interjectInThread],
+  );
+
+  const tagAgentInThread = useCallback(
+    async (
+      threadId: string,
+      agentId: string,
+      text: string,
+    ): Promise<BoardroomTurnDTO> => {
+      const data = await jsonFetch<{ turn: BoardroomTurnDTO }>(
+        `${BASE}/threads/${threadId}/tag`,
+        { method: 'POST', body: JSON.stringify({ agentId, text }) },
+      );
+      mergeTurn(data.turn);
+      return data.turn;
+    },
+    [mergeTurn],
+  );
+
+  const tagAgent = useCallback(
+    async (agentId: string, text: string) => {
+      if (!activeThreadId) throw new Error('No active thread');
+      return tagAgentInThread(activeThreadId, agentId, text);
+    },
+    [activeThreadId, tagAgentInThread],
+  );
 
   const cancelTurn = useCallback(async (turnId: string) => {
     if (!activeThreadId) throw new Error('No active thread');
@@ -380,10 +421,14 @@ export function useBoardroomThread(panelId: string | null) {
     });
   }, [activeThreadId]);
 
+  const kickoffThread = useCallback(async (threadId: string) => {
+    await jsonFetch(`${BASE}/threads/${threadId}/kickoff`, { method: 'POST' });
+  }, []);
+
   const kickoff = useCallback(async () => {
     if (!activeThreadId) throw new Error('No active thread');
-    await jsonFetch(`${BASE}/threads/${activeThreadId}/kickoff`, { method: 'POST' });
-  }, [activeThreadId]);
+    await kickoffThread(activeThreadId);
+  }, [activeThreadId, kickoffThread]);
 
   return {
     activeThreadId,
@@ -396,13 +441,16 @@ export function useBoardroomThread(panelId: string | null) {
     error,
     createThread,
     interject,
+    interjectInThread,
     tagAgent,
+    tagAgentInThread,
     cancelTurn,
     setPhase,
     answerQuestion,
     redirectQuestion,
     skipQuestion,
     kickoff,
+    kickoffThread,
     refreshThreadList,
     loadThread,
   };

@@ -91,6 +91,7 @@ export function BoardroomThread({ conversationId, onConfigurePanel }: Props) {
 
   const [chairText, setChairText] = useState('');
   const [taggedAgent, setTaggedAgent] = useState<string>('all');
+  const [sendError, setSendError] = useState<string | null>(null);
 
   // Auto-scroll on new turns / tokens.
   useEffect(() => {
@@ -175,34 +176,48 @@ export function BoardroomThread({ conversationId, onConfigurePanel }: Props) {
   // -- Active boardroom UI -------------------------------------------
 
   const startSession = async () => {
-    if (!board.activeThreadId) {
-      const first = chairText.trim() || 'Open the floor.';
-      const t = await board.createThread({ title: first.slice(0, 80), conversationId });
-      // Send the chair's opening prompt.
-      if (chairText.trim()) {
+    if (board.activeThreadId) return;
+    const opening = chairText.trim();
+    setSendError(null);
+    try {
+      const t = await board.createThread({
+        title: (opening || 'Open the floor.').slice(0, 80),
+        conversationId,
+      });
+      if (opening) {
         setChairText('');
-        await board.interject(first);
+        await board.interjectInThread(t.id, opening);
       } else {
-        await board.kickoff();
+        await board.kickoffThread(t.id);
       }
       return t;
+    } catch (err) {
+      setSendError(err instanceof Error ? err.message : String(err));
     }
   };
 
   const sendChair = async () => {
     const text = chairText.trim();
     if (!text) return;
+    setSendError(null);
     setChairText('');
-    if (!board.activeThreadId) {
-      await board.createThread({ title: text.slice(0, 80), conversationId });
-      // The newly created thread is loaded by createThread — fire interject after a tick.
-      setTimeout(() => board.interject(text).catch(() => {}), 50);
-      return;
-    }
-    if (taggedAgent && taggedAgent !== 'all') {
-      await board.tagAgent(taggedAgent, text);
-    } else {
-      await board.interject(text);
+    try {
+      let threadId = board.activeThreadId;
+      if (!threadId) {
+        const t = await board.createThread({
+          title: text.slice(0, 80),
+          conversationId,
+        });
+        threadId = t.id;
+      }
+      if (taggedAgent && taggedAgent !== 'all') {
+        await board.tagAgentInThread(threadId, taggedAgent, text);
+      } else {
+        await board.interjectInThread(threadId, text);
+      }
+    } catch (err) {
+      setSendError(err instanceof Error ? err.message : String(err));
+      setChairText(text);
     }
   };
 
@@ -382,9 +397,9 @@ export function BoardroomThread({ conversationId, onConfigurePanel }: Props) {
               <Send className="w-4 h-4" />
             </Button>
           </div>
-          {board.error && (
+          {(sendError || board.error) && (
             <div className="mt-2 text-xs text-red-600 flex items-center gap-1">
-              <AlertTriangle className="w-3.5 h-3.5" /> {board.error}
+              <AlertTriangle className="w-3.5 h-3.5" /> {sendError ?? board.error}
             </div>
           )}
         </footer>

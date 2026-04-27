@@ -89,6 +89,12 @@ export function useBoardroomThread(panelId: string | null) {
   const [state, setState] = useState<ThreadState>(EMPTY);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** True when the runtime has paused (user clicked Pause, or all
+   *  agents idle). Driven by SSE `paused` / `resumed` events. */
+  const [paused, setPaused] = useState(false);
+  /** When non-null, the loop is waiting on the chair to answer the
+   *  referenced open question card. Cleared by `resumed` / answer. */
+  const [awaitingChairCardId, setAwaitingChairCardId] = useState<string | null>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
 
   // Resolve or list threads for this panel.
@@ -292,6 +298,23 @@ export function useBoardroomThread(panelId: string | null) {
       }));
     };
 
+    const onPaused = () => {
+      setPaused(true);
+    };
+    const onResumed = () => {
+      setPaused(false);
+      setAwaitingChairCardId(null);
+    };
+    const onLoopIdle = (e: MessageEvent) => {
+      let d: { reason?: string; cardId?: string } = {};
+      try { d = JSON.parse(e.data); } catch { /* ignore */ }
+      if (d.reason === 'awaiting-chair' && d.cardId) {
+        setAwaitingChairCardId(d.cardId);
+      } else {
+        setAwaitingChairCardId(null);
+      }
+    };
+
     es.addEventListener('turn-started', onTurnStarted);
     es.addEventListener('turn-token', onTurnToken);
     es.addEventListener('turn-completed', onTurnCompleted);
@@ -303,6 +326,9 @@ export function useBoardroomThread(panelId: string | null) {
     es.addEventListener('question-answered', onQuestionAnswered);
     es.addEventListener('question-redirected', onQuestionRedirected);
     es.addEventListener('question-skipped', onQuestionSkipped);
+    es.addEventListener('paused', onPaused);
+    es.addEventListener('resumed', onResumed);
+    es.addEventListener('loop-idle', onLoopIdle);
 
     return () => {
       es.close();
@@ -430,6 +456,19 @@ export function useBoardroomThread(panelId: string | null) {
     await kickoffThread(activeThreadId);
   }, [activeThreadId, kickoffThread]);
 
+  const pause = useCallback(async () => {
+    if (!activeThreadId) throw new Error('No active thread');
+    await jsonFetch(`${BASE}/threads/${activeThreadId}/pause`, { method: 'POST' });
+    setPaused(true);
+  }, [activeThreadId]);
+
+  const resume = useCallback(async () => {
+    if (!activeThreadId) throw new Error('No active thread');
+    await jsonFetch(`${BASE}/threads/${activeThreadId}/resume`, { method: 'POST' });
+    setPaused(false);
+    setAwaitingChairCardId(null);
+  }, [activeThreadId]);
+
   return {
     activeThreadId,
     setActiveThreadId,
@@ -439,6 +478,8 @@ export function useBoardroomThread(panelId: string | null) {
     participantStates: state.participantStates,
     loading,
     error,
+    paused,
+    awaitingChairCardId,
     createThread,
     interject,
     interjectInThread,
@@ -451,6 +492,8 @@ export function useBoardroomThread(panelId: string | null) {
     skipQuestion,
     kickoff,
     kickoffThread,
+    pause,
+    resume,
     refreshThreadList,
     loadThread,
   };

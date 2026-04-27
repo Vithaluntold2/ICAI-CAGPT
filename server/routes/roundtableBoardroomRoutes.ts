@@ -24,6 +24,8 @@ import {
   skipQuestion,
   subscribe,
   kickoff,
+  pauseThread,
+  resumeThread,
 } from '../services/roundtable/roundtableRuntime';
 
 const router = express.Router();
@@ -216,6 +218,29 @@ router.post('/threads/:threadId/kickoff', async (req: Request, res: Response) =>
   try {
     const userId = getCurrentUserId(req);
     await kickoff(userId, req.params.threadId);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+// Pause / resume the boardroom — user-controlled "stop everything" /
+// "carry on". Pause aborts the active stream and prevents any further
+// agent turns until resume is called.
+router.post('/threads/:threadId/pause', async (req: Request, res: Response) => {
+  try {
+    const userId = getCurrentUserId(req);
+    await pauseThread(userId, req.params.threadId);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+router.post('/threads/:threadId/resume', async (req: Request, res: Response) => {
+  try {
+    const userId = getCurrentUserId(req);
+    await resumeThread(userId, req.params.threadId);
     res.json({ ok: true });
   } catch (err) {
     res.status(400).json({ error: err instanceof Error ? err.message : String(err) });

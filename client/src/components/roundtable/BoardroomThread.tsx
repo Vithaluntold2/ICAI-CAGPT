@@ -22,8 +22,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import {
-  StopCircle,
   PauseCircle,
+  PlayCircle,
   Send,
   AtSign,
   HelpCircle,
@@ -196,11 +196,6 @@ export function BoardroomThread({ conversationId, onConfigurePanel }: Props) {
     }
   };
 
-  const stopSpeaker = async () => {
-    const speaking = board.turns.find((t) => t.status === 'streaming');
-    if (speaking) await board.cancelTurn(speaking.id);
-  };
-
   const openCards = board.questionCards.filter((c) => c.status === 'open');
   const isStreaming = board.turns.some((t) => t.status === 'streaming');
   const sessionStartedAt = board.thread?.createdAt ?? null;
@@ -219,19 +214,31 @@ export function BoardroomThread({ conversationId, onConfigurePanel }: Props) {
         <div className="font-exo text-sm font-semibold tracking-tight truncate" title={panel.hydrated?.panel?.name ?? ''}>
           {panel.hydrated?.panel?.name ?? 'Panel'}
         </div>
-        <SessionTimer startedAt={sessionStartedAt} active={isStreaming} />
+        <SessionTimer startedAt={sessionStartedAt} active={isStreaming && !board.paused} />
         <div className="ml-auto flex items-center gap-1.5">
           <TranscriptVolumeChip turns={board.turns} />
-          {isStreaming && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 px-2 text-xs"
-              onClick={stopSpeaker}
-              data-testid="boardroom-stop"
-            >
-              <PauseCircle className="w-3.5 h-3.5 mr-1" /> Stop speaker
-            </Button>
+          {board.activeThreadId && (
+            board.paused ? (
+              <Button
+                variant="default"
+                size="sm"
+                className="h-7 px-2 text-xs bg-aurora-teal hover:bg-aurora-teal/90 text-white border-transparent"
+                onClick={() => board.resume().catch(() => {})}
+                data-testid="boardroom-resume"
+              >
+                <PlayCircle className="w-3.5 h-3.5 mr-1" /> Resume
+              </Button>
+            ) : (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 px-2 text-xs"
+                onClick={() => board.pause().catch(() => {})}
+                data-testid="boardroom-pause"
+              >
+                <PauseCircle className="w-3.5 h-3.5 mr-1" /> Pause
+              </Button>
+            )
           )}
           <Button
             variant="ghost"
@@ -244,6 +251,34 @@ export function BoardroomThread({ conversationId, onConfigurePanel }: Props) {
           </Button>
         </div>
       </header>
+
+      {/* Pause / chair-waiting banner — visible signal when the loop has
+       *  stopped so the user knows the system isn't broken, just waiting. */}
+      {(board.paused || board.awaitingChairCardId) && (
+        <div className="flex-shrink-0 flex items-center gap-2 px-4 py-2 border-b border-border/70 bg-amber-500/10 text-xs">
+          {board.paused ? (
+            <>
+              <PauseCircle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+              <span className="font-medium text-amber-900 dark:text-amber-200">
+                Boardroom paused.
+              </span>
+              <span className="text-amber-800/80 dark:text-amber-300/80">
+                No agents will speak until you click Resume.
+              </span>
+            </>
+          ) : (
+            <>
+              <HelpCircle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+              <span className="font-medium text-amber-900 dark:text-amber-200">
+                Waiting on you.
+              </span>
+              <span className="text-amber-800/80 dark:text-amber-300/80">
+                A panelist asked you a question — answer it in the right rail to let the discussion continue.
+              </span>
+            </>
+          )}
+        </div>
+      )}
 
       {/* Phase stepper */}
       <PhaseStepper

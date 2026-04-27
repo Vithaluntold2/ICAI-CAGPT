@@ -205,6 +205,10 @@ interface ThreadRuntime {
   loopRunning: boolean;
   /** Queue of pending loop triggers (compressed to a single re-run). */
   loopPending: boolean;
+  /** When true, the relevance loop is suspended — agents do not speak
+   *  until the user explicitly resumes (or answers a pending chair
+   *  question if that's what triggered the pause). */
+  paused: boolean;
   /** Last activity timestamp for GC. */
   lastActivity: number;
 }
@@ -223,6 +227,7 @@ function getRuntime(threadId: string): ThreadRuntime {
       activeAbort: null,
       loopRunning: false,
       loopPending: false,
+      paused: false,
       lastActivity: Date.now(),
     };
     runtimes.set(threadId, r);
@@ -607,6 +612,40 @@ export async function setPhase(
   return updated;
 }
 
+/**
+ * Pause the boardroom for this thread. Any active streaming turn is
+ * aborted; the relevance loop bails on its next pass and stays idle
+ * until `resumeThread` is called. Idempotent.
+ */
+export async function pauseThread(userId: string, threadId: string): Promise<void> {
+  const owned = await ownedThread(userId, threadId);
+  if (!owned) throw new Error('Thread not found');
+  const r = getRuntime(threadId);
+  if (r.paused) return;
+  r.paused = true;
+  // Abort the active stream so the user's "stop everything" is immediate.
+  if (r.activeAbort) {
+    try { r.activeAbort.abort(); } catch { /* already aborted */ }
+  }
+  emit(threadId, 'paused', { reason: 'user' });
+}
+
+/**
+ * Resume after a prior pause. Re-schedules the relevance loop so the
+ * conversation picks up where it left off. Idempotent.
+ */
+export async function resumeThread(userId: string, threadId: string): Promise<void> {
+  const owned = await ownedThread(userId, threadId);
+  if (!owned) throw new Error('Thread not found');
+  const r = getRuntime(threadId);
+  if (!r.paused) return;
+  r.paused = false;
+  emit(threadId, 'resumed', {});
+  scheduleRelevanceLoop(userId, threadId).catch((err) => {
+    console.error('[Boardroom] post-resume loop failed:', err);
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Question cards
 // ---------------------------------------------------------------------------
@@ -808,6 +847,16 @@ async function scheduleRelevanceLoop(userId: string, threadId: string): Promise<
 async function runRelevanceLoop(userId: string, threadId: string): Promise<void> {
   const owned = await ownedThread(userId, threadId);
   if (!owned) return;
+
+  // ── Pause guard ────────────────────────────────────────────────
+  // Honour an explicit user-initiated pause. The loop bails immediately;
+  // resumeThread() clears the flag and re-schedules.
+  const r = getRuntime(threadId);
+  if (r.paused) {
+    emit(threadId, 'loop-idle', { reason: 'paused' });
+    return;
+  }
+
   const agents = await loadAgents(owned.panel.id);
   if (agents.length === 0) return;
 
@@ -825,6 +874,17 @@ async function runRelevanceLoop(userId: string, threadId: string): Promise<void>
       eq(roundtableQuestionCards.status, 'open'),
     ))
     .orderBy(asc(roundtableQuestionCards.createdAt));
+
+  // ── Chair-question gate ───────────────────────────────────────
+  // If any open card is addressed to the chair (toUser=true), agents
+  // must NOT speak over a pending chair question. Stop the loop here;
+  // answerQuestion / skipQuestion / redirectQuestion already schedule
+  // the loop again, so it'll resume naturally when the user acts.
+  const chairWaiting = openCards.find((c) => c.toUser);
+  if (chairWaiting) {
+    emit(threadId, 'loop-idle', { reason: 'awaiting-chair', cardId: chairWaiting.id });
+    return;
+  }
 
   const directable = openCards.find((c) => c.toAgentId && !c.toUser);
   if (directable && directable.toAgentId) {

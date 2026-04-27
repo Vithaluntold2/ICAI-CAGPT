@@ -1,6 +1,6 @@
 // client/src/components/shell/ModeSidebar.tsx
 import { useState, useMemo } from 'react';
-import { Sun, Moon, Monitor } from 'lucide-react';
+import { Sun, Moon, Monitor, PanelLeftClose, PanelLeft } from 'lucide-react';
 
 const THEME_SEGMENTS: Array<{ id: ThemeMode; label: string; Icon: typeof Sun }> = [
   { id: 'light', label: 'Light', Icon: Sun },
@@ -32,9 +32,10 @@ interface ModeSidebarProps {
   userInitial?: string;
   themeMode?: ThemeMode;
   onChangeTheme?: (mode: ThemeMode) => void;
-  /** When true, the sidebar collapses to 0 width (content stays mounted but
-   *  clipped so the rail's toggle animation reads smoothly). */
+  /** When true, the sidebar collapses to a 52px icon rail. */
   collapsed?: boolean;
+  /** Toggle handler invoked by the in-header collapse button. */
+  onToggleSidebar?: () => void;
   onSelectMode: (mode: ChatMode) => void;
   onSelectConversation: (id: string) => void;
   onRenameConversation?: (id: string) => void;
@@ -54,6 +55,7 @@ export function ModeSidebar({
   themeMode = 'system',
   onChangeTheme,
   collapsed = false,
+  onToggleSidebar,
   onSelectMode,
   onSelectConversation,
   onRenameConversation,
@@ -89,16 +91,43 @@ export function ModeSidebar({
     >
       {/* ── Header ── */}
       {!collapsed && (
-        <div className="px-4 pt-3.5 pb-2.5 border-b border-border">
-          <div className="font-display font-bold text-[15px] tracking-tight text-foreground">
-            CA-GPT
+        <div className="px-4 pt-3.5 pb-2.5 border-b border-border flex items-start gap-2">
+          <div className="flex-1 min-w-0">
+            <div className="font-display font-bold text-[15px] tracking-tight text-foreground">
+              CA-GPT
+            </div>
+            <div className="text-[11px] text-muted-foreground mt-0.5">
+              Chartered Accountancy · Research &amp; Practice
+            </div>
           </div>
-          <div className="text-[11px] text-muted-foreground mt-0.5">
-            Chartered Accountancy · Research &amp; Practice
-          </div>
+          {onToggleSidebar && (
+            <button
+              type="button"
+              onClick={onToggleSidebar}
+              title="Collapse sidebar"
+              aria-label="Collapse sidebar"
+              className="shrink-0 w-7 h-7 -mr-1 flex items-center justify-center rounded-md text-muted-foreground hover:bg-foreground/5 hover:text-foreground transition-colors"
+            >
+              <PanelLeftClose className="w-4 h-4" strokeWidth={1.75} />
+            </button>
+          )}
         </div>
       )}
-      {collapsed && <div className="h-[57px] border-b border-border shrink-0" />}
+      {collapsed && (
+        <div className="h-[57px] border-b border-border shrink-0 flex items-center justify-center">
+          {onToggleSidebar && (
+            <button
+              type="button"
+              onClick={onToggleSidebar}
+              title="Expand sidebar"
+              aria-label="Expand sidebar"
+              className="w-8 h-8 flex items-center justify-center rounded-md text-muted-foreground hover:bg-foreground/5 hover:text-foreground transition-colors"
+            >
+              <PanelLeft className="w-4 h-4" strokeWidth={1.75} />
+            </button>
+          )}
+        </div>
+      )}
 
       {/* ── Nav ── */}
       <nav className="flex-1 overflow-y-auto py-2">

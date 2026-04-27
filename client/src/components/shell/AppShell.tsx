@@ -65,7 +65,11 @@ export function AppShell({
           bounded height, so the inner `overflow-y-auto` collapsed to content
           and never scrolled). Passing `collapsed` directly lets the aside
           keep its own flex column while still animating width. */}
-      <ModeSidebar collapsed={!sidebarOpen} {...sidebarProps} />
+      <ModeSidebar
+        collapsed={!sidebarOpen}
+        onToggleSidebar={onToggleSidebar}
+        {...sidebarProps}
+      />
       <main className="flex-1 flex flex-col min-w-0 relative">{children}</main>
     </div>
   );

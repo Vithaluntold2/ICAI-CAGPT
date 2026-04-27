@@ -171,17 +171,11 @@ function SuggestionChip({
       onClick={() => onPick(suggestion.prompt)}
       className={[
         'group relative w-full text-left rounded-xl overflow-hidden',
-        'bg-card/60 border border-border',
+        'bg-card/60',
         'transition-all duration-200',
-        'hover:bg-card hover:-translate-y-[1px] hover:border-aurora-teal/40',
-        meta.glow,
+        'hover:bg-card hover:-translate-y-[1px]',
       ].join(' ')}
     >
-      {/* 2px brand-colored left accent — replaces the previous gradient ring
-          which used Tailwind arbitrary values with commas (mask trick) and
-          parsed unreliably in prod, leaving a solid pastel wash. */}
-      <span aria-hidden className={`absolute left-0 top-0 bottom-0 w-[3px] ${meta.accent}`} />
-
       <div className="relative flex items-start gap-3 px-4 py-3">
         <div className={`flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center ${meta.iconWrap}`}>
           <SourceIcon className="w-4 h-4" strokeWidth={2} />
@@ -222,7 +216,7 @@ function SuggestionSkeletons() {
       {delays.map((d, i) => (
         <div
           key={i}
-          className={`w-full h-[68px] rounded-xl border border-border/50 bg-card/30 animate-pulse ${d}`}
+          className={`w-full h-[68px] rounded-xl bg-card/30 animate-pulse ${d}`}
         />
       ))}
     </>

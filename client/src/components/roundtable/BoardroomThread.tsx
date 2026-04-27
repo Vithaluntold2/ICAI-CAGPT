@@ -1100,32 +1100,90 @@ function FinalMemoCard({
   const memoBodyRef = useRef<HTMLDivElement>(null);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
   const { toast } = useToast();
-  const memo = useMemo(() => {
-    if (phase !== 'resolution') return null;
-    // Find the latest completed Moderator turn. Walk in reverse for cheap
-    // first-match.
+  // Required H2 sections for a valid resolution memo. Detection requires
+  // at least 4 of these to appear so a stray synthesis turn (which uses
+  // "## Synthesis Wrap-Up" / "(1) Consensus / (2) Dissent / (3) Open
+  // Questions") doesn't get misidentified as the memo and rendered as
+  // the deliverable.
+  const REQUIRED_MEMO_SECTIONS = [
+    '## Background',
+    '## Issue',
+    '## Analysis',
+    '## Recommendation',
+    '## Risks',           // matches "Risks" or "Risks & Mitigations"
+    '## Implementation',
+    '## Disclosures',
+  ];
+  const MIN_REQUIRED_MATCHES = 4;
+
+  const { memo, isGenerating } = useMemo(() => {
+    if (phase !== 'resolution') return { memo: null, isGenerating: false };
     const moderatorIds = new Set(
       agents
         .filter((a) => (a.createdFromTemplate ?? '') === 'moderator-bot' || /moderator/i.test(a.name))
         .map((a) => a.id),
     );
-    if (moderatorIds.size === 0) return null;
+    if (moderatorIds.size === 0) return { memo: null, isGenerating: false };
+
+    let memoCandidate: string | null = null;
+    let foundAnyModeratorTurn = false;
+    let hasInFlightModeratorTurn = false;
+
     for (let i = turns.length - 1; i >= 0; i--) {
       const t = turns[i];
-      if (
-        t.status === 'completed'
-        && t.speakerKind === 'agent'
-        && t.agentId
-        && moderatorIds.has(t.agentId)
-        && t.content
-        && t.content.includes('## ')
-      ) {
-        return t.content;
+      if (!t.agentId || !moderatorIds.has(t.agentId)) continue;
+      if (t.speakerKind !== 'agent') continue;
+      if (t.status === 'streaming') {
+        hasInFlightModeratorTurn = true;
+        continue;
+      }
+      if (t.status !== 'completed' || !t.content) continue;
+      foundAnyModeratorTurn = true;
+
+      // Require the canonical H2 section structure. A synthesis turn
+      // (which uses "(1) Consensus / (2) Dissent / (3) Open questions")
+      // won't match enough of these to be mistaken for the memo.
+      const matchCount = REQUIRED_MEMO_SECTIONS.reduce(
+        (n, marker) => n + (t.content.includes(marker) ? 1 : 0),
+        0,
+      );
+      if (matchCount >= MIN_REQUIRED_MATCHES) {
+        memoCandidate = t.content;
+        break;
       }
     }
-    return null;
+
+    return {
+      memo: memoCandidate,
+      // Show "generating" placeholder if we're in resolution but the
+      // Moderator hasn't yet produced a memo-shaped turn (could be in
+      // flight, or could have produced a synthesis-shaped turn that
+      // we correctly rejected — either way, the user should see a
+      // status, not nothing).
+      isGenerating: !memoCandidate && (hasInFlightModeratorTurn || !foundAnyModeratorTurn),
+    };
   }, [turns, phase, agents]);
 
+  // Show a placeholder card when in resolution but no memo yet. Better
+  // than rendering nothing — the user knows the system is working on it.
+  if (!memo && phase === 'resolution') {
+    return (
+      <div
+        className="mt-6 rounded-lg border-2 border-dashed border-aurora-teal/30 bg-card/40 p-6 text-center"
+        data-testid="boardroom-final-memo-placeholder"
+      >
+        <FileText className="w-6 h-6 mx-auto text-aurora-teal/60 mb-2" />
+        <div className="text-sm font-medium mb-1">
+          {isGenerating ? 'Moderator is drafting the final board memo…' : 'Final board memo not yet produced.'}
+        </div>
+        <div className="text-xs text-muted-foreground">
+          {isGenerating
+            ? 'The deliverable will appear here once the structured H2 sections are written.'
+            : 'The Moderator\'s last turn did not follow the required board-memo format. Click Pause then Resume to retry, or @-tag the Moderator with "Produce the final board memo now".'}
+        </div>
+      </div>
+    );
+  }
   if (!memo) return null;
 
   const safeTitle = threadTitle.replace(/[^a-zA-Z0-9-_ ]/g, '').replace(/\s+/g, '_').slice(0, 60) || 'Boardroom';

@@ -646,9 +646,45 @@ export async function setPhase(
     .where(eq(roundtableThreads.id, threadId))
     .returning();
   emit(threadId, 'phase-changed', { phase });
-  scheduleRelevanceLoop(userId, threadId).catch((err) => {
-    console.error('[Boardroom] post-phase loop failed:', err);
-  });
+
+  // When entering RESOLUTION, the deliverable must be produced —
+  // we don't trust the relevance loop to pick the right agent with
+  // the right intent. Directly schedule a Moderator turn with an
+  // explicit memo-generation directive that re-states the H2
+  // template and forbids copying synthesis structure. Falls back
+  // to the normal loop if no Moderator exists on the panel.
+  if (phase === 'resolution') {
+    const agents = await loadAgents(owned.panel.id);
+    const moderator = agents.find(
+      (a) => a.createdFromTemplate === 'moderator-bot' || /moderator/i.test(a.name),
+    );
+    if (moderator) {
+      // Run async — don't block the setPhase HTTP response. Errors are
+      // swallowed because the chair doesn't need to see them; the
+      // FinalMemoCard will surface "memo not generated" if it fails.
+      runAgentTurn(userId, threadId, moderator.id, {
+        reason: 'resolution-memo',
+        headline: 'Produce the FINAL BOARD MEMO',
+        injectedPrompt:
+          'Produce the FINAL BOARD MEMO now. Use ONLY these H2 sections, in order, verbatim: ' +
+          '## Background, ## Issue, ## Analysis, ## Recommendation, ## Risks & Mitigations, ## Implementation, ## Disclosures. ' +
+          'DO NOT use synthesis structure ("(1) Consensus / (2) Dissent / (3) Open questions"). ' +
+          'DO NOT title the document "Synthesis Wrap-Up", "Wrap-Up", or "Recap". ' +
+          'DO NOT add "Pending chair acceptance" or any epilogue. ' +
+          'Carry forward all computed numbers and citations from the synthesis turn so the memo stands alone as the deliverable.',
+      }).catch((err) => {
+        console.error('[Boardroom] resolution memo turn failed:', err);
+      });
+    } else {
+      scheduleRelevanceLoop(userId, threadId).catch((err) => {
+        console.error('[Boardroom] post-phase loop failed:', err);
+      });
+    }
+  } else {
+    scheduleRelevanceLoop(userId, threadId).catch((err) => {
+      console.error('[Boardroom] post-phase loop failed:', err);
+    });
+  }
   return updated;
 }
 
@@ -1307,9 +1343,15 @@ function phaseInstructionFor(phase: string, agent: RoundtablePanelAgent): string
       return isModerator
         ? `RESOLUTION PHASE — FINAL BOARD MEMO.
 
-⚠ CRITICAL: This output IS the deliverable the chair downloads. It is NOT a synthesis recap. Do NOT use the synthesis "(1) Consensus / (2) Dissent / (3) Open questions" structure here — that belongs in synthesis phase only. If you copy that structure in resolution, the deliverable is broken.
+This output IS the deliverable the chair downloads as a PDF. It is NOT a synthesis recap.
 
-REQUIRED OUTPUT FORMAT — use these EXACT H2 headings, in this order, verbatim. No other top-level structure is acceptable:
+HARD CONSTRAINTS:
+  - DO NOT use the synthesis "(1) Consensus / (2) Dissent / (3) Open questions" structure here — that belongs to synthesis phase only.
+  - DO NOT use a heading like "Synthesis Wrap-Up", "Wrap-Up", "Summary", or "Recap". Those are wrong.
+  - DO NOT prefix sections with "1)", "2)", "3)" or any other numbering. Use the exact H2 headings listed below.
+  - DO NOT add commentary like "Pending chair acceptance, advance to resolution" — you are ALREADY in resolution.
+
+REQUIRED OUTPUT FORMAT — use these EXACT H2 Markdown headings, in this order, verbatim. No other top-level structure is acceptable. Each section MUST appear:
 
 ## Background
 2-3 sentences on the situation: entity name, transaction, scale, deadline.
@@ -1321,7 +1363,7 @@ The specific question the board is being asked to decide. One sentence.
 The panel's reasoning, with cited standards/statutes (Ind AS X.Y, §92C, SA-705.7, etc.) and the computed numbers carried forward from synthesis (materiality benchmarks with multipliers, restated amounts, the Dr/Cr journal entry as inline lines).
 
 ## Recommendation
-ONE sentence — clear, defensible, executable. Imperative voice ("Restate revenue to ₹3.5 cr and engage TPO post-restatement").
+ONE sentence — clear, defensible, executable. Imperative voice ("Recognise the full ₹130 cr impairment and pursue covenant standstill in parallel").
 
 ## Risks & Mitigations
 Numbered list (2-4 items). Each item: one-line risk + one-line mitigation. Use the Devil's Advocate's "single sensitivity that would flip the conclusion" as one of the risks.
@@ -1330,9 +1372,9 @@ Numbered list (2-4 items). Each item: one-line risk + one-line mitigation. Use t
 Numbered list (3-6 items) of immediate next steps. For each: WHO does WHAT BY WHEN, fitting inside the chair's stated timeline.
 
 ## Disclosures
-Specific Ind AS / SA / SEBI disclosures required by this recommendation, with paragraph references (e.g., Ind AS 8.42 restatement note, Ind AS 24 related-party, Ind AS 37.86 contingent liability, SEBI LODR Reg 30 if material).
+Specific Ind AS / SA / SEBI disclosures required, with paragraph references (e.g., Ind AS 36.134(d) sensitivity, Ind AS 24 related-party, SEBI LODR Reg 30 if material).
 
-After producing the memo, the discussion ENDS. Do not propose further phase transitions. Do not summarise. Do not add an epilogue.`
+After producing the memo with all seven sections above, the discussion ENDS. Do not propose further phase transitions. Do not summarise. Do not add an epilogue. Do not add a "Pending chair acceptance" line.`
         : 'RESOLUTION PHASE: the Moderator is producing the final memo. Cede the floor unless the Moderator directly addresses you for a fact-check.';
     default:
       return '';

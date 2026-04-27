@@ -1003,20 +1003,32 @@ async function runRelevanceLoop(userId: string, threadId: string): Promise<void>
   }
 
   // ── Normal propose-and-pick path ───────────────────────────────
+  // In synthesis/resolution phases, the wrap-up belongs to the Moderator.
+  // Specialists were ceding-on-pick because their phase-aware prompt told
+  // them to defer — wasting LLM calls and producing ugly cancelled bubbles.
+  // Restrict the propose pool to the Moderator (specialists can still
+  // respond if directly addressed via address-routing, which runs above).
+  const phase = owned.thread.phase;
+  const isLatePhase = phase === 'synthesis' || phase === 'resolution';
+  const moderatorOnly = isLatePhase
+    ? agents.filter((a) => a.createdFromTemplate === 'moderator-bot' || /moderator/i.test(a.name))
+    : [];
+  const proposingAgents = isLatePhase && moderatorOnly.length > 0 ? moderatorOnly : agents;
+
   const threadContext = await loadRecentThreadContext(threadId, 10);
 
   // Notify clients all agents are evaluating relevance.
-  for (const a of agents) {
+  for (const a of proposingAgents) {
     emit(threadId, 'participant-state', { agentId: a.id, state: 'thinking' });
   }
 
   const proposals = await Promise.all(
-    agents.map((a) => proposeForAgent(a, threadContext, owned.thread.phase)),
+    proposingAgents.map((a) => proposeForAgent(a, threadContext, owned.thread.phase)),
   );
   const valid = proposals.filter((p): p is ProposeResult => p !== null);
   const winner = await pickNextSpeaker(valid);
 
-  for (const a of agents) {
+  for (const a of proposingAgents) {
     emit(threadId, 'participant-state', { agentId: a.id, state: 'listening' });
   }
 

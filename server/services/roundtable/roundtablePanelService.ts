@@ -28,6 +28,7 @@ import {
   type InsertRoundtablePanelAgent,
   type InsertRoundtableKbDoc,
 } from '@shared/schema';
+import { getTemplate } from './roundtableTemplates';
 
 // ----------------------------------------------------------------------
 // Panels
@@ -67,6 +68,32 @@ export async function createPanel(
       metadata: data.metadata ?? {},
     })
     .returning();
+
+  // Every live panel needs a Moderator — it routes the discussion, suggests
+  // phase transitions, and synthesises consensus. Without one, agents have
+  // no chair-substitute to defer to and the loop tends to converge into
+  // parallel monologues. Skip for template panels (those are user-curated
+  // reusable presets — the user composes them deliberately).
+  if (!panel.isTemplate) {
+    const moderatorTemplate = getTemplate('moderator-bot');
+    if (moderatorTemplate) {
+      await db
+        .insert(roundtablePanelAgents)
+        .values({
+          panelId: panel.id,
+          name: moderatorTemplate.name,
+          avatar: moderatorTemplate.avatar,
+          color: moderatorTemplate.color,
+          systemPrompt: moderatorTemplate.systemPrompt,
+          useBaseKnowledge: moderatorTemplate.useBaseKnowledge,
+          model: moderatorTemplate.model,
+          toolAllowlist: [],
+          createdFromTemplate: moderatorTemplate.id,
+          position: 0,
+        });
+    }
+  }
+
   return panel;
 }
 

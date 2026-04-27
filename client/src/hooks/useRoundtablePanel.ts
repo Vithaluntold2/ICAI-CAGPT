@@ -213,6 +213,20 @@ export function useRoundtablePanel(conversationId: string | null) {
     if (panelId) refresh();
   }, [panelId, refresh]);
 
+  // Poll while any KB doc is still ingesting. The pipeline writes
+  // `ingestStatus` from `pending` → `ready` / `failed` after the embedding
+  // job completes; without polling the UI sticks on "pending" until the
+  // user reopens the builder. Cleared as soon as everything settles.
+  useEffect(() => {
+    if (!panelId || !hydrated) return;
+    const hasPending = hydrated.docs.some((d) => d.ingestStatus === 'pending');
+    if (!hasPending) return;
+    const interval = window.setInterval(() => {
+      void refresh();
+    }, 2500);
+    return () => window.clearInterval(interval);
+  }, [panelId, hydrated, refresh]);
+
   // ----- panel-level ops -----
   const createPanelForConversation = useCallback(
     async (name?: string, explicitConversationId?: string) => {

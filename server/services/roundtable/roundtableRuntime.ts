@@ -1194,23 +1194,50 @@ function buildAgentSystemPrompt(
  */
 function phaseInstructionFor(phase: string, agent: RoundtablePanelAgent): string {
   const isModerator = agent.createdFromTemplate === 'moderator-bot' || /moderator/i.test(agent.name);
+  const isAdvocate = agent.createdFromTemplate === 'devil-advocate-bot' || /advocate|critic/i.test(agent.name);
   switch (phase) {
     case 'opening':
-      return 'OPENING PHASE: panelists introduce their position on the chair\'s prompt. State your view in 2-4 sentences. Do not yet challenge other panelists in detail — that\'s for cross-examination.';
+      return 'OPENING PHASE: state your position in 2-4 sentences. Do not yet challenge other panelists in detail — that\'s for cross-examination. If your position rests on a quantifiable claim (materiality, impact, threshold), compute it inline now (formula → inputs → result).';
     case 'independent-views':
-      return 'INDEPENDENT VIEWS PHASE: each specialist commits to a position and surfaces the assumptions behind it. Stay narrow to your own specialty for now.';
+      return 'INDEPENDENT VIEWS PHASE: commit to a position and surface the assumptions behind it. Stay narrow to your own specialty. Quantify any numerical claims explicitly.';
     case 'cross-examination':
-      return 'CROSS-EXAMINATION PHASE: actively probe other panelists\' positions. Use ask_panelist or start_side_thread to surface dependencies and disagreements. Do not just restate your own view.';
+      if (isAdvocate) {
+        return 'CROSS-EXAMINATION PHASE: this is YOUR primary phase. Articulate the strongest possible case for the option(s) the panel is rejecting. Steel-man the rejected position in detail — citations, scenarios, defensible interpretations. The chair NEEDS this case on the record before consensus is locked. Do not concede; if the panel\'s case is genuinely overwhelming, state precisely what evidence or fact would have to be different to flip the conclusion.';
+      }
+      return 'CROSS-EXAMINATION PHASE: actively probe other panelists\' positions. Use ask_panelist or start_side_thread to surface dependencies and disagreements. Do not just restate your own view. Required: at least one challenge to a peer\'s claim per turn — politely converging is not allowed in this phase.';
     case 'user-qa':
       return 'USER Q&A PHASE: the chair leads. Only speak if directly addressed or if you have a critical safety/compliance flag the chair clearly missed.';
     case 'synthesis':
       return isModerator
-        ? 'SYNTHESIS PHASE: produce a structured wrap-up of the panel\'s position so far — Sections: (1) Consensus, (2) Key dissent if any, (3) Open questions still unresolved. Do not introduce new analysis. After your synthesis, propose_phase_transition({to_phase: "resolution"}) if the panel agrees.'
+        ? 'SYNTHESIS PHASE: produce a structured wrap-up. Required sections: (1) Consensus position with the SUPPORTING NUMBERS (materiality computed, restated amounts, journal entries). (2) Key dissent — if the Devil\'s Advocate raised a steel-man, summarise it and explain why the panel is rejecting it. (3) Open questions still unresolved. Do not introduce new analysis. After your synthesis, propose_phase_transition({to_phase: "resolution"}) if the panel agrees.'
         : 'SYNTHESIS PHASE: defer to the Moderator unless they directly address you. If you cede, do so via cede_floor — do not write empty filler.';
     case 'resolution':
       return isModerator
-        ? 'RESOLUTION PHASE: produce the FINAL board-ready output. Structure as: (1) One-sentence recommendation, (2) Rationale (3-5 sentences), (3) Recommended immediate next steps (numbered). This is the conclusion — the discussion ends here. Do not propose further phase transitions.'
-        : 'RESOLUTION PHASE: the Moderator is producing the final wrap-up. Cede the floor unless the Moderator directly addresses you for a fact-check.';
+        ? `RESOLUTION PHASE: produce the FINAL BOARD MEMO. Use this exact structured Markdown format with H2 sections — the chair will export this as the deliverable:
+
+## Background
+2-3 sentences on the situation (entity, transaction, scale).
+
+## Issue
+The specific question the board is being asked to decide.
+
+## Analysis
+The panel\'s reasoning, with cited standards/statutes and computed numbers (materiality, restated amounts, journal entries shown as Dr/Cr lines).
+
+## Recommendation
+ONE sentence — clear, defensible, executable.
+
+## Risks & Mitigations
+Numbered list of the 2-4 most important risks of the recommendation, each with a one-line mitigation.
+
+## Implementation
+Numbered list of immediate next steps (who, what, by when), within the chair\'s stated timeline.
+
+## Disclosures
+Specific Ind AS / SA / SEBI disclosures required by this recommendation, with paragraph references.
+
+This is the conclusion — the discussion ends here. Do not propose further phase transitions.`
+        : 'RESOLUTION PHASE: the Moderator is producing the final memo. Cede the floor unless the Moderator directly addresses you for a fact-check.';
     default:
       return '';
   }

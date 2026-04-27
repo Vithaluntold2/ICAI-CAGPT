@@ -1633,12 +1633,24 @@ async function runAgentTurn(
     }
 
     const persistedContent = abort.signal.aborted ? accumulated : finalContent;
-    const finalStatus = abort.signal.aborted ? 'cancelled' : 'completed';
+    // Empty-response detection: occasionally the LLM completes the
+    // tool-call loop with no text and no tool calls (provider hiccup,
+    // safety filter, or just an unhelpful generation). Persisting this
+    // as `completed` produces a hollow "(no response generated)" bubble
+    // in the UI. Treat it as a cancelled turn with a distinct reason
+    // so it renders as a faded inline note (same path as cede_floor).
+    const isEmpty = !abort.signal.aborted && persistedContent.trim().length === 0;
+    const finalStatus = abort.signal.aborted || isEmpty ? 'cancelled' : 'completed';
+    const finalCancelReason = abort.signal.aborted
+      ? 'aborted'
+      : isEmpty
+        ? 'ceded: empty response from model'
+        : null;
 
     await updateTurn(turn.id, {
       content: persistedContent,
       status: finalStatus,
-      cancelReason: abort.signal.aborted ? 'aborted' : null,
+      cancelReason: finalCancelReason,
       tokensInput: totalTokensIn,
       tokensOutput: totalTokensOut,
       costMicros: totalCostMicros,
@@ -1648,7 +1660,10 @@ async function runAgentTurn(
     await debitBudget(owned.thread.conversationId, totalCostMicros);
 
     if (finalStatus === 'cancelled') {
-      emit(threadId, 'turn-cancelled', { turnId: turn.id, reason: 'aborted' });
+      emit(threadId, 'turn-cancelled', {
+        turnId: turn.id,
+        reason: finalCancelReason ?? 'aborted',
+      });
     } else {
       emit(threadId, 'turn-completed', {
         turnId: turn.id,

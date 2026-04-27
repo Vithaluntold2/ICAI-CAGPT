@@ -896,24 +896,49 @@ async function gatherKbContext(agentId: string, query: string): Promise<{ snippe
   return { snippets, citations };
 }
 
-function buildAgentSystemPrompt(agent: RoundtablePanelAgent, kbSnippets: string): string {
+function buildAgentSystemPrompt(
+  agent: RoundtablePanelAgent,
+  kbSnippets: string,
+  allAgents: RoundtablePanelAgent[],
+): string {
   const baseGate = agent.useBaseKnowledge
     ? `You may use your training knowledge in addition to any provided context.`
     : `STRICT BASE-KNOWLEDGE GATE: You MUST answer only from the provided KB context below. If the context does not contain the answer, reply exactly "No source in panel KB" and stop. Do NOT use your training knowledge.`;
   const kbBlock = kbSnippets
     ? `\n\n=== PANEL KB CONTEXT (for retrieval-grounded answers) ===\n${kbSnippets}\n=== END KB ===`
     : (agent.useBaseKnowledge ? '' : '\n\n(No KB context retrieved for this turn.)');
+
+  // Roster: every OTHER member, by name + template/category, so the agent
+  // knows who actually exists on this panel and can address them by their
+  // real display name. Without this, agents hallucinate roles ("defer to
+  // governance and funding agents") that aren't on the panel.
+  const others = allAgents.filter((a) => a.id !== agent.id);
+  const rosterBlock = others.length === 0
+    ? `\n\n=== PANEL ROSTER ===\nYou are the only panelist. There are no other agents to address — direct any clarifying questions to the chair (the user) using ask_panelist with to_agent_name="chair".\n=== END ROSTER ===`
+    : `\n\n=== PANEL ROSTER (other members you may address) ===\n${others
+        .map((a) => {
+          const tag = a.createdFromTemplate ? ` [${a.createdFromTemplate}]` : '';
+          return `  • "${a.name}"${tag}`;
+        })
+        .join('\n')}\nThe chair (the user) can also be addressed as to_agent_name="chair".\nIMPORTANT: If a question requires a specialty NOT represented above, address the chair — do NOT invent panelists ("Governance Bot", "Legal Counsel") that don't exist.\n=== END ROSTER ===`;
+
   return [
     `You are ${agent.name}, a panel expert in a roundtable discussion.`,
     `Persona / instructions: ${agent.systemPrompt}`,
     baseGate,
     'Stay in character. Speak in the first person. Keep your contribution focused and under ~250 words unless the chair asks for depth.',
     '',
-    'Available tools (call instead of writing free-form questions):',
-    '  • ask_panelist({to_agent_name, question})    — open question card; relevance loop routes the next speaker.',
-    '  • start_side_thread({to_agent_name, question}) — nested clarification answered immediately under your turn. Use sparingly (max one per turn) and only when their answer is a prerequisite for your point.',
-    '  • cede_floor({reason})                       — yield without speaking when the topic is outside your specialty.',
-    'Tool usage rules: pair AT MOST one tool call with your spoken contribution; do not embed pseudo-questions in prose — use ask_panelist instead.',
+    'Available tools (PREFER calling these over writing rhetorical disagreement in prose):',
+    '  • ask_panelist({to_agent_name, question})       — open question card; relevance loop routes the next speaker. Use whenever you would otherwise write "I need to know X from <other agent>" or "<other agent> should clarify Y".',
+    '  • start_side_thread({to_agent_name, question})  — nested clarification answered immediately under your turn. Use sparingly (max one per turn) and only when their answer is a prerequisite you cannot proceed without.',
+    '  • cede_floor({reason})                          — yield without speaking when the topic is genuinely outside your specialty AND another panelist on the roster covers it.',
+    '',
+    'Tool usage rules:',
+    '  - You may pair AT MOST one tool call with your spoken contribution.',
+    '  - Do NOT embed pseudo-questions in prose ("I wonder if Tax could clarify…") — call ask_panelist instead.',
+    '  - When the chair explicitly asks you to "ask them directly", "challenge each other", or to surface dependencies on another specialty, you SHOULD use ask_panelist for at least one concrete question.',
+    '  - to_agent_name MUST exactly match a name from the PANEL ROSTER above (or "chair").',
+    rosterBlock,
     kbBlock,
   ].join('\n');
 }
@@ -1022,18 +1047,8 @@ async function runAgentTurn(
     const queryForKb = (meta.injectedPrompt ?? lastUserish.replace('[CHAIR]', '')).trim() || agent.name;
     const { snippets, citations } = await gatherKbContext(agent.id, queryForKb);
 
-    const systemPrompt = buildAgentSystemPrompt(agent, snippets);
-    const userPrompt = [
-      `Current phase: ${owned.thread.phase}.`,
-      'Recent thread (most recent last):',
-      threadContext || '(empty)',
-      '',
-      meta.injectedPrompt ? `Direct request to you: ${meta.injectedPrompt}` : '',
-      meta.headline ? `Your draft headline (refine if needed): ${meta.headline}` : '',
-      'Now contribute your turn. Use tools where appropriate; otherwise respond in plain text.',
-    ].filter(Boolean).join('\n');
-
-    // -- Tool-call loop -------------------------------------------------
+    // Load roster early so it can be injected into the system prompt and
+    // also used by the tool-call resolver below.
     const allAgents = await loadAgents(owned.panel.id);
     const findAgentByName = (raw: string): RoundtablePanelAgent | null => {
       const norm = raw.trim().toLowerCase();
@@ -1045,6 +1060,19 @@ async function runAgentTurn(
         null
       );
     };
+
+    const systemPrompt = buildAgentSystemPrompt(agent, snippets, allAgents);
+    const userPrompt = [
+      `Current phase: ${owned.thread.phase}.`,
+      'Recent thread (most recent last):',
+      threadContext || '(empty)',
+      '',
+      meta.injectedPrompt ? `Direct request to you: ${meta.injectedPrompt}` : '',
+      meta.headline ? `Your draft headline (refine if needed): ${meta.headline}` : '',
+      'Now contribute your turn. Use tools where appropriate; otherwise respond in plain text.',
+    ].filter(Boolean).join('\n');
+
+    // -- Tool-call loop -------------------------------------------------
 
     const extraMessages: Array<{
       role: 'system' | 'user' | 'assistant' | 'tool';
@@ -1110,8 +1138,37 @@ async function runAgentTurn(
           } else if (call.name === 'ask_panelist' || call.name === 'start_side_thread') {
             const targetName = String((call.input as any)?.to_agent_name ?? '').trim();
             const question = String((call.input as any)?.question ?? '').trim();
+            const isChair = /^chair$|^the chair$|^user$|^you$/i.test(targetName);
             if (!question) {
               resultPayload = { ok: false, error: 'question is required' };
+            } else if (isChair) {
+              // Chair-targeted card: question stays open in the right rail
+              // until the user answers it. Side-thread variant doesn't make
+              // sense here (no auto-reply from chair) — downgrade to ask.
+              const [card] = await db
+                .insert(roundtableQuestionCards)
+                .values({
+                  threadId,
+                  parentTurnId: turn.id,
+                  fromAgentId: agent.id,
+                  toAgentId: null,
+                  toUser: true,
+                  text: question,
+                  status: 'open',
+                })
+                .returning();
+              cardIds.push(card.id);
+              if (!questionId) questionId = card.id;
+              emit(threadId, 'question-card', {
+                qid: card.id,
+                fromAgentId: agent.id,
+                toAgentId: null,
+                toUser: true,
+                text: question,
+                parentTurnId: turn.id,
+                sideThread: false,
+              });
+              resultPayload = { ok: true, question_card_id: card.id, will_run_inline: false };
             } else {
               const target = findAgentByName(targetName);
               if (!target) {

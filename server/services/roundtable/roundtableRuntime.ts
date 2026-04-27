@@ -1464,17 +1464,49 @@ async function runAgentTurn(
 
     for (let iter = 0; iter < MAX_AGENT_TOOL_ITERATIONS; iter++) {
       if (abort.signal.aborted) throw new Error('aborted');
-      const result = await callLLM({
-        systemPrompt,
-        userPrompt,
-        maxTokens: agent.model === 'mini' ? 600 : 1200,
-        temperature: 0.6,
-        modelTier: agent.model === 'mini' ? 'mini' : 'strong',
-        signal: abort.signal,
-        tools: AGENT_TOOLS,
-        toolChoice: 'auto',
-        extraMessages: extraMessages.length > 0 ? extraMessages : undefined,
-      });
+
+      // Retry with exponential backoff on transient provider issues
+      // (empty content from a rate-limited provider, "All providers
+      // failed" exhaustion). Max 3 attempts: 0s + 2s + 5s wait.
+      // Real terminal errors (auth, schema, etc.) bubble through after
+      // the last attempt and the outer try/catch marks the turn failed.
+      let result: Awaited<ReturnType<typeof callLLM>> | null = null;
+      let lastErr: unknown = null;
+      const RETRY_BACKOFF_MS = [0, 2000, 5000];
+      for (const wait of RETRY_BACKOFF_MS) {
+        if (wait > 0) {
+          await new Promise((r) => setTimeout(r, wait));
+          if (abort.signal.aborted) throw new Error('aborted');
+        }
+        try {
+          result = await callLLM({
+            systemPrompt,
+            userPrompt,
+            maxTokens: agent.model === 'mini' ? 600 : 1200,
+            temperature: 0.6,
+            modelTier: agent.model === 'mini' ? 'mini' : 'strong',
+            signal: abort.signal,
+            tools: AGENT_TOOLS,
+            toolChoice: 'auto',
+            extraMessages: extraMessages.length > 0 ? extraMessages : undefined,
+          });
+          // Empty content with no tool calls = transient provider hiccup.
+          // Retry instead of accepting silence as "the agent ceded".
+          const empty = (result.content ?? '').trim().length === 0
+            && (result.toolCalls ?? []).length === 0;
+          if (!empty) break;
+          lastErr = new Error('Provider returned empty content');
+        } catch (err) {
+          lastErr = err;
+          if (err instanceof Error && err.message === 'aborted') throw err;
+          // continue to next backoff attempt
+        }
+      }
+      if (!result) {
+        throw lastErr instanceof Error
+          ? lastErr
+          : new Error('LLM call failed after retries');
+      }
 
       totalTokensIn += result.tokensInput;
       totalTokensOut += result.tokensOutput;

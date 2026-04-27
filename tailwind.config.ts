@@ -10,6 +10,15 @@ export default {
         md: ".375rem", /* 6px */
         sm: ".1875rem", /* 3px */
       },
+      backgroundImage: {
+        "gradient-aurora": "var(--gradient-aurora)",
+      },
+      boxShadow: {
+        float: "var(--shadow-float)",
+        popover: "var(--shadow-popover)",
+        dialog: "var(--shadow-dialog)",
+        "glow-teal": "var(--glow-teal)",
+      },
       colors: {
         // Flat / base colors (regular buttons)
         background: "hsl(var(--background) / <alpha-value>)",
@@ -91,6 +100,14 @@ export default {
           busy: "rgb(239 68 68)",
           offline: "rgb(156 163 175)",
         },
+        "aurora-navy": "hsl(var(--aurora-navy))",
+        "aurora-cyan": "hsl(var(--aurora-cyan))",
+        "aurora-teal": "hsl(var(--aurora-teal))",
+        "aurora-teal-soft": "hsl(var(--aurora-teal-soft))",
+        "aurora-gold": "hsl(var(--aurora-gold))",
+        "aurora-gold-deep": "hsl(var(--aurora-gold-deep))",
+        "aurora-amber-deep": "hsl(var(--aurora-amber-deep))",
+        "border-strong": "hsl(var(--border-strong))",
       },
       fontFamily: {
         sans: ["var(--font-sans)"],

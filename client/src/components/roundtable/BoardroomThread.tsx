@@ -54,6 +54,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { useRoundtablePanel } from '@/hooks/useRoundtablePanel';
+import { useToast } from '@/hooks/use-toast';
 import {
   useBoardroomThread,
   type BoardroomTurnDTO,
@@ -1098,6 +1099,7 @@ function FinalMemoCard({
 }) {
   const memoBodyRef = useRef<HTMLDivElement>(null);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
+  const { toast } = useToast();
   const memo = useMemo(() => {
     if (phase !== 'resolution') return null;
     // Find the latest completed Moderator turn. Walk in reverse for cheap
@@ -1213,6 +1215,7 @@ function FinalMemoCard({
   const handleDownloadPdf = async () => {
     if (downloadingPdf) return;
     setDownloadingPdf(true);
+    let serverError: string | null = null;
     try {
       // Server pipeline first — buildDocumentPdfBuffer renders via
       // headless Chrome for a true vector PDF with KaTeX-rendered math
@@ -1223,7 +1226,13 @@ function FinalMemoCard({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title: threadTitle, content: memo }),
       });
-      if (res.ok) {
+      const contentType = res.headers.get('content-type') ?? '';
+
+      // Defensive: only treat as PDF if both status and content-type
+      // confirm it. Without this check, a stale server (route not yet
+      // mounted) returns Vite's index.html with status 200, and we
+      // happily download HTML as a .pdf file.
+      if (res.ok && contentType.startsWith('application/pdf')) {
         const blob = await res.blob();
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -1235,7 +1244,16 @@ function FinalMemoCard({
         URL.revokeObjectURL(url);
         return;
       }
-      console.warn('[BoardroomMemo] Server PDF export failed, falling back to client-side', res.status);
+
+      if (res.ok && !contentType.startsWith('application/pdf')) {
+        serverError = `Server returned ${contentType || 'unknown content type'} instead of PDF — has the dev server been restarted since this route was added?`;
+      } else {
+        // Try to read JSON error body if any.
+        let body = '';
+        try { body = await res.text(); } catch { /* noop */ }
+        serverError = `Server returned ${res.status}: ${body.slice(0, 200) || res.statusText}`;
+      }
+      console.warn('[BoardroomMemo] Server PDF export failed:', serverError, '— falling back to client-side');
       await downloadPdfClientSide();
     } catch (err) {
       console.error('[BoardroomMemo] PDF export error:', err);
@@ -1244,6 +1262,14 @@ function FinalMemoCard({
         await downloadPdfClientSide();
       } catch (fallbackErr) {
         console.error('[BoardroomMemo] Client-side fallback also failed:', fallbackErr);
+        const msg = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
+        toast({
+          title: 'PDF download failed',
+          description: serverError
+            ? `${serverError} (Client fallback: ${msg})`
+            : `Both server and client pipelines failed. ${msg}`,
+          variant: 'destructive',
+        });
       }
     } finally {
       setDownloadingPdf(false);

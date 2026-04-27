@@ -10,7 +10,6 @@ const THEME_SEGMENTS: Array<{ id: ThemeMode; label: string; Icon: typeof Sun }> 
 import { MODES, type ChatMode } from '@/lib/mode-registry';
 import { ModeRow } from './ModeRow';
 import { ConvoRow } from './ConvoRow';
-import { Kbd } from '@/components/ui/Kbd';
 import { cn } from '@/lib/utils';
 
 export type ThemeMode = 'light' | 'dark' | 'system';
@@ -228,8 +227,10 @@ export function ModeSidebar({
 
       {/* ── Footer ── */}
       {collapsed ? (
-        /* Collapsed: avatar + theme icons in a compact vertical-column,
-           theme icons are arranged horizontally ("becomes horizontal"). */
+        /* Collapsed: avatar + a single vertical strip of icon controls
+           (theme segments + sign-out). Sign-out sits below a thin divider
+           so it reads as a destructive-coloured "exit" rather than a
+           fourth theme option. */
         <footer className="py-2.5 border-t border-border flex flex-col items-center gap-2">
           <div
             title={`${userLabel} · ${userPlan}`}
@@ -237,9 +238,9 @@ export function ModeSidebar({
           >
             {userInitial}
           </div>
-          {onChangeTheme && (
-            <div className="flex flex-col items-center gap-1">
-              {THEME_SEGMENTS.map(({ id, label, Icon }) => (
+          {(onChangeTheme || onSignOut) && (
+            <div className="flex flex-col items-center gap-0.5">
+              {onChangeTheme && THEME_SEGMENTS.map(({ id, label, Icon }) => (
                 <button
                   key={id}
                   type="button"
@@ -256,23 +257,29 @@ export function ModeSidebar({
                   <Icon className="w-3 h-3" strokeWidth={1.75} />
                 </button>
               ))}
+              {onChangeTheme && onSignOut && (
+                <div aria-hidden className="w-3 h-px bg-border my-0.5" />
+              )}
+              {onSignOut && (
+                <button
+                  type="button"
+                  title="Sign out"
+                  aria-label="Sign out"
+                  onClick={onSignOut}
+                  data-testid="sidebar-sign-out"
+                  className="w-6 h-6 flex items-center justify-center rounded text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
+                >
+                  <LogOut className="w-3 h-3" strokeWidth={1.75} />
+                </button>
+              )}
             </div>
-          )}
-          {onSignOut && (
-            <button
-              type="button"
-              title="Sign out"
-              aria-label="Sign out"
-              onClick={onSignOut}
-              data-testid="sidebar-sign-out"
-              className="w-6 h-6 flex items-center justify-center rounded text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
-            >
-              <LogOut className="w-3 h-3" strokeWidth={1.75} />
-            </button>
           )}
         </footer>
       ) : (
-        /* Expanded: full user row */
+        /* Expanded: avatar + name/plan, then a single segmented strip
+           combining theme toggle + sign-out. Dropping the ⌘K hint
+           previously here — it forced the row to wrap on common
+           usernames and the shortcut is already discoverable globally. */
         <footer className="px-3.5 py-2.5 border-t border-border flex items-center gap-2 text-[12px] text-muted-foreground">
           <div className="w-[26px] h-[26px] rounded-full bg-gradient-to-br from-violet-600 to-cyan-600 flex items-center justify-center text-white text-[11px] font-bold font-display shrink-0">
             {userInitial}
@@ -281,24 +288,45 @@ export function ModeSidebar({
             <div className="text-foreground font-display font-semibold text-[12px] truncate">
               {userLabel}
             </div>
-            <div className="text-[10px] text-muted-foreground flex items-center gap-1.5">
-              {userPlan} · <Kbd keys={['mod', 'K']} />
+            <div className="text-[10px] text-muted-foreground truncate">
+              {userPlan}
             </div>
           </div>
-          {onChangeTheme && (
-            <ThemeToggle mode={themeMode} onChange={onChangeTheme} />
-          )}
-          {onSignOut && (
-            <button
-              type="button"
-              title="Sign out"
-              aria-label="Sign out"
-              onClick={onSignOut}
-              data-testid="sidebar-sign-out"
-              className="w-7 h-7 flex items-center justify-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors shrink-0"
-            >
-              <LogOut className="w-3.5 h-3.5" strokeWidth={1.75} />
-            </button>
+          {(onChangeTheme || onSignOut) && (
+            <div className="inline-flex bg-foreground/[0.04] border border-border rounded-md p-0.5 shrink-0">
+              {onChangeTheme && THEME_SEGMENTS.map(({ id, label, Icon }) => (
+                <button
+                  key={id}
+                  type="button"
+                  title={label}
+                  onClick={() => onChangeTheme(id)}
+                  aria-label={`Switch to ${label} theme`}
+                  className={cn(
+                    'w-6 h-6 flex items-center justify-center rounded transition-colors',
+                    themeMode === id
+                      ? 'bg-aurora-teal/15 text-aurora-teal-soft'
+                      : 'text-muted-foreground hover:text-foreground',
+                  )}
+                >
+                  <Icon className="w-3 h-3" strokeWidth={1.75} />
+                </button>
+              ))}
+              {onChangeTheme && onSignOut && (
+                <div aria-hidden className="w-px self-stretch bg-border mx-0.5" />
+              )}
+              {onSignOut && (
+                <button
+                  type="button"
+                  title="Sign out"
+                  aria-label="Sign out"
+                  onClick={onSignOut}
+                  data-testid="sidebar-sign-out"
+                  className="w-6 h-6 flex items-center justify-center rounded text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
+                >
+                  <LogOut className="w-3 h-3" strokeWidth={1.75} />
+                </button>
+              )}
+            </div>
           )}
         </footer>
       )}
@@ -306,32 +334,3 @@ export function ModeSidebar({
   );
 }
 
-function ThemeToggle({
-  mode,
-  onChange,
-}: {
-  mode: ThemeMode;
-  onChange: (mode: ThemeMode) => void;
-}) {
-  return (
-    <div className="inline-flex bg-foreground/[0.04] border border-border rounded-md p-0.5 shrink-0">
-      {THEME_SEGMENTS.map(({ id, label, Icon }) => (
-        <button
-          key={id}
-          type="button"
-          title={label}
-          onClick={() => onChange(id)}
-          className={cn(
-            'w-6 h-6 flex items-center justify-center rounded transition-colors',
-            mode === id
-              ? 'bg-aurora-teal/15 text-aurora-teal-soft'
-              : 'text-muted-foreground hover:text-foreground'
-          )}
-          aria-label={`Switch to ${label} theme`}
-        >
-          <Icon className="w-3 h-3" strokeWidth={1.75} />
-        </button>
-      ))}
-    </div>
-  );
-}

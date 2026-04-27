@@ -835,8 +835,15 @@ function TurnBubble({
       >
         <Icon className="w-4 h-4" strokeWidth={1.75} />
       </div>
-      <div className={`max-w-[78%] ${isUser ? 'text-right' : ''}`}>
-        <div className="text-xs text-muted-foreground mb-0.5">
+      {/* The bubble wrapper sits on the right for user turns via the
+       *  parent's flex-row-reverse — we DO NOT also right-align the text
+       *  inside, because multi-line right-aligned prose has a ragged
+       *  left edge that looks broken. Text reads left-to-right. The
+       *  agent label / timestamp row gets text-right so it lines up
+       *  with the bubble's right edge instead of starting under the
+       *  avatar. */}
+      <div className="max-w-[78%]">
+        <div className={`text-xs text-muted-foreground mb-0.5 ${isUser ? 'text-right' : ''}`}>
           {isUser ? 'You (chair)' : agentName ?? 'Agent'}
           {isStreaming && (
             <span className="ml-2 inline-flex items-center gap-1 text-aurora-teal">

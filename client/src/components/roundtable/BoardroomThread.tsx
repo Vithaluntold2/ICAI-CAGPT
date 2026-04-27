@@ -911,6 +911,18 @@ function parsePhaseProposal(text: string): { toPhase: string; rationale: string 
   return { toPhase, rationale };
 }
 
+// Minimal HTML escape for values interpolated into the print container's
+// header (entity name etc.). Body content goes through ReactMarkdown +
+// renderToStaticMarkup which handles escaping itself.
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function QuestionCard({
   card,
   agents,
@@ -1124,22 +1136,112 @@ function FinalMemoCard({
   if (!memo) return null;
 
   const safeTitle = threadTitle.replace(/[^a-zA-Z0-9-_ ]/g, '').replace(/\s+/g, '_').slice(0, 60) || 'Boardroom';
-  const filename = `${safeTitle}-memo-${new Date().toISOString().slice(0, 10)}.md`;
+  const dateStamp = new Date().toISOString().slice(0, 10);
+  const filenameMd = `${safeTitle}-memo-${dateStamp}.md`;
+  const filenamePdf = `${safeTitle}-memo-${dateStamp}.pdf`;
 
   const handleCopy = async () => {
     try { await navigator.clipboard.writeText(memo); } catch { /* clipboard may be unavailable */ }
   };
 
-  const handleDownload = () => {
+  const handleDownloadMd = () => {
     const blob = new Blob([memo], { type: 'text/markdown;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = filename;
+    a.download = filenameMd;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+  };
+
+  // PDF generation: html2pdf.js (already in deps) takes a hidden, light-
+  // themed printable element built from the memo content + a header
+  // (entity, panel, date) and produces an A4 portrait file. We render
+  // the printable element off-screen during generation so the user
+  // sees no flicker. The on-screen card stays in its dark/light theme;
+  // PDF output is always light + serif for a clean board-pack look.
+  const handleDownloadPdf = async () => {
+    const [html2pdfMod, { renderToStaticMarkup }] = await Promise.all([
+      import('html2pdf.js'),
+      import('react-dom/server'),
+    ]);
+    const html2pdf: any = (html2pdfMod as any).default ?? html2pdfMod;
+
+    // Render the same Markdown pipeline used on-screen, but to an HTML
+    // string we can drop into the print container. This guarantees the
+    // PDF body matches what the user sees (tables, math, code) without
+    // a second Markdown parser.
+    const bodyHtml = renderToStaticMarkup(
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm, remarkMath]}
+        rehypePlugins={[rehypeKatex, rehypeHighlight]}
+      >
+        {memo}
+      </ReactMarkdown>,
+    );
+
+    // Build a one-shot DOM node off-screen with print-friendly styling.
+    const container = document.createElement('div');
+    container.style.position = 'fixed';
+    container.style.left = '-10000px';
+    container.style.top = '0';
+    container.style.width = '170mm'; // A4 portrait minus margins
+    container.style.padding = '0';
+    container.style.background = '#ffffff';
+    container.style.color = '#0f172a';
+    container.style.fontFamily = 'Georgia, "Times New Roman", serif';
+    container.style.fontSize = '11pt';
+    container.style.lineHeight = '1.5';
+
+    // Inline style block so html2canvas captures consistent typography
+    // without relying on the app's stylesheet (prose tokens, dark mode).
+    container.innerHTML = `
+      <style>
+        .memo-header { border-bottom: 2px solid #0f172a; padding-bottom: 8mm; margin-bottom: 8mm; }
+        .memo-kicker { font-family: 'Helvetica', sans-serif; font-size: 8pt; letter-spacing: 0.16em; text-transform: uppercase; color: #475569; margin-bottom: 2mm; }
+        .memo-title { font-family: 'Helvetica', sans-serif; font-size: 18pt; font-weight: 700; color: #0f172a; margin: 0; line-height: 1.2; }
+        .memo-meta { font-family: 'Helvetica', sans-serif; font-size: 9pt; color: #64748b; margin-top: 3mm; }
+        .memo-body h1 { font-family: 'Helvetica', sans-serif; font-size: 14pt; font-weight: 700; color: #0f172a; margin: 6mm 0 2mm; padding-bottom: 1.5mm; border-bottom: 1px solid #cbd5e1; }
+        .memo-body h2 { font-family: 'Helvetica', sans-serif; font-size: 12pt; font-weight: 700; color: #0f172a; margin: 5mm 0 2mm; padding-bottom: 1mm; border-bottom: 1px solid #cbd5e1; }
+        .memo-body h3 { font-family: 'Helvetica', sans-serif; font-size: 11pt; font-weight: 700; color: #1e293b; margin: 4mm 0 1.5mm; }
+        .memo-body p { margin: 2mm 0; }
+        .memo-body ul, .memo-body ol { margin: 2mm 0 2mm 6mm; padding: 0; }
+        .memo-body li { margin: 1mm 0; }
+        .memo-body strong { color: #0f172a; }
+        .memo-body code { font-family: 'Courier New', monospace; font-size: 10pt; background: #f1f5f9; padding: 1px 4px; border-radius: 2px; }
+        .memo-body pre { font-family: 'Courier New', monospace; font-size: 9.5pt; background: #f8fafc; border: 1px solid #e2e8f0; padding: 3mm; border-radius: 2px; margin: 3mm 0; white-space: pre-wrap; }
+        .memo-body table { border-collapse: collapse; width: 100%; margin: 3mm 0; font-size: 10pt; }
+        .memo-body th { background: #f1f5f9; font-weight: 700; text-align: left; padding: 2mm; border: 1px solid #cbd5e1; }
+        .memo-body td { padding: 2mm; border: 1px solid #e2e8f0; vertical-align: top; }
+        .memo-body blockquote { border-left: 2px solid #94a3b8; margin: 3mm 0; padding-left: 3mm; color: #475569; }
+        .memo-body hr { border: 0; border-top: 1px solid #cbd5e1; margin: 5mm 0; }
+      </style>
+      <div class="memo-header">
+        <div class="memo-kicker">Final Board Memo &middot; CA&middot;GPT Roundtable</div>
+        <h1 class="memo-title">${escapeHtml(threadTitle)}</h1>
+        <div class="memo-meta">Generated ${new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}</div>
+      </div>
+      <div class="memo-body">${bodyHtml}</div>
+    `;
+    document.body.appendChild(container);
+
+    try {
+      await html2pdf()
+        .set({
+          margin: [15, 15, 15, 15], // mm
+          filename: filenamePdf,
+          image: { type: 'jpeg', quality: 0.98 },
+          html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
+          jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+          pagebreak: { mode: ['css', 'legacy'] },
+        })
+        .from(container)
+        .save();
+    } finally {
+      document.body.removeChild(container);
+    }
   };
 
   return (
@@ -1168,12 +1270,21 @@ function FinalMemoCard({
             <Copy className="w-3.5 h-3.5 mr-1" /> Copy
           </Button>
           <Button
+            variant="outline"
+            size="sm"
+            className="h-7 px-2 text-xs"
+            onClick={handleDownloadMd}
+            data-testid="boardroom-final-memo-download-md"
+          >
+            <Download className="w-3.5 h-3.5 mr-1" /> .md
+          </Button>
+          <Button
             size="sm"
             className="h-7 px-2 text-xs bg-aurora-teal hover:bg-aurora-teal/90 text-white border-transparent"
-            onClick={handleDownload}
-            data-testid="boardroom-final-memo-download"
+            onClick={handleDownloadPdf}
+            data-testid="boardroom-final-memo-download-pdf"
           >
-            <Download className="w-3.5 h-3.5 mr-1" /> Download .md
+            <Download className="w-3.5 h-3.5 mr-1" /> .pdf
           </Button>
         </div>
       </header>

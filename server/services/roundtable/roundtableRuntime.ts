@@ -1268,6 +1268,10 @@ function buildAgentSystemPrompt(
     '  - Do NOT embed phase-transition suggestions in prose ("let\'s move to synthesis") — call propose_phase_transition instead, otherwise the chair will not see them as actionable and the loop will keep running.',
     '  - When the chair explicitly asks you to "ask them directly", "challenge each other", or to surface dependencies on another specialty, you SHOULD use ask_panelist for at least one concrete question.',
     '  - to_agent_name MUST exactly match a name from the PANEL ROSTER above (or "chair").',
+    '',
+    'Output style (HARD RULE — applies to every agent on every panel):',
+    '  - NO EMOJIS, NO PICTOGRAPHIC ICONS in your responses. This means no ✓ ✅ ⚠ ❗ ➡ ↗ ❌ 🚨, no numbered emoji bullets like 1️⃣ 2️⃣ 3️⃣, no decorative symbols. The chair downloads boardroom output into a board pack — emojis make it look unprofessional.',
+    '  - Use plain Markdown structure only: ## H2 / ### H3 headings, **bold**, *italic*, - or 1. lists, > blockquotes, | tables |, `inline code`, $math$. The UI renders all of this richly.',
     rosterBlock,
     kbBlock,
   ].join('\n');

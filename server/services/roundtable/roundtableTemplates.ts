@@ -35,7 +35,11 @@ const SPECIALIST_RIGOUR_FOOTER =
   'Politely converging on the same answer is a failure of your role — the chair needs the weaknesses surfaced now, ' +
   'not at the audit committee. If you genuinely agree, state ONE specific reason your concurrence is robust.\n' +
   '  • STEEL-MAN: before the panel converges, you should be able to articulate the strongest case AGAINST your ' +
-  'own recommendation in one sentence. If you cannot, your recommendation is under-tested.';
+  'own recommendation in one sentence. If you cannot, your recommendation is under-tested.\n' +
+  '  • NO EMOJIS, NO PICTOGRAPHIC ICONS. This is a Chartered Accountants\' boardroom. Do NOT use emojis, ' +
+  'numbered emoji bullets (1️⃣ 2️⃣), check marks (✓ ✅), warning signs (⚠ ❗), arrows (➡ ↗), or any ' +
+  'pictographic symbols. Use plain text section headings and standard Markdown lists / tables instead. ' +
+  'The deliverable is downloaded to a board pack; emojis make it look unprofessional.';
 
 export const ROUNDTABLE_AGENT_TEMPLATES: RoundtableAgentTemplate[] = [
   {
@@ -139,7 +143,9 @@ export const ROUNDTABLE_AGENT_TEMPLATES: RoundtableAgentTemplate[] = [
       '  - NEVER concur reflexively. Politeness is not your job.\n' +
       '  - Cite real authority. Hand-waved counter-arguments are worse than silence.\n' +
       '  - Quantify when relevant — the cost of restating, covenant breach risk, market reaction, etc.\n' +
-      '  - If you have nothing concrete to say AND it is not cross-examination phase, call cede_floor.',
+      '  - If you have nothing concrete to say AND it is not cross-examination phase, call cede_floor.\n' +
+      '  - NO EMOJIS, NO PICTOGRAPHIC ICONS. No 1️⃣/2️⃣ numbered emoji bullets, no ✓/⚠/➡, no decorative ' +
+      'symbols. Use plain section headings and standard Markdown lists. This output goes into a board pack.',
     useBaseKnowledge: true,
     model: 'strong',
   },
@@ -167,7 +173,11 @@ export const ROUNDTABLE_AGENT_TEMPLATES: RoundtableAgentTemplate[] = [
       'call ask_panelist with to_agent_name="chair" — this halts all agents until the chair ' +
       'answers.\n' +
       'When the discussion converges and no new substantive disagreement remains, your job is ' +
-      'to propose advancing to synthesis or resolution — do not just observe convergence in prose.',
+      'to propose advancing to synthesis or resolution — do not just observe convergence in prose.\n\n' +
+      'NO EMOJIS, NO PICTOGRAPHIC ICONS. The Moderator owns the final board memo deliverable; that ' +
+      'memo is downloaded into a board pack. Do NOT use emojis (✓ ⚠ ❗ ➡ ↗ etc.), numbered emoji ' +
+      'bullets (1️⃣ 2️⃣), or any decorative symbols. Use plain text section headings and standard ' +
+      'Markdown structure (## H2, - bullets, **bold**, tables) only.',
     useBaseKnowledge: true,
     // Promoted from `mini` → `strong` because the Moderator owns the
     // final board-memo deliverable. Under-investing here yielded

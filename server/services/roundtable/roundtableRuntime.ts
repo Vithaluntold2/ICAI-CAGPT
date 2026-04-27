@@ -782,13 +782,58 @@ async function loadRecentThreadContext(threadId: string, limit = 12): Promise<st
     .where(eq(roundtableTurns.threadId, threadId))
     .orderBy(desc(roundtableTurns.position))
     .limit(limit);
-  const ordered = turns.reverse().filter((t) => t.status === 'completed' || t.status === 'streaming');
-  return ordered
-    .map((t) => {
-      const who = t.speakerKind === 'user' ? 'CHAIR' : t.speakerKind === 'agent' ? `AGENT(${t.agentId})` : t.speakerKind.toUpperCase();
-      return `[${who}] ${t.content}`;
-    })
-    .join('\n\n');
+
+  // Load recent question cards too. Without this, agents never see the
+  // chair's answer to a chair-targeted question (it's stored on the card,
+  // not as a turn) and the conversation appears stuck — the asker keeps
+  // asking the same question because their context shows it as unanswered.
+  const cards = await db
+    .select()
+    .from(roundtableQuestionCards)
+    .where(eq(roundtableQuestionCards.threadId, threadId))
+    .orderBy(desc(roundtableQuestionCards.createdAt))
+    .limit(limit);
+
+  type Entry = { time: number; text: string };
+  const entries: Entry[] = [];
+
+  for (const t of turns) {
+    if (t.status !== 'completed' && t.status !== 'streaming') continue;
+    const who = t.speakerKind === 'user'
+      ? 'CHAIR'
+      : t.speakerKind === 'agent'
+        ? `AGENT(${t.agentId})`
+        : t.speakerKind.toUpperCase();
+    entries.push({
+      time: new Date(t.startedAt).getTime(),
+      text: `[${who}] ${t.content}`,
+    });
+  }
+
+  for (const c of cards) {
+    const from = c.fromAgentId ? `AGENT(${c.fromAgentId})` : 'AGENT';
+    const to = c.toUser ? 'CHAIR' : c.toAgentId ? `AGENT(${c.toAgentId})` : 'OPEN';
+    if (c.status === 'answered' && c.answer) {
+      const ansBy = c.answeredByUser
+        ? 'CHAIR'
+        : c.answeredByAgentId
+          ? `AGENT(${c.answeredByAgentId})`
+          : 'unknown';
+      entries.push({
+        time: new Date(c.answeredAt ?? c.createdAt).getTime(),
+        text: `[QUESTION CARD ${from} → ${to}] ${c.text}\n[ANSWER from ${ansBy}] ${c.answer}`,
+      });
+    } else if (c.status === 'open') {
+      entries.push({
+        time: new Date(c.createdAt).getTime(),
+        text: `[OPEN QUESTION CARD ${from} → ${to}] ${c.text}`,
+      });
+    }
+    // skipped / redirected cards are noise — omit
+  }
+
+  entries.sort((a, b) => a.time - b.time);
+  return entries.map((e) => e.text).join('\n\n');
 }
 
 function parseProposeResponse(raw: string, agent: RoundtablePanelAgent): ProposeResult {

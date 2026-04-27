@@ -810,6 +810,63 @@ async function runRelevanceLoop(userId: string, threadId: string): Promise<void>
   if (!owned) return;
   const agents = await loadAgents(owned.panel.id);
   if (agents.length === 0) return;
+
+  // ── Address routing ────────────────────────────────────────────
+  // If there's an open question card addressed to a specific panelist,
+  // they get the next turn directly — skip propose-and-pick. This matches
+  // the contract advertised in the ask_panelist tool description and stops
+  // questions from piling up unanswered while agents repeat themselves.
+  // FIFO across cards so the oldest unanswered question is handled first.
+  const openCards = await db
+    .select()
+    .from(roundtableQuestionCards)
+    .where(and(
+      eq(roundtableQuestionCards.threadId, threadId),
+      eq(roundtableQuestionCards.status, 'open'),
+    ))
+    .orderBy(asc(roundtableQuestionCards.createdAt));
+
+  const directable = openCards.find((c) => c.toAgentId && !c.toUser);
+  if (directable && directable.toAgentId) {
+    const target = agents.find((a) => a.id === directable.toAgentId);
+    if (target) {
+      // Run the addressed agent with the question injected. Mark the card
+      // answered ONLY if the turn produced real content — if the agent
+      // ceded or failed, leave the card open so the user can re-route
+      // (or another agent can pick it up).
+      const beforePos = await nextPosition(threadId);
+      await runAgentTurn(userId, threadId, target.id, {
+        reason: 'answer-question',
+        headline: directable.text.slice(0, 80),
+        injectedPrompt: `Another panelist asked you: "${directable.text}"\n\nAnswer this directly first; add any further analysis after.`,
+      });
+      const [completedTurn] = await db
+        .select()
+        .from(roundtableTurns)
+        .where(and(
+          eq(roundtableTurns.threadId, threadId),
+          eq(roundtableTurns.agentId, target.id),
+          sql`${roundtableTurns.position} >= ${beforePos}`,
+        ))
+        .orderBy(desc(roundtableTurns.position))
+        .limit(1);
+      const answered = completedTurn
+        && completedTurn.status === 'completed'
+        && (completedTurn.content?.trim().length ?? 0) > 0;
+      if (answered) {
+        await db
+          .update(roundtableQuestionCards)
+          .set({ status: 'answered', answeredByAgentId: target.id, answeredAt: new Date() })
+          .where(eq(roundtableQuestionCards.id, directable.id));
+        emit(threadId, 'question-answered', { qid: directable.id, byAgentId: target.id });
+      }
+      // runAgentTurn's finally block already schedules the next loop pass,
+      // which will pick up the next open card (or fall through to propose).
+      return;
+    }
+  }
+
+  // ── Normal propose-and-pick path ───────────────────────────────
   const threadContext = await loadRecentThreadContext(threadId, 10);
 
   // Notify clients all agents are evaluating relevance.

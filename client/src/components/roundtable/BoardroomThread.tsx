@@ -26,6 +26,14 @@ import {
   ChevronRight,
   ChevronDown,
   CornerDownRight,
+  Receipt,
+  ClipboardCheck,
+  BookOpen,
+  ScanSearch,
+  Scale,
+  Mic2,
+  User,
+  type LucideIcon,
 } from 'lucide-react';
 import { useRoundtablePanel } from '@/hooks/useRoundtablePanel';
 import {
@@ -43,6 +51,33 @@ const PHASES = [
   { id: 'synthesis', label: 'Synthesis' },
   { id: 'resolution', label: 'Resolution' },
 ];
+
+// Map agent template id (or name keyword) to a minimalistic Lucide icon.
+// Replaces the legacy emoji avatars on the panel rail / turn cards.
+const AGENT_ICONS: Record<string, LucideIcon> = {
+  'tax-bot': Receipt,
+  'audit-bot': ClipboardCheck,
+  'ifrs-bot': BookOpen,
+  'forensic-bot': ScanSearch,
+  'compliance-bot': Scale,
+  'moderator-bot': Mic2,
+};
+
+function resolveAgentIcon(opts: {
+  templateId?: string | null;
+  name?: string | null;
+}): LucideIcon {
+  const { templateId, name } = opts;
+  if (templateId && AGENT_ICONS[templateId]) return AGENT_ICONS[templateId];
+  const n = (name ?? '').toLowerCase();
+  if (n.includes('tax')) return Receipt;
+  if (n.includes('audit')) return ClipboardCheck;
+  if (n.includes('ifrs') || n.includes('ind as') || n.includes('gaap')) return BookOpen;
+  if (n.includes('forensic') || n.includes('fraud')) return ScanSearch;
+  if (n.includes('compliance') || n.includes('regulator')) return Scale;
+  if (n.includes('moderator') || n.includes('chair')) return Mic2;
+  return User;
+}
 
 interface Props {
   conversationId: string | null;
@@ -201,17 +236,15 @@ export function BoardroomThread({ conversationId, onConfigurePanel }: Props) {
           <ul className="px-2 py-2 space-y-1">
             {agents.map((a) => {
               const state: ParticipantState = board.participantStates[a.id] ?? 'listening';
+              const Icon = resolveAgentIcon({ templateId: a.createdFromTemplate, name: a.name });
               return (
                 <li
                   key={a.id}
                   className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-accent/40 text-sm"
                   data-testid={`boardroom-participant-${a.id}`}
                 >
-                  <span
-                    className="w-7 h-7 rounded-full flex items-center justify-center text-base"
-                    style={{ background: a.color ?? '#e5e7eb' }}
-                  >
-                    {a.avatar ?? '🧑'}
+                  <span className="w-7 h-7 rounded-md flex items-center justify-center bg-aurora-teal/10 text-aurora-teal-soft shrink-0">
+                    <Icon className="w-3.5 h-3.5" strokeWidth={1.75} />
                   </span>
                   <div className="flex-1 min-w-0">
                     <div className="font-medium truncate">{a.name}</div>
@@ -393,6 +426,7 @@ type AgentLite = {
   avatar?: string | null;
   color?: string | null;
   useBaseKnowledge?: boolean;
+  createdFromTemplate?: string | null;
 };
 
 function TurnGroup({
@@ -412,8 +446,7 @@ function TurnGroup({
         key={t.id}
         turn={t}
         agentName={a?.name ?? null}
-        agentAvatar={a?.avatar ?? null}
-        agentColor={a?.color ?? null}
+        agentTemplateId={a?.createdFromTemplate ?? null}
       />
     );
   };
@@ -466,28 +499,32 @@ function ParticipantBadge({
 function TurnBubble({
   turn,
   agentName,
-  agentAvatar,
-  agentColor,
+  agentTemplateId,
 }: {
   turn: BoardroomTurnDTO;
   agentName: string | null | undefined;
-  agentAvatar: string | null | undefined;
-  agentColor: string | null | undefined;
+  agentTemplateId: string | null | undefined;
 }) {
   const isUser = turn.speakerKind === 'user';
   const isStreaming = turn.status === 'streaming';
   const isCancelled = turn.status === 'cancelled';
   const isFailed = turn.status === 'failed';
+  const Icon = isUser
+    ? User
+    : resolveAgentIcon({ templateId: agentTemplateId, name: agentName });
   return (
     <div
       className={`flex gap-3 ${isUser ? 'flex-row-reverse' : ''}`}
       data-testid={`boardroom-turn-${turn.id}`}
     >
       <div
-        className="w-8 h-8 rounded-full flex items-center justify-center text-base shrink-0"
-        style={{ background: isUser ? '#0ea5e9' : (agentColor ?? '#e5e7eb') }}
+        className={`w-8 h-8 rounded-md flex items-center justify-center shrink-0 ${
+          isUser
+            ? 'bg-aurora-cyan/15 text-aurora-cyan'
+            : 'bg-aurora-teal/10 text-aurora-teal-soft'
+        }`}
       >
-        {isUser ? '👤' : (agentAvatar ?? '🧑')}
+        <Icon className="w-4 h-4" strokeWidth={1.75} />
       </div>
       <div className={`max-w-[78%] ${isUser ? 'text-right' : ''}`}>
         <div className="text-xs text-muted-foreground mb-0.5">

@@ -1025,6 +1025,43 @@ async function runRelevanceLoop(userId: string, threadId: string): Promise<void>
 
   const threadContext = await loadRecentThreadContext(threadId, 10);
 
+  // ── Per-agent turn counts (used for silent-agent boost + fairness)
+  // Counts all completed turns for this thread, grouped by agent.
+  // Empty/cancelled turns don't count (they're not real contributions).
+  const turnCountRows = await db
+    .select({
+      agentId: roundtableTurns.agentId,
+      count: sql<number>`count(*)::int`,
+    })
+    .from(roundtableTurns)
+    .where(and(
+      eq(roundtableTurns.threadId, threadId),
+      eq(roundtableTurns.status, 'completed'),
+      sql`${roundtableTurns.agentId} IS NOT NULL`,
+    ))
+    .groupBy(roundtableTurns.agentId);
+  const countByAgent = new Map<string, number>();
+  for (const r of turnCountRows) {
+    if (r.agentId) countByAgent.set(r.agentId, r.count);
+  }
+
+  // ── Just-spoken agent (excluded from this round to prevent
+  // consecutive monologues from one agent — common failure mode where
+  // the same agent kept winning propose-pick and restated themselves).
+  // The most recent COMPLETED non-cancelled turn determines who's
+  // muted this round.
+  const lastCompleted = await db
+    .select({ agentId: roundtableTurns.agentId })
+    .from(roundtableTurns)
+    .where(and(
+      eq(roundtableTurns.threadId, threadId),
+      eq(roundtableTurns.status, 'completed'),
+      sql`${roundtableTurns.agentId} IS NOT NULL`,
+    ))
+    .orderBy(desc(roundtableTurns.position))
+    .limit(1);
+  const lastSpeakerId = lastCompleted[0]?.agentId ?? null;
+
   // Notify clients all agents are evaluating relevance.
   for (const a of proposingAgents) {
     emit(threadId, 'participant-state', { agentId: a.id, state: 'thinking' });
@@ -1034,7 +1071,26 @@ async function runRelevanceLoop(userId: string, threadId: string): Promise<void>
     proposingAgents.map((a) => proposeForAgent(a, threadContext, owned.thread.phase)),
   );
   const valid = proposals.filter((p): p is ProposeResult => p !== null);
-  const winner = await pickNextSpeaker(valid);
+
+  // ── Apply silent-agent boost + just-spoken exclusion before pick.
+  // Silent-agent boost: agents with 0 completed turns get +4 added to
+  // (urgency + relevance) so a freshly-spawned panelist (e.g. user
+  // adds Compliance Bot mid-conversation) gets pulled into the
+  // discussion instead of perpetually losing on score.
+  // Just-spoken exclusion: filter out the agent whose ID matches
+  // lastSpeakerId so the same agent never wins two turns in a row.
+  // (Address-routing above this still allows the addressed agent to
+  // answer a card directed at them, even if they just spoke.)
+  const adjusted = valid
+    .filter((p) => p.agentId !== lastSpeakerId)
+    .map((p) => {
+      const count = countByAgent.get(p.agentId) ?? 0;
+      if (count === 0) {
+        return { ...p, urgency: Math.min(10, p.urgency + 4) };
+      }
+      return p;
+    });
+  const winner = await pickNextSpeaker(adjusted);
 
   for (const a of proposingAgents) {
     emit(threadId, 'participant-state', { agentId: a.id, state: 'listening' });
@@ -1044,16 +1100,15 @@ async function runRelevanceLoop(userId: string, threadId: string): Promise<void>
     // ── Moderator fallback ───────────────────────────────────────
     // No specialist scored above the (urgency + relevance) >= 6
     // threshold. Before declaring the loop idle, give the Moderator
-    // a chance: if at least 2 specialist turns have happened since
-    // the Moderator last spoke (or the Moderator hasn't spoken yet),
-    // run their turn anyway. The Moderator's job at lulls is to
-    // assess convergence and propose phase transitions — they
-    // shouldn't sit silent just because their `mini` model under-
-    // scored relevance against domain experts.
+    // a chance — but only if there's been a real gap since they last
+    // spoke. Tightened from 2 → 3 specialist turns to prevent the
+    // "Moderator opens, Moderator opens, Moderator opens" repetition
+    // pattern observed when specialists kept coming in below threshold.
+    // Also skip if the Moderator just spoke (lastSpeakerId guard).
     const moderator = agents.find(
       (a) => a.createdFromTemplate === 'moderator-bot' || /moderator/i.test(a.name),
     );
-    if (moderator) {
+    if (moderator && moderator.id !== lastSpeakerId) {
       const recent = await db
         .select({ id: roundtableTurns.id, agentId: roundtableTurns.agentId, position: roundtableTurns.position })
         .from(roundtableTurns)
@@ -1062,12 +1117,12 @@ async function runRelevanceLoop(userId: string, threadId: string): Promise<void>
           eq(roundtableTurns.status, 'completed'),
         ))
         .orderBy(desc(roundtableTurns.position))
-        .limit(5);
+        .limit(6);
       const lastModeratorIdx = recent.findIndex((t) => t.agentId === moderator.id);
       // Conditions to fire the fallback:
       //   - Moderator has never spoken in the recent window, OR
-      //   - At least 2 OTHER turns have happened since the Moderator's last turn.
-      const shouldFallback = lastModeratorIdx === -1 || lastModeratorIdx >= 2;
+      //   - At least 3 OTHER turns have happened since the Moderator's last turn.
+      const shouldFallback = lastModeratorIdx === -1 || lastModeratorIdx >= 3;
       if (shouldFallback) {
         await runAgentTurn(userId, threadId, moderator.id, {
           reason: 'moderator-fallback',

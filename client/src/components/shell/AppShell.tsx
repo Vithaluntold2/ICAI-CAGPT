@@ -53,8 +53,6 @@ export function AppShell({
         className="absolute top-0 left-0 right-0 h-0.5 bg-gradient-aurora z-50 pointer-events-none"
       />
       <IconRail
-        sidebarOpen={sidebarOpen}
-        onToggleSidebar={onToggleSidebar}
         onOpenSearch={onOpenSearch}
         onNewChat={onNewChat}
         onOpenSettings={onOpenSettings}
@@ -65,7 +63,11 @@ export function AppShell({
           bounded height, so the inner `overflow-y-auto` collapsed to content
           and never scrolled). Passing `collapsed` directly lets the aside
           keep its own flex column while still animating width. */}
-      <ModeSidebar collapsed={!sidebarOpen} {...sidebarProps} />
+      <ModeSidebar
+        collapsed={!sidebarOpen}
+        onToggleSidebar={onToggleSidebar}
+        {...sidebarProps}
+      />
       <main className="flex-1 flex flex-col min-w-0 relative">{children}</main>
     </div>
   );

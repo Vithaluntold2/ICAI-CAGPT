@@ -22,9 +22,12 @@ import ssoRoutes from "./routes/ssoRoutes";
 import contextRoutes from "./routes/context";
 import voiceRoutes from "./routes/voiceRoutes";
 import roundtableRoutes from "./routes/roundtableRoutes";
+import roundtablePanelRoutes from "./routes/roundtablePanelRoutes";
+import roundtableBoardroomRoutes from "./routes/roundtableBoardroomRoutes";
 import searchRoutes from "./routes/searchRoutes";
 import guideRoutes from "./routes/guideRoutes";
 import costRoutes from "./routes/costRoutes";
+import suggestionsRoutes from "./routes/suggestionsRoutes";
 // test-mindmap routes loaded dynamically in development only
 import { 
   setupSecurityMiddleware,
@@ -223,8 +226,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Register voice routes for STT/TTS with regional voices
   app.use('/api/voice', voiceRoutes);
   
-  // Register roundtable routes for AI multi-expert workflows
+  // Register roundtable routes for AI multi-expert workflows (legacy workflow)
   app.use('/api/roundtable', roundtableRoutes);
+
+  // Register roundtable panel routes — user-curated agent panels (Phase 1)
+  // Mounted on a child path so it lives alongside the legacy session API
+  // without overlapping any of its endpoints.
+  app.use('/api/roundtable/panels', roundtablePanelRoutes);
+
+  // Register roundtable boardroom routes — live runtime threads (Phase 2)
+  app.use('/api/roundtable/boardroom', roundtableBoardroomRoutes);
   
   // Register CA GPT Search routes — AI-powered search engine
   app.use('/api/search', searchRoutes);
@@ -235,6 +246,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Register cost / budget / telemetry routes — powers Spreadsheet Mode
   // cost-estimator UI (plan §7 step 8).
   app.use('/api/cost', costRoutes);
+
+  // Register dynamic chat suggestions — powers the empty-state chips in
+  // EmptyModeState (recent conversations + ICAI compliance calendar +
+  // curated Council circular highlights).
+  app.use('/api/suggestions', suggestionsRoutes);
   
   // Authentication routes (with rate limiting)
   app.post("/api/auth/register", authRateLimiter, async (req, res) => {
@@ -933,7 +949,8 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
         return res.status(401).json({ error: "Not authenticated" });
       }
       
-      const { title, preview, profileId } = req.body;
+      const { title, preview, profileId, chatMode: rawChatMode } = req.body;
+      const chatMode = normalizeChatMode(rawChatMode);
       
       // Validate profileId ownership if provided
       if (profileId) {
@@ -950,7 +967,8 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
         userId,
         title,
         preview,
-        profileId: profileId || null
+        profileId: profileId || null,
+        chatMode,
       });
       
       res.json({ conversation });

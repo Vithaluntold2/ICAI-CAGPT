@@ -1,5 +1,5 @@
 /* stylelint-disable at-rule-no-unknown */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Exo+2:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 @import url('https://api.fontshare.com/v2/css?f[]=satoshi@400,500,600,700&display=swap');
 @import 'react-loading-skeleton/dist/skeleton.css';
 @tailwind base;
@@ -491,6 +491,10 @@
  * need to be distinguished from eachother visually.
  */
 @layer utilities {
+
+  .font-exo {
+    font-family: 'Exo 2', 'Inter', system-ui, sans-serif;
+  }
 
   /* Hide ugly search cancel button in Chrome until we can style it properly */
   input[type="search"]::-webkit-search-cancel-button {

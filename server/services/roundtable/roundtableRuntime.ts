@@ -1021,6 +1021,41 @@ async function runRelevanceLoop(userId: string, threadId: string): Promise<void>
   }
 
   if (!winner) {
+    // ── Moderator fallback ───────────────────────────────────────
+    // No specialist scored above the (urgency + relevance) >= 6
+    // threshold. Before declaring the loop idle, give the Moderator
+    // a chance: if at least 2 specialist turns have happened since
+    // the Moderator last spoke (or the Moderator hasn't spoken yet),
+    // run their turn anyway. The Moderator's job at lulls is to
+    // assess convergence and propose phase transitions — they
+    // shouldn't sit silent just because their `mini` model under-
+    // scored relevance against domain experts.
+    const moderator = agents.find(
+      (a) => a.createdFromTemplate === 'moderator-bot' || /moderator/i.test(a.name),
+    );
+    if (moderator) {
+      const recent = await db
+        .select({ id: roundtableTurns.id, agentId: roundtableTurns.agentId, position: roundtableTurns.position })
+        .from(roundtableTurns)
+        .where(and(
+          eq(roundtableTurns.threadId, threadId),
+          eq(roundtableTurns.status, 'completed'),
+        ))
+        .orderBy(desc(roundtableTurns.position))
+        .limit(5);
+      const lastModeratorIdx = recent.findIndex((t) => t.agentId === moderator.id);
+      // Conditions to fire the fallback:
+      //   - Moderator has never spoken in the recent window, OR
+      //   - At least 2 OTHER turns have happened since the Moderator's last turn.
+      const shouldFallback = lastModeratorIdx === -1 || lastModeratorIdx >= 2;
+      if (shouldFallback) {
+        await runAgentTurn(userId, threadId, moderator.id, {
+          reason: 'moderator-fallback',
+          headline: 'Assess convergence and propose next step',
+        });
+        return;
+      }
+    }
     emit(threadId, 'loop-idle', { reason: 'no agent wanted floor' });
     return;
   }

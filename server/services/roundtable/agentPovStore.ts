@@ -4,7 +4,7 @@
  * (write) and by buildAgentSystemPrompt (read).
  */
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "../../db";
 import { agentPovDocuments, type AgentPovDocument } from "@shared/schema";
 import { CacheService } from "../hybridCache";
@@ -53,4 +53,58 @@ export async function getOrInit(threadId: string, agentId: string): Promise<Agen
     throw new Error(`Failed to init POV doc for ${threadId}/${agentId}`);
   }
   return reread;
+}
+
+export class StaleVersionError extends Error {
+  constructor(threadId: string, agentId: string, expectedVersion: number) {
+    super(
+      `StaleVersionError: POV doc for ${threadId}/${agentId} expected version ${expectedVersion} but DB version differed`,
+    );
+    this.name = "StaleVersionError";
+  }
+}
+
+export interface PovPatch {
+  selfPosition?: Record<string, any>;
+  othersSummary?: Record<string, any>;
+  outgoingQa?: any[];
+  incomingQa?: any[];
+  chairQa?: any[];
+  openThreads?: any[];
+  glossary?: Record<string, any>;
+  lastSynthesizedTurnId?: string | null;
+  tokenCount?: number;
+}
+
+export async function upsert(args: {
+  threadId: string;
+  agentId: string;
+  expectedVersion: number;
+  patch: PovPatch;
+}): Promise<AgentPovDocument> {
+  const { threadId, agentId, expectedVersion, patch } = args;
+
+  const updated = await db
+    .update(agentPovDocuments)
+    .set({
+      ...patch,
+      version: sql`${agentPovDocuments.version} + 1`,
+      lastUpdatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(agentPovDocuments.threadId, threadId),
+        eq(agentPovDocuments.agentId, agentId),
+        eq(agentPovDocuments.version, expectedVersion),
+      ),
+    )
+    .returning();
+
+  if (updated.length === 0) {
+    throw new StaleVersionError(threadId, agentId, expectedVersion);
+  }
+
+  // Invalidate cache so next read sees the new version.
+  await CacheService.del(cacheKey(threadId, agentId));
+  return updated[0];
 }

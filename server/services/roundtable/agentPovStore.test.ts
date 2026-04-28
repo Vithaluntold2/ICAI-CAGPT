@@ -124,3 +124,52 @@ describe("agentPovStore.getOrInit", () => {
     await expect(store.getOrInit("t", "a")).rejects.toThrow(/Failed to init POV doc/);
   });
 });
+
+describe("agentPovStore.upsert", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("succeeds when expectedVersion matches current version", async () => {
+    const updated = {
+      threadId: "t", agentId: "a", version: 2,
+      selfPosition: { stance: "x" }, othersSummary: {},
+      outgoingQa: [], incomingQa: [], chairQa: [], openThreads: [], glossary: {},
+      lastSynthesizedTurnId: "turn1", tokenCount: 50,
+      lastUpdatedAt: new Date(),
+    };
+    (db.update as any).mockReturnValue({
+      set: () => ({
+        where: () => ({
+          returning: () => Promise.resolve([updated]),
+        }),
+      }),
+    });
+    const result = await store.upsert({
+      threadId: "t",
+      agentId: "a",
+      expectedVersion: 1,
+      patch: { selfPosition: { stance: "x" }, lastSynthesizedTurnId: "turn1" },
+    });
+    expect(result.version).toBe(2);
+    expect(CacheService.del).toHaveBeenCalledWith("roundtable:pov:t:a");
+  });
+
+  it("throws StaleVersionError when expectedVersion does not match", async () => {
+    (db.update as any).mockReturnValue({
+      set: () => ({
+        where: () => ({
+          returning: () => Promise.resolve([]),
+        }),
+      }),
+    });
+    await expect(
+      store.upsert({
+        threadId: "t",
+        agentId: "a",
+        expectedVersion: 1,
+        patch: { selfPosition: { stance: "x" } },
+      }),
+    ).rejects.toThrow("StaleVersionError");
+  });
+});

@@ -188,3 +188,35 @@ describe("agentPovStore.upsert", () => {
     expect(CacheService.del).not.toHaveBeenCalled();
   });
 });
+
+describe("agentPovStore.renderForPrompt", () => {
+  it("returns empty-perspective marker when doc is empty", () => {
+    const doc: any = {
+      selfPosition: {}, othersSummary: {},
+      outgoingQa: [], incomingQa: [], chairQa: [], openThreads: [], glossary: {},
+      lastSynthesizedTurnId: null,
+    };
+    const text = store.renderForPrompt(doc);
+    expect(text).toContain("YOUR PERSPECTIVE");
+    expect(text).toContain("(no prior perspective");
+  });
+
+  it("renders all sections with content", () => {
+    const doc: any = {
+      selfPosition: { stance: "Impairment trigger met under Ind AS 36.59." },
+      othersSummary: { Auditor: "Focused on going-concern; flagged 8mo runway." },
+      outgoingQa: [{ to: "Auditor", question: "Cash runway?", answer: "8 months", turnId: "t1" }],
+      incomingQa: [{ from: "Compliance", question: "When does window close?", answer: "24h", turnId: "t2" }],
+      chairQa: [{ direction: "from", text: "Cite paragraph?", answer: "Ind AS 36.59", turnId: "t3" }],
+      openThreads: [{ description: "Awaiting DA's revised VIU", awaitingFrom: "DevilsAdvocate", turnId: "t4" }],
+      glossary: { Entity: "NovaPlast Ltd", Asset: "Plant 3 (Pune)" },
+      lastSynthesizedTurnId: "t4",
+    };
+    const text = store.renderForPrompt(doc);
+    expect(text).toContain("Impairment trigger met");
+    expect(text).toContain("Auditor:");
+    expect(text).toContain("8 months");
+    expect(text).toContain("NovaPlast");
+    expect(text).toContain("synced through turn t4");
+  });
+});

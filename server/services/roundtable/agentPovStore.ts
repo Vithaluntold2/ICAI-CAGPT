@@ -112,3 +112,82 @@ export async function upsert(args: {
   await CacheService.del(cacheKey(threadId, agentId));
   return updated[0];
 }
+
+function isObjectEmpty(obj: Record<string, any>): boolean {
+  return !obj || Object.keys(obj).length === 0;
+}
+
+export function renderForPrompt(doc: AgentPovDocument): string {
+  const lines: string[] = [];
+  const synced = doc.lastSynthesizedTurnId
+    ? `synced through turn ${doc.lastSynthesizedTurnId}`
+    : "no prior perspective; this is your first time speaking";
+
+  lines.push(`=== YOUR PERSPECTIVE (${synced}) ===`);
+
+  const sp = (doc.selfPosition ?? {}) as { stance?: string; conclusions?: string[] };
+  if (sp.stance || (sp.conclusions && sp.conclusions.length > 0)) {
+    lines.push("\nYOUR POSITION:");
+    if (sp.stance) lines.push(sp.stance);
+    if (sp.conclusions && sp.conclusions.length > 0) {
+      for (const c of sp.conclusions) lines.push(`- ${c}`);
+    }
+  }
+
+  const others = (doc.othersSummary ?? {}) as Record<string, string>;
+  if (!isObjectEmpty(others)) {
+    lines.push("\nWHAT OTHERS HAVE SAID:");
+    for (const [name, summary] of Object.entries(others)) {
+      lines.push(`- ${name}: ${summary}`);
+    }
+  }
+
+  const outgoing = (doc.outgoingQa ?? []) as Array<{ to: string; question: string; answer: string }>;
+  if (outgoing.length > 0) {
+    lines.push("\nQUESTIONS YOU ASKED OTHERS:");
+    for (const qa of outgoing) lines.push(`- To ${qa.to}: "${qa.question}" → "${qa.answer}"`);
+  }
+
+  const incoming = (doc.incomingQa ?? []) as Array<{ from: string; question: string; answer: string }>;
+  if (incoming.length > 0) {
+    lines.push("\nQUESTIONS ASKED OF YOU:");
+    for (const qa of incoming) lines.push(`- From ${qa.from}: "${qa.question}" → You: "${qa.answer}"`);
+  }
+
+  const chair = (doc.chairQa ?? []) as Array<{ direction: "to" | "from"; text: string; answer: string }>;
+  if (chair.length > 0) {
+    lines.push("\nCHAIR Q&A:");
+    for (const qa of chair) {
+      if (qa.direction === "from") {
+        lines.push(`- Chair → You: "${qa.text}" → You: "${qa.answer}"`);
+      } else {
+        lines.push(`- You → Chair: "${qa.text}" → Chair: "${qa.answer}"`);
+      }
+    }
+  }
+
+  const open = (doc.openThreads ?? []) as Array<{ description: string; awaitingFrom?: string }>;
+  if (open.length > 0) {
+    lines.push("\nOPEN THREADS:");
+    for (const o of open) {
+      const awaitingNote = o.awaitingFrom ? ` (awaiting ${o.awaitingFrom})` : "";
+      lines.push(`- ${o.description}${awaitingNote}`);
+    }
+  }
+
+  const glossary = (doc.glossary ?? {}) as Record<string, string>;
+  if (!isObjectEmpty(glossary)) {
+    lines.push("\nKEY FACTS:");
+    for (const [term, def] of Object.entries(glossary)) {
+      lines.push(`- ${term}: ${def}`);
+    }
+  }
+
+  if (lines.length === 1) {
+    // Only the header — empty doc.
+    lines.push("\n(no prior perspective; this is your first time speaking)");
+  }
+
+  lines.push("\n=== END YOUR PERSPECTIVE ===");
+  return lines.join("\n");
+}

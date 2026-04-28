@@ -223,7 +223,15 @@ export function BoardroomThread({ conversationId, onConfigurePanel }: Props) {
         <div className="font-exo text-sm font-semibold tracking-tight truncate" title={panel.hydrated?.panel?.name ?? ''}>
           {panel.hydrated?.panel?.name ?? 'Panel'}
         </div>
-        <SessionTimer startedAt={sessionStartedAt} active={isStreaming && !board.paused} />
+        <SessionTimer
+          startedAt={sessionStartedAt}
+          active={isStreaming && !board.paused}
+          /* Freeze the timer once the session is concluded (resolution
+           * phase) or paused — no point re-rendering once per second
+           * forever when the elapsed time is the answer. Resumes if
+           * the user moves out of resolution / unpauses. */
+          frozen={board.thread?.phase === 'resolution' || board.paused}
+        />
         <div className="ml-auto flex items-center gap-1.5">
           <TranscriptVolumeChip turns={board.turns} />
           {board.activeThreadId && (
@@ -564,13 +572,25 @@ function EmptyShell({
   );
 }
 
-function SessionTimer({ startedAt, active }: { startedAt: string | null; active: boolean }) {
+function SessionTimer({
+  startedAt,
+  active,
+  frozen,
+}: {
+  startedAt: string | null;
+  active: boolean;
+  /** When true, stop ticking. The displayed elapsed time freezes at
+   *  the moment this flips on. Used to halt the per-second re-render
+   *  once the session concludes (resolution phase or paused) — the
+   *  total time is the useful info from that point on. */
+  frozen: boolean;
+}) {
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
-    if (!startedAt) return;
+    if (!startedAt || frozen) return;
     const id = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(id);
-  }, [startedAt]);
+  }, [startedAt, frozen]);
   if (!startedAt) return null;
   const ms = Math.max(0, now - new Date(startedAt).getTime());
   const total = Math.floor(ms / 1000);
@@ -583,6 +603,7 @@ function SessionTimer({ startedAt, active }: { startedAt: string | null; active:
       className={`gap-1.5 font-mono text-[10.5px] px-2 py-0.5 ${
         active ? 'border-emerald-500/40 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10' : ''
       }`}
+      title={frozen ? 'Session ended' : 'Session running'}
     >
       <span
         className={`inline-block w-1.5 h-1.5 rounded-full ${

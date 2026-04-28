@@ -1334,7 +1334,9 @@ function updateRuleBasedPOV(r: ThreadRuntime, agentId: string, content: string):
   // Take the tail of the content: the last paragraph is usually the
   // clearest statement of position, not the preamble.
   const position = trimmed.length > 400 ? '…' + trimmed.slice(-400) : trimmed;
-  r.agentPOVs.set(agentId, `## My Position\n${position}`);
+  if (process.env.ROUNDTABLE_SYNTHESIZER_ENABLED !== 'true') {
+    r.agentPOVs.set(agentId, `## My Position\n${position}`);
+  }
 }
 
 /**
@@ -2037,6 +2039,26 @@ async function runAgentTurn(
 
     // Continue the relevance loop after the turn (and any side-threads)
     // finish.
+    // Dispatch synthesizer jobs for ALL panel agents (speaker included),
+    // when the feature flag is on. Non-blocking; the synthesizer's Bull
+    // processor swallows failures so the panel never blocks on synthesis.
+    if (process.env.ROUNDTABLE_SYNTHESIZER_ENABLED === 'true') {
+      try {
+        const { addSynthesizerJob } = await import('../hybridJobQueue');
+        const synthAgents = await loadAgents(owned.panel.id);
+        for (const a of synthAgents) {
+          addSynthesizerJob({
+            threadId,
+            agentId: a.id,
+            agentName: a.name,
+            panelId: owned.panel.id,
+          });
+        }
+      } catch (err) {
+        console.error('[Roundtable] failed to dispatch synthesizer jobs:', err);
+      }
+    }
+
     scheduleRelevanceLoop(userId, threadId).catch((err) => {
       console.error('[Boardroom] post-turn loop failed:', err);
     });

@@ -72,4 +72,55 @@ describe("agentPovStore.getOrInit", () => {
     expect(result.threadId).toBe("t");
     expect(result.version).toBe(1);
   });
+
+  it("falls back to re-read when concurrent insert wins the conflict race", async () => {
+    const existing = {
+      threadId: "t", agentId: "a", version: 1,
+      selfPosition: {}, othersSummary: {},
+      outgoingQa: [], incomingQa: [], chairQa: [], openThreads: [], glossary: {},
+      lastSynthesizedTurnId: null, tokenCount: 0,
+      lastUpdatedAt: new Date(),
+    };
+    // Both reads (initial get + re-fetch get) miss cache.
+    (CacheService.get as any).mockResolvedValue(null);
+    // First DB select (initial get): empty. Second DB select (re-fetch): row exists.
+    let dbCallCount = 0;
+    (db.select as any).mockReturnValue({
+      from: () => ({
+        where: () => ({
+          limit: () => Promise.resolve(dbCallCount++ === 0 ? [] : [existing]),
+        }),
+      }),
+    });
+    // Insert returns empty (conflict path).
+    (db.insert as any).mockReturnValue({
+      values: () => ({
+        onConflictDoNothing: () => ({
+          returning: () => Promise.resolve([]),
+        }),
+      }),
+    });
+    const result = await store.getOrInit("t", "a");
+    expect(result).toEqual(existing);
+    expect(dbCallCount).toBe(2); // initial + re-fetch
+  });
+
+  it("throws when both insert AND re-fetch miss (impossible state)", async () => {
+    (CacheService.get as any).mockResolvedValue(null);
+    (db.select as any).mockReturnValue({
+      from: () => ({
+        where: () => ({
+          limit: () => Promise.resolve([]),
+        }),
+      }),
+    });
+    (db.insert as any).mockReturnValue({
+      values: () => ({
+        onConflictDoNothing: () => ({
+          returning: () => Promise.resolve([]),
+        }),
+      }),
+    });
+    await expect(store.getOrInit("t", "a")).rejects.toThrow(/Failed to init POV doc/);
+  });
 });

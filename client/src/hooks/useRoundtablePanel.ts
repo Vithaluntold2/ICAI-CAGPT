@@ -194,12 +194,26 @@ export function useRoundtablePanel(conversationId: string | null) {
       const samePanel = !!panelId && detail?.panelId === panelId;
       if (!sameConversation && !samePanel) return;
 
-      if (sameConversation) {
-        void resolvePanelForConversation();
+      // If we already have the panel resolved (panelId set), the event
+      // signals that the panel's INTERNAL state changed (agent added,
+      // KB doc uploaded, agent edited, etc) — re-fetch hydrated directly.
+      //
+      // Previously this code took the `sameConversation` branch first
+      // and called resolvePanelForConversation, which re-runs the
+      // list+pick and calls setPanelId(sameId). React skips the
+      // re-render because the value is unchanged, so the downstream
+      // useEffect that triggers refresh() never fires. Result: agents
+      // added via PanelBuilder didn't appear in the boardroom rail
+      // until the user navigated away and back (which remounted the
+      // hook and re-fetched from scratch).
+      if (panelId) {
+        void refresh();
         return;
       }
-      if (samePanel) {
-        void refresh();
+
+      // Otherwise (no panel yet for this conversation), resolve.
+      if (sameConversation) {
+        void resolvePanelForConversation();
       }
     };
 

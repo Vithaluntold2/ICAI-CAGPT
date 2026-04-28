@@ -58,6 +58,7 @@ import {
 import { aiProviderRegistry } from '../aiProviders/registry';
 import { AIProviderName } from '../aiProviders/types';
 import { embeddingService } from '../embeddingService';
+import * as agentPovStore from './agentPovStore';
 
 // ---------------------------------------------------------------------------
 // Provider helper (mirrors roundtableAgents.ts; non-streaming completion)
@@ -1628,12 +1629,20 @@ async function runAgentTurn(
       );
     };
 
-    // Build the cue card showing each other agent's current position.
-    // On the first turn of a session agentPOVs is empty so the card is
-    // blank — that's fine; it populates after each completed turn.
-    const otherAgentsCueCard = buildOtherAgentsCueCard(threadId, agent.id, allAgents);
+    // Cue card: rule-based in-memory POV (legacy) OR persistent synthesizer POV
+    // (new), depending on ROUNDTABLE_SYNTHESIZER_ENABLED. When ON, the agent
+    // sees a structured per-agent POV doc rendered from agent_pov_documents;
+    // when OFF, the legacy rule-based "## My Position" map keeps working.
+    const synthesizerEnabled = process.env.ROUNDTABLE_SYNTHESIZER_ENABLED === 'true';
+    let cueCard = '';
+    if (synthesizerEnabled) {
+      const povDoc = await agentPovStore.get(threadId, agent.id);
+      cueCard = povDoc ? agentPovStore.renderForPrompt(povDoc) : '';
+    } else {
+      cueCard = buildOtherAgentsCueCard(threadId, agent.id, allAgents);
+    }
 
-    const systemPrompt = buildAgentSystemPrompt(agent, snippets, allAgents, otherAgentsCueCard);
+    const systemPrompt = buildAgentSystemPrompt(agent, snippets, allAgents, cueCard);
     const phaseDirective = phaseInstructionFor(owned.thread.phase, agent);
     const userPrompt = [
       `Current phase: ${owned.thread.phase}.`,

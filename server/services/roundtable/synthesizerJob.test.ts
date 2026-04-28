@@ -25,12 +25,13 @@ describe("processSynthesizerJob", () => {
     expect(result.tokenCount).toBe(500);
   });
 
-  it("swallows errors and returns success=false (panel must not block)", async () => {
+  it("rethrows errors so Bull retries per queue config", async () => {
     (synthesizeAgentPOV as any).mockRejectedValue(new Error("model timed out"));
-    const result = await processSynthesizerJob({
-      data: { threadId: "t", agentId: "a", agentName: "X", panelId: "p" },
-    } as any);
-    expect(result.success).toBe(false);
-    expect(result.error).toContain("model timed out");
+    await expect(
+      processSynthesizerJob({
+        data: { threadId: "t", agentId: "a", agentName: "X", panelId: "p" },
+        attemptsMade: 0,
+      } as any),
+    ).rejects.toThrow("model timed out");
   });
 });

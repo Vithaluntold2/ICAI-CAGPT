@@ -170,8 +170,10 @@ async function processMemoryJob(job: MemoryJob): Promise<boolean> {
       }
       case 'synthesizer': {
         const { processSynthesizerJob } = await import('./roundtable/synthesizerJob');
-        const result = await processSynthesizerJob({ data: job.data } as any);
-        return result.success;
+        // Throws on failure — caught by the surrounding try/catch which returns
+        // false, triggering the memory-queue retry mechanism below.
+        await processSynthesizerJob({ data: job.data, attemptsMade: job.attempts } as any);
+        return true;
       }
       default:
         return false;

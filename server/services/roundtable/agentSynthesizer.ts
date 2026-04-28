@@ -143,20 +143,25 @@ export async function synthesizeAgentPOV(
   const newPov = JSON.parse(completion.content);
 
   const lastTurnId = newTurns[newTurns.length - 1].turnId;
-  const tokenCount = approxTokenCount(JSON.stringify(newPov));
+  let finalPov: Record<string, any> = newPov;
+  let tokenCount = approxTokenCount(JSON.stringify(finalPov));
+  if (tokenCount > tokenBudget) {
+    finalPov = compactPov(finalPov);
+    tokenCount = approxTokenCount(JSON.stringify(finalPov));
+  }
 
   const updated = await povStore.upsert({
     threadId: args.threadId,
     agentId: args.agentId,
     expectedVersion,
     patch: {
-      selfPosition: newPov.selfPosition ?? {},
-      othersSummary: newPov.othersSummary ?? {},
-      outgoingQa: newPov.outgoingQa ?? [],
-      incomingQa: newPov.incomingQa ?? [],
-      chairQa: newPov.chairQa ?? [],
-      openThreads: newPov.openThreads ?? [],
-      glossary: newPov.glossary ?? {},
+      selfPosition: finalPov.selfPosition ?? {},
+      othersSummary: finalPov.othersSummary ?? {},
+      outgoingQa: finalPov.outgoingQa ?? [],
+      incomingQa: finalPov.incomingQa ?? [],
+      chairQa: finalPov.chairQa ?? [],
+      openThreads: finalPov.openThreads ?? [],
+      glossary: finalPov.glossary ?? {},
       lastSynthesizedTurnId: lastTurnId,
       tokenCount,
     },
@@ -260,4 +265,27 @@ async function loadTurnsAfter(
       : agentNameById.get(t.agentId) ?? "Agent",
     content: t.content,
   }));
+}
+
+const COMPACT_BATCH_SIZE = 5;
+
+export function compactPov(pov: Record<string, any>): Record<string, any> {
+  const out = { ...pov };
+  for (const field of ["outgoingQa", "incomingQa", "chairQa"] as const) {
+    const arr = (out[field] ?? []) as any[];
+    if (arr.length > COMPACT_BATCH_SIZE) {
+      const oldest = arr.slice(0, COMPACT_BATCH_SIZE);
+      const summary: Record<string, any> = {
+        question: `[Earlier ${oldest.length} ${field} entries collapsed for budget]`,
+        text: `[Earlier ${oldest.length} ${field} entries collapsed for budget]`,
+        answer: oldest.map((e: any) => e.answer ?? "(no answer)").join("; ").slice(0, 400),
+        turnId: `compact:${oldest[0].turnId ?? "x"}-${oldest[oldest.length - 1].turnId ?? "y"}`,
+      };
+      if (field === "outgoingQa") summary.to = "various";
+      if (field === "incomingQa") summary.from = "various";
+      if (field === "chairQa") summary.direction = "from";
+      out[field] = [summary, ...arr.slice(COMPACT_BATCH_SIZE)];
+    }
+  }
+  return out;
 }

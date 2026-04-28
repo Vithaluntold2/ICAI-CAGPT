@@ -202,3 +202,67 @@ describe("synthesizeAgentPOV", () => {
     expect(openaiProvider.generateCompletion).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("synthesizeAgentPOV — error paths", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("throws on invalid JSON from model and does not upsert", async () => {
+    (povStore.getOrInit as any).mockResolvedValue({
+      threadId: "t", agentId: "a", version: 1,
+      selfPosition: {}, othersSummary: {},
+      outgoingQa: [], incomingQa: [], chairQa: [], openThreads: [], glossary: {},
+      lastSynthesizedTurnId: null, tokenCount: 0, lastUpdatedAt: new Date(),
+    });
+    (aiProviderRegistry.getProvider as any).mockReturnValue({
+      generateCompletion: vi.fn().mockResolvedValue({
+        content: "this is not json {{{",
+        finishReason: "stop",
+        tokensUsed: { input: 0, output: 0, total: 0 },
+        model: "x", provider: "x",
+      }),
+    });
+
+    await expect(
+      synthesizeAgentPOV({
+        threadId: "t", agentId: "a", agentName: "X", panelId: "p",
+        _testHooks: {
+          loadRoster: async () => [],
+          loadTurnsAfter: async () => [{ turnId: "tx", speaker: "Y", content: "hi" }],
+        },
+      }),
+    ).rejects.toThrow();
+
+    expect(povStore.upsert).not.toHaveBeenCalled();
+  });
+});
+
+describe("recursive compaction (compactPov)", () => {
+  it("collapses oldest 5 entries of outgoingQa when over budget", async () => {
+    const { compactPov } = await import("./agentSynthesizer");
+    const oversized = {
+      selfPosition: {}, othersSummary: {},
+      outgoingQa: Array.from({ length: 10 }, (_, i) => ({
+        to: "X", question: `q${i}`, answer: `a${i}`, turnId: `t${i}`,
+      })),
+      incomingQa: [], chairQa: [], openThreads: [], glossary: {},
+    };
+    const compacted = compactPov(oversized);
+    expect(compacted.outgoingQa.length).toBeLessThan(10);
+    // First entry should be a collapsed summary.
+    expect(typeof compacted.outgoingQa[0].question).toBe("string");
+    expect(compacted.outgoingQa[0].turnId).toContain("compact:");
+  });
+
+  it("preserves arrays under threshold unchanged", async () => {
+    const { compactPov } = await import("./agentSynthesizer");
+    const small = {
+      selfPosition: {}, othersSummary: {},
+      outgoingQa: [{ to: "X", question: "q", answer: "a", turnId: "t1" }],
+      incomingQa: [], chairQa: [], openThreads: [], glossary: {},
+    };
+    const compacted = compactPov(small);
+    expect(compacted.outgoingQa).toEqual(small.outgoingQa);
+  });
+});

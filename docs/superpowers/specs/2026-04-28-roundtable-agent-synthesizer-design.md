@@ -2,7 +2,7 @@
 
 Date: 2026-04-28
 Owner: Mohammed
-Status: Draft (awaiting user review)
+Status: Implemented (flag-gated; see plan 2026-04-28-roundtable-agent-synthesizer.md)
 
 ## Context
 

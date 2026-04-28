@@ -171,5 +171,20 @@ describe("agentPovStore.upsert", () => {
         patch: { selfPosition: { stance: "x" } },
       }),
     ).rejects.toThrow("StaleVersionError");
+
+    // Lock in the err.name contract that callers depend on (cross-module
+    // instanceof is finicky; name comparison is the agreed convention).
+    await expect(
+      store.upsert({
+        threadId: "t",
+        agentId: "a",
+        expectedVersion: 1,
+        patch: { selfPosition: { stance: "x" } },
+      }),
+    ).rejects.toMatchObject({ name: "StaleVersionError" });
+
+    // Cache must NOT be invalidated on failure — the cached value is still
+    // valid (the underlying row didn't change).
+    expect(CacheService.del).not.toHaveBeenCalled();
   });
 });

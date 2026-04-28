@@ -84,10 +84,14 @@ export async function upsert(args: {
 }): Promise<AgentPovDocument> {
   const { threadId, agentId, expectedVersion, patch } = args;
 
+  const cleanPatch = Object.fromEntries(
+    Object.entries(patch).filter(([, v]) => v !== undefined),
+  );
+
   const updated = await db
     .update(agentPovDocuments)
     .set({
-      ...patch,
+      ...cleanPatch,
       version: sql`${agentPovDocuments.version} + 1`,
       lastUpdatedAt: new Date(),
     })

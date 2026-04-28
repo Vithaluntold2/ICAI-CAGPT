@@ -72,8 +72,20 @@ export function buildSynthesizerPrompt(args: {
 import { aiProviderRegistry } from "../aiProviders/registry";
 import { AIProviderName } from "../aiProviders/types";
 import * as povStore from "./agentPovStore";
+import { db } from "../../db";
+import { roundtablePanelAgents, roundtableTurns } from "@shared/schema";
+import { and, asc, eq, inArray, ne } from "drizzle-orm";
 
 const DEFAULT_TOKEN_BUDGET = 1800;
+
+const ROSTER_DESCRIPTION_MAX_CHARS = 180;
+
+function truncateForRoster(text: string | null | undefined): string {
+  if (!text) return "";
+  const flat = text.replace(/\s+/g, " ").trim();
+  if (flat.length <= ROSTER_DESCRIPTION_MAX_CHARS) return flat;
+  return flat.slice(0, ROSTER_DESCRIPTION_MAX_CHARS - 1).trimEnd() + "…";
+}
 
 const SYNTHESIZER_PROVIDER_ORDER: AIProviderName[] = [
   AIProviderName.AZURE_OPENAI,
@@ -175,7 +187,6 @@ async function callSynthesizerLLM(userPrompt: string): Promise<{ content: string
   for (const providerName of SYNTHESIZER_PROVIDER_ORDER) {
     try {
       const provider = aiProviderRegistry.getProvider(providerName);
-      if (!provider) continue;
       const model = SYNTHESIZER_MODELS[providerName] ?? "gpt-4o-mini";
       const res = await provider.generateCompletion({
         model,
@@ -201,16 +212,13 @@ async function callSynthesizerLLM(userPrompt: string): Promise<{ content: string
 
 // Default loaders — overridden in tests via _testHooks.
 async function loadRoster(panelId: string, excludeAgentId: string): Promise<RosterDescription[]> {
-  const { db } = await import("../../db");
-  const { roundtablePanelAgents } = await import("@shared/schema");
-  const { and, eq, ne } = await import("drizzle-orm");
   const rows = await db
     .select()
     .from(roundtablePanelAgents)
     .where(and(eq(roundtablePanelAgents.panelId, panelId), ne(roundtablePanelAgents.id, excludeAgentId)));
   return rows.map((a: any) => ({
     name: a.name,
-    description: a.createdFromTemplate ?? "panel specialist",
+    description: truncateForRoster(a.systemPrompt) || a.createdFromTemplate || "panel specialist",
   }));
 }
 
@@ -218,10 +226,6 @@ async function loadTurnsAfter(
   threadId: string,
   afterTurnId: string | null,
 ): Promise<SynthesizerTurn[]> {
-  const { db } = await import("../../db");
-  const { roundtableTurns, roundtablePanelAgents } = await import("@shared/schema");
-  const { eq, asc, inArray } = await import("drizzle-orm");
-
   const allTurns = await db
     .select({
       id: roundtableTurns.id,

@@ -314,6 +314,24 @@ export function BoardroomThread({ conversationId, onConfigurePanel }: Props) {
         </div>
       )}
 
+      {/* Convergence banner — shown when all agents ceded simultaneously.
+       *  Chair can accept (advance phase) or dismiss (keep running). */}
+      {board.convergenceProposal && !board.sessionComplete && (
+        <ConvergenceBanner
+          currentPhase={board.convergenceProposal.currentPhase}
+          proposedNextPhase={board.convergenceProposal.proposedNextPhase}
+          onAccept={async () => {
+            await board.setPhase(board.convergenceProposal!.proposedNextPhase);
+            board.dismissConvergenceProposal();
+          }}
+          onDismiss={() => board.dismissConvergenceProposal()}
+        />
+      )}
+
+      {/* Session-complete banner — shown when the panel converged in the
+       *  resolution phase and the loop has closed. */}
+      {board.sessionComplete && <SessionCompleteBanner />}
+
       {/* Phase stepper */}
       <PhaseStepper
         currentPhase={board.thread?.phase ?? 'opening'}
@@ -734,6 +752,71 @@ function ParticipationSummary({
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+// ── Convergence UI ────────────────────────────────────────────────────────
+// Shown when all agents ceded simultaneously (no one wants to speak).
+// The chair can accept (advance phase) or dismiss (keep the current phase).
+function ConvergenceBanner({
+  currentPhase,
+  proposedNextPhase,
+  onAccept,
+  onDismiss,
+}: {
+  currentPhase: string;
+  proposedNextPhase: string;
+  onAccept: () => Promise<void>;
+  onDismiss: () => void;
+}) {
+  const [accepting, setAccepting] = useState(false);
+  const nextLabel = PHASE_LABELS[proposedNextPhase] ?? proposedNextPhase;
+  const currentLabel = PHASE_LABELS[currentPhase] ?? currentPhase;
+
+  return (
+    <div className="flex items-center gap-2 px-4 py-2 border-b border-border/70 text-[11.5px] bg-aurora-teal/5">
+      <CheckCircle2 className="w-3.5 h-3.5 text-aurora-teal shrink-0" />
+      <span className="font-medium text-aurora-teal">Panel converged.</span>
+      <span className="text-foreground/70 flex-1">
+        All agents ceded after <span className="font-medium">{currentLabel}</span>.
+        Advance to <span className="font-medium">{nextLabel}</span>?
+      </span>
+      <Button
+        size="sm"
+        className="h-6 px-2.5 text-[11px] bg-aurora-teal hover:bg-aurora-teal/90 text-white border-transparent"
+        disabled={accepting}
+        onClick={async () => {
+          setAccepting(true);
+          await onAccept().catch(() => {});
+          setAccepting(false);
+        }}
+      >
+        {accepting ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <ChevronRight className="w-3 h-3 mr-1" />}
+        Advance
+      </Button>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-6 px-2 text-[11px] text-muted-foreground"
+        onClick={onDismiss}
+      >
+        <XCircle className="w-3 h-3 mr-1" />
+        Dismiss
+      </Button>
+    </div>
+  );
+}
+
+// Shown when the panel reached full resolution and the loop has closed.
+function SessionCompleteBanner() {
+  return (
+    <div className="flex items-center gap-2 px-4 py-2 border-b border-border/70 text-[11.5px] bg-emerald-500/8 dark:bg-emerald-500/10">
+      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+      <span className="font-medium text-emerald-700 dark:text-emerald-300">Session complete.</span>
+      <span className="text-foreground/70">
+        The panel reached full resolution. The board memo is available above.
+      </span>
     </div>
   );
 }

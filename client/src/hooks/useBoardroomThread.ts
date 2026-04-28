@@ -100,6 +100,22 @@ export function useBoardroomThread(panelId: string | null) {
    *  consecutive infra failures). Lets the UI render a precise
    *  message instead of a generic "paused". */
   const [pauseReason, setPauseReason] = useState<string | null>(null);
+  /**
+   * Set when the runtime emits `convergence-detected`: all agents ceded
+   * simultaneously and there are no open peer-directed questions. The
+   * chair sees a banner offering to advance to the proposed next phase
+   * (or dismiss to let the session keep running).
+   */
+  const [convergenceProposal, setConvergenceProposal] = useState<{
+    currentPhase: string;
+    proposedNextPhase: string;
+  } | null>(null);
+  /**
+   * Set to true when `session-complete` is emitted (the panel converged
+   * while in the resolution phase). The boardroom loop stops entirely;
+   * the UI shows a "session complete" banner.
+   */
+  const [sessionComplete, setSessionComplete] = useState(false);
   const eventSourceRef = useRef<EventSource | null>(null);
 
   // Resolve or list threads for this panel.
@@ -324,6 +340,21 @@ export function useBoardroomThread(panelId: string | null) {
       }
     };
 
+    const onConvergenceDetected = (e: MessageEvent) => {
+      let d: { currentPhase?: string; proposedNextPhase?: string } = {};
+      try { d = JSON.parse(e.data); } catch { /* ignore */ }
+      if (d.currentPhase && d.proposedNextPhase) {
+        setConvergenceProposal({
+          currentPhase: d.currentPhase,
+          proposedNextPhase: d.proposedNextPhase,
+        });
+      }
+    };
+
+    const onSessionComplete = () => {
+      setSessionComplete(true);
+    };
+
     es.addEventListener('turn-started', onTurnStarted);
     es.addEventListener('turn-token', onTurnToken);
     es.addEventListener('turn-completed', onTurnCompleted);
@@ -338,6 +369,8 @@ export function useBoardroomThread(panelId: string | null) {
     es.addEventListener('paused', onPaused);
     es.addEventListener('resumed', onResumed);
     es.addEventListener('loop-idle', onLoopIdle);
+    es.addEventListener('convergence-detected', onConvergenceDetected);
+    es.addEventListener('session-complete', onSessionComplete);
 
     return () => {
       es.close();
@@ -480,6 +513,11 @@ export function useBoardroomThread(panelId: string | null) {
     setAwaitingChairCardId(null);
   }, [activeThreadId]);
 
+  /** Dismiss the convergence proposal banner without advancing the phase. */
+  const dismissConvergenceProposal = useCallback(() => {
+    setConvergenceProposal(null);
+  }, []);
+
   return {
     activeThreadId,
     setActiveThreadId,
@@ -492,6 +530,8 @@ export function useBoardroomThread(panelId: string | null) {
     paused,
     pauseReason,
     awaitingChairCardId,
+    convergenceProposal,
+    sessionComplete,
     createThread,
     interject,
     interjectInThread,
@@ -506,6 +546,7 @@ export function useBoardroomThread(panelId: string | null) {
     kickoffThread,
     pause,
     resume,
+    dismissConvergenceProposal,
     refreshThreadList,
     loadThread,
   };

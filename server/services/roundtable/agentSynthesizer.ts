@@ -68,3 +68,192 @@ export function buildSynthesizerPrompt(args: {
     "- Output ONLY valid JSON, no prose, no markdown fences.",
   ].join("\n");
 }
+
+import { aiProviderRegistry } from "../aiProviders/registry";
+import { AIProviderName } from "../aiProviders/types";
+import * as povStore from "./agentPovStore";
+
+const DEFAULT_TOKEN_BUDGET = 1800;
+
+const SYNTHESIZER_PROVIDER_ORDER: AIProviderName[] = [
+  AIProviderName.AZURE_OPENAI,
+  AIProviderName.OPENAI,
+  AIProviderName.CLAUDE,
+  AIProviderName.GEMINI,
+];
+
+const SYNTHESIZER_MODELS: Partial<Record<AIProviderName, string>> = {
+  [AIProviderName.AZURE_OPENAI]: "gpt-4o-mini",
+  [AIProviderName.OPENAI]: "gpt-4o-mini",
+  [AIProviderName.CLAUDE]: "claude-3-5-haiku-20241022",
+  [AIProviderName.GEMINI]: "gemini-1.5-flash",
+};
+
+export interface SynthesizeArgs {
+  threadId: string;
+  agentId: string;
+  agentName: string;
+  panelId: string;
+  tokenBudget?: number;
+  _testHooks?: {
+    loadRoster?: (panelId: string, excludeAgentId: string) => Promise<RosterDescription[]>;
+    loadTurnsAfter?: (threadId: string, afterTurnId: string | null) => Promise<SynthesizerTurn[]>;
+  };
+}
+
+export async function synthesizeAgentPOV(
+  args: SynthesizeArgs,
+): Promise<{ version: number; tokenCount: number }> {
+  const tokenBudget = args.tokenBudget ?? DEFAULT_TOKEN_BUDGET;
+
+  const prior = await povStore.getOrInit(args.threadId, args.agentId);
+  const expectedVersion = prior.version;
+
+  const roster = await (args._testHooks?.loadRoster ?? loadRoster)(args.panelId, args.agentId);
+  const newTurns = await (args._testHooks?.loadTurnsAfter ?? loadTurnsAfter)(
+    args.threadId,
+    prior.lastSynthesizedTurnId,
+  );
+
+  if (newTurns.length === 0) {
+    return { version: prior.version, tokenCount: prior.tokenCount };
+  }
+
+  const userPrompt = buildSynthesizerPrompt({
+    agentName: args.agentName,
+    priorPov: priorPovAsCompact(prior),
+    newTurns,
+    rosterDescriptions: roster,
+    tokenBudget,
+  });
+
+  const completion = await callSynthesizerLLM(userPrompt);
+  const newPov = JSON.parse(completion.content);
+
+  const lastTurnId = newTurns[newTurns.length - 1].turnId;
+  const tokenCount = approxTokenCount(JSON.stringify(newPov));
+
+  const updated = await povStore.upsert({
+    threadId: args.threadId,
+    agentId: args.agentId,
+    expectedVersion,
+    patch: {
+      selfPosition: newPov.selfPosition ?? {},
+      othersSummary: newPov.othersSummary ?? {},
+      outgoingQa: newPov.outgoingQa ?? [],
+      incomingQa: newPov.incomingQa ?? [],
+      chairQa: newPov.chairQa ?? [],
+      openThreads: newPov.openThreads ?? [],
+      glossary: newPov.glossary ?? {},
+      lastSynthesizedTurnId: lastTurnId,
+      tokenCount,
+    },
+  });
+
+  return { version: updated.version, tokenCount };
+}
+
+function priorPovAsCompact(doc: any): Record<string, any> {
+  return {
+    selfPosition: doc.selfPosition,
+    othersSummary: doc.othersSummary,
+    outgoingQa: doc.outgoingQa,
+    incomingQa: doc.incomingQa,
+    chairQa: doc.chairQa,
+    openThreads: doc.openThreads,
+    glossary: doc.glossary,
+  };
+}
+
+function approxTokenCount(text: string): number {
+  // 4 chars/token rough estimate; sufficient for budget enforcement.
+  return Math.ceil(text.length / 4);
+}
+
+async function callSynthesizerLLM(userPrompt: string): Promise<{ content: string }> {
+  const errors: string[] = [];
+  for (const providerName of SYNTHESIZER_PROVIDER_ORDER) {
+    try {
+      const provider = aiProviderRegistry.getProvider(providerName);
+      if (!provider) continue;
+      const model = SYNTHESIZER_MODELS[providerName] ?? "gpt-4o-mini";
+      const res = await provider.generateCompletion({
+        model,
+        messages: [
+          {
+            role: "system",
+            content: "You are a JSON-only synthesis assistant. Output a single JSON object.",
+          },
+          { role: "user", content: userPrompt },
+        ],
+        temperature: 0.2,
+        maxTokens: 2400,
+        responseFormat: "json",
+      });
+      return { content: res.content };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      errors.push(`${providerName}: ${msg}`);
+    }
+  }
+  throw new Error(`Synthesizer: all providers failed: ${errors.join(" | ")}`);
+}
+
+// Default loaders — overridden in tests via _testHooks.
+async function loadRoster(panelId: string, excludeAgentId: string): Promise<RosterDescription[]> {
+  const { db } = await import("../../db");
+  const { roundtablePanelAgents } = await import("@shared/schema");
+  const { and, eq, ne } = await import("drizzle-orm");
+  const rows = await db
+    .select()
+    .from(roundtablePanelAgents)
+    .where(and(eq(roundtablePanelAgents.panelId, panelId), ne(roundtablePanelAgents.id, excludeAgentId)));
+  return rows.map((a: any) => ({
+    name: a.name,
+    description: a.createdFromTemplate ?? "panel specialist",
+  }));
+}
+
+async function loadTurnsAfter(
+  threadId: string,
+  afterTurnId: string | null,
+): Promise<SynthesizerTurn[]> {
+  const { db } = await import("../../db");
+  const { roundtableTurns, roundtablePanelAgents } = await import("@shared/schema");
+  const { eq, asc, inArray } = await import("drizzle-orm");
+
+  const allTurns = await db
+    .select({
+      id: roundtableTurns.id,
+      content: roundtableTurns.content,
+      speakerKind: roundtableTurns.speakerKind,
+      agentId: roundtableTurns.agentId,
+      position: roundtableTurns.position,
+    })
+    .from(roundtableTurns)
+    .where(eq(roundtableTurns.threadId, threadId))
+    .orderBy(asc(roundtableTurns.position));
+
+  let cutoffPosition = -1;
+  if (afterTurnId) {
+    const cutoff = allTurns.find((t: any) => t.id === afterTurnId);
+    if (cutoff) cutoffPosition = cutoff.position;
+  }
+  const newTurns = allTurns.filter((t: any) => t.position > cutoffPosition && t.content?.trim());
+
+  // Resolve all distinct speaker agent IDs in one query.
+  const agentIds = Array.from(new Set(newTurns.map((t: any) => t.agentId).filter(Boolean) as string[]));
+  const agentRows = agentIds.length > 0
+    ? await db.select().from(roundtablePanelAgents).where(inArray(roundtablePanelAgents.id, agentIds))
+    : [];
+  const agentNameById = new Map<string, string>();
+  for (const row of agentRows as any[]) agentNameById.set(row.id, row.name);
+
+  return newTurns.map((t: any) => ({
+    turnId: t.id,
+    speaker: t.speakerKind === "user"
+      ? "Chair"
+      : agentNameById.get(t.agentId) ?? "Agent",
+    content: t.content,
+  }));
+}

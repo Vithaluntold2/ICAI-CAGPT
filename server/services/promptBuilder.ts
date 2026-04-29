@@ -407,7 +407,9 @@ export class PromptBuilder {
     instructions += `4. Provide concrete examples for abstract principles\n`;
     instructions += `5. Highlight key takeaways and action items\n\n`;
     
-    // MINDMAP GENERATION - Check if this query should include mindmap visualization
+    // MINDMAP GENERATION - Optional supplementary visualization. The injected
+    // prompt makes clear the mode's native deliverable comes first, and the
+    // mindmap is appended only if useful.
     if (query && chatMode && MindMapGenerator.shouldGenerateMindmap(query, chatMode)) {
       instructions += MindMapGenerator.getMindMapGenerationPrompt(chatMode, query);
       instructions += `\n\n`;

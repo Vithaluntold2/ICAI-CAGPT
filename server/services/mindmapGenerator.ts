@@ -22,12 +22,14 @@ export class MindMapGenerator {
     const config = MODE_MINDMAP_CONFIGS[chatMode] || MODE_MINDMAP_CONFIGS['standard'];
     
     return `
-## 🧠 MINDMAP GENERATION REQUESTED
+## Optional Mindmap Visualization
 
-The user has requested a mindmap visualization. Generate a comprehensive mindmap structure.
+The mode's primary deliverable (checklist, workflow, audit plan, calculation, document, etc., as defined above) is the PRIMARY output and MUST be produced in full first. A mindmap is OPTIONAL — append one ONLY if it genuinely complements the deliverable for this query (i.e., the topic is hierarchical/branching and a visual would aid comprehension). If the query is best answered by the mode's native format alone (e.g., a flat checklist, a linear calculation, a table), DO NOT add a mindmap.
 
-### Mindmap Format Requirements:
-Generate the mindmap using this EXACT JSON structure at the END of your response:
+If — and only if — you decide a mindmap adds value, append it AFTER the primary deliverable using the JSON structure below. Never let the mindmap replace, shorten, or restructure the primary deliverable.
+
+### Mindmap Format (only if you choose to include one):
+Append the mindmap as a JSON block at the very END of your response:
 
 \`\`\`json
 {
@@ -97,7 +99,7 @@ ${this.getModeSpecificGuidelines(chatMode)}
 - **tertiary**: Details/specifics (1-4 per secondary)
 - **leaf**: Final details/examples (optional)
 
-Place the mindmap JSON at the VERY END of your response after your text explanation.
+Place the mindmap JSON at the VERY END of your response, AFTER the mode's primary deliverable. Skip it entirely if a mindmap would not genuinely aid this specific query.
 `;
   }
 

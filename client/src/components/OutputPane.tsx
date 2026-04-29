@@ -254,8 +254,13 @@ export default function OutputPane({
         </div>
       </div>
 
-      {/* Export Options - only show when there's visual content */}
-      {hasVisualContent && (
+      {/* Export Options - only show when there's visual content.
+          Spreadsheet artifacts have their own dedicated Excel download in
+          SpreadsheetViewer (which streams the real generated .xlsx);
+          rendering the generic Excel/PDF/PPT bar here would (a) duplicate the
+          Excel option with a lossy markdown-table conversion and (b) offer
+          PDF/PPT exports the user explicitly does not want for spreadsheets. */}
+      {hasVisualContent && !spreadsheetData && (
         <div className="px-4 py-2 border-b">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-xs text-muted-foreground">Export:</span>

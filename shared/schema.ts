@@ -1911,6 +1911,33 @@ export const roundtablePanelAgentKbDocs = pgTable("roundtable_panel_agent_kb_doc
   docIdx: index("roundtable_panel_agent_kb_docs_doc_idx").on(table.docId),
 }));
 
+// =============================================================================
+// Per-agent POV documents (synthesizer output). One row per (thread, agent).
+// Maintained by a background "synthesizer" subworker that summarises the
+// broader roundtable conversation from this agent's POV.
+// =============================================================================
+export const agentPovDocuments = pgTable("agent_pov_documents", {
+  threadId: varchar("thread_id").notNull().references(() => roundtableThreads.id, { onDelete: "cascade" }),
+  agentId: varchar("agent_id").notNull().references(() => roundtablePanelAgents.id, { onDelete: "cascade" }),
+  selfPosition: jsonb("self_position").notNull().default({}),
+  othersSummary: jsonb("others_summary").notNull().default({}),
+  outgoingQa: jsonb("outgoing_qa").notNull().default([]),
+  incomingQa: jsonb("incoming_qa").notNull().default([]),
+  chairQa: jsonb("chair_qa").notNull().default([]),
+  openThreads: jsonb("open_threads").notNull().default([]),
+  glossary: jsonb("glossary").notNull().default({}),
+  lastSynthesizedTurnId: varchar("last_synthesized_turn_id"),
+  tokenCount: integer("token_count").notNull().default(0),
+  version: integer("version").notNull().default(1),
+  lastUpdatedAt: timestamp("last_updated_at").notNull().defaultNow(),
+}, (table) => ({
+  pk: uniqueIndex("agent_pov_documents_pk").on(table.threadId, table.agentId),
+  threadIdx: index("agent_pov_documents_thread_idx").on(table.threadId),
+}));
+
+export type AgentPovDocument = typeof agentPovDocuments.$inferSelect;
+export type InsertAgentPovDocument = typeof agentPovDocuments.$inferInsert;
+
 // Chunked text + embedding for retrieval. Reuses the same TEXT-fallback
 // embedding storage as conversation memory (Railway has no pgvector).
 export const roundtableKbChunks = pgTable("roundtable_kb_chunks", {

@@ -25,6 +25,7 @@ const useRedis = !!redisUrl;
 let titleGenerationQueue: Queue | null = null;
 let analyticsQueue: Queue | null = null;
 let fileProcessingQueue: Queue | null = null;
+let synthesizerQueue: Queue | null = null;
 
 if (useRedis && redisUrl) {
   console.log('[JobQueue] ✓ Using Redis + Bull for job queues');
@@ -57,6 +58,28 @@ if (useRedis && redisUrl) {
       removeOnComplete: 50,
       removeOnFail: 200
     }
+  });
+
+  synthesizerQueue = new Bull('roundtable-synthesizer', redisUrl, {
+    prefix: 'luca',
+    defaultJobOptions: {
+      attempts: 3,
+      backoff: { type: 'exponential', delay: 5000 },
+      removeOnComplete: 100,
+      removeOnFail: 500,
+      timeout: 30000,
+    }
+  });
+
+  // Process synthesizer jobs. Lazy-import the processor to avoid pulling
+  // the synthesizer + provider stack into queue startup paths.
+  synthesizerQueue.process(async (job: Job) => {
+    const { processSynthesizerJob } = await import('./roundtable/synthesizerJob');
+    return processSynthesizerJob(job);
+  });
+
+  synthesizerQueue.on('failed', (job, err) => {
+    console.error(`[SynthesizerQueue] Job ${job?.id} failed (attempt ${job?.attemptsMade}):`, err.message);
   });
 
   // Process title generation jobs
@@ -114,7 +137,7 @@ if (useRedis && redisUrl) {
 
 interface MemoryJob {
   id: string;
-  type: 'title' | 'analytics' | 'file';
+  type: 'title' | 'analytics' | 'file' | 'synthesizer';
   data: any;
   attempts: number;
   maxAttempts: number;
@@ -143,6 +166,13 @@ async function processMemoryJob(job: MemoryJob): Promise<boolean> {
       }
       case 'file': {
         console.log(`[MemoryQueue] Processing file ${job.data.fileId}`);
+        return true;
+      }
+      case 'synthesizer': {
+        const { processSynthesizerJob } = await import('./roundtable/synthesizerJob');
+        // Throws on failure — caught by the surrounding try/catch which returns
+        // false, triggering the memory-queue retry mechanism below.
+        await processSynthesizerJob({ data: job.data, attemptsMade: job.attempts } as any);
         return true;
       }
       default:
@@ -244,18 +274,44 @@ export function addFileProcessingJob(fileId: string, filePath: string, userId: s
   return jobId;
 }
 
+export function addSynthesizerJob(data: {
+  threadId: string;
+  agentId: string;
+  agentName: string;
+  panelId: string;
+}): string {
+  if (useRedis && synthesizerQueue) {
+    synthesizerQueue.add(data)
+      .catch(err => console.error('[JobQueue] Failed to queue synthesizer:', err));
+    return `redis_${Date.now()}`;
+  }
+
+  const jobId = generateJobId();
+  pendingJobs.push({
+    id: jobId,
+    type: 'synthesizer',
+    data,
+    attempts: 0,
+    maxAttempts: 3
+  });
+  setImmediate(() => processMemoryQueue());
+  return jobId;
+}
+
 export async function getQueueStats() {
   if (useRedis && titleGenerationQueue && analyticsQueue && fileProcessingQueue) {
-    const [titleStats, analyticsStats, fileStats] = await Promise.all([
+    const [titleStats, analyticsStats, fileStats, synthStats] = await Promise.all([
       titleGenerationQueue.getJobCounts(),
       analyticsQueue.getJobCounts(),
-      fileProcessingQueue.getJobCounts()
+      fileProcessingQueue.getJobCounts(),
+      synthesizerQueue ? synthesizerQueue.getJobCounts() : Promise.resolve({}),
     ]);
-    
+
     return {
       titleGeneration: titleStats,
       analytics: analyticsStats,
       fileProcessing: fileStats,
+      synthesizer: synthStats,
       backend: 'redis',
       status: 'ready'
     };
@@ -266,6 +322,7 @@ export async function getQueueStats() {
     titleGeneration: { waiting: pendingJobs.filter(j => j.type === 'title').length, active: isProcessing ? 1 : 0 },
     analytics: { waiting: pendingJobs.filter(j => j.type === 'analytics').length, active: 0 },
     fileProcessing: { waiting: pendingJobs.filter(j => j.type === 'file').length, active: 0 },
+    synthesizer: { waiting: pendingJobs.filter(j => j.type === 'synthesizer').length, active: 0 },
     backend: 'memory',
     status: 'ready'
   };
@@ -279,7 +336,8 @@ async function gracefulShutdown() {
     await Promise.all([
       titleGenerationQueue.close(),
       analyticsQueue.close(),
-      fileProcessingQueue.close()
+      fileProcessingQueue.close(),
+      synthesizerQueue ? synthesizerQueue.close() : Promise.resolve(),
     ]);
   }
   

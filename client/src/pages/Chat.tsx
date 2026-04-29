@@ -281,6 +281,15 @@ export default function Chat() {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedProfileFilter, setSelectedProfileFilter] = useState<string>("all");
   const [pendingRoundtableConversationId, setPendingRoundtableConversationId] = useState<string | null>(null);
+  /** Server-assigned conversation id from a brand-new chat's first
+   *  message. Tracked separately because the sidebar conversations
+   *  query is invalidated AFTER `onSuccess` fires — leaving a window
+   *  where activeConversation is set but the cached list still doesn't
+   *  contain it. The stale-conversation-cleanup effect would otherwise
+   *  reset activeConversation during that window and bounce the user
+   *  back to the new-chat home page mid-stream. Cleared once the new
+   *  conversation actually appears in the list. */
+  const [pendingNewConversationId, setPendingNewConversationId] = useState<string | null>(null);
   const [renameDialogOpen, setRenameDialogOpen] = useState(false);
   const [renameConvId, setRenameConvId] = useState<string>("");
   const [renameValue, setRenameValue] = useState("");
@@ -657,6 +666,11 @@ export default function Chat() {
 
           if (!activeConversation) {
             setActiveConversation(convId);
+            // Mark this id as pending so the stale-conversation-cleanup
+            // effect doesn't reset it while the sidebar query is still
+            // refetching post-onSuccess. Cleared once the conv appears
+            // in the conversations list (effect below).
+            setPendingNewConversationId(convId);
           }
           // Mirror the server-side conversation id into our closure so
           // onEnd can invalidate caches even before the React state update
@@ -1227,18 +1241,28 @@ export default function Chat() {
     }
   }, [conversations, pendingRoundtableConversationId]);
 
+  // Symmetric clear for normal-chat pending conversations.
+  useEffect(() => {
+    if (!pendingNewConversationId) return;
+    const exists = conversations.some((c) => c.id === pendingNewConversationId);
+    if (exists) {
+      setPendingNewConversationId(null);
+    }
+  }, [conversations, pendingNewConversationId]);
+
   useEffect(() => {
     if (conversationsLoading) return;
     if (!activeConversation) return;
     if (pendingRoundtableConversationId === activeConversation) return;
-    // Don't reset activeConversation while a send is in flight. When the
-    // user sends the FIRST message in a new chat, onStart fires with the
-    // server-assigned convId BEFORE the sidebar's conversations query has
-    // had a chance to refetch (that happens later via onSuccess->invalidate).
-    // Without this guard, the freshly-set activeConversation isn't in the
-    // stale conversations list, this effect treats it as "deleted", and
-    // the user gets bounced back to the new-chat home page mid-stream.
+    // Bail while a send is in flight (covers the streaming window).
     if (isStreaming) return;
+    // Bail while a brand-new conversation hasn't yet appeared in the
+    // sidebar query. onSuccess invalidates the conversations list AFTER
+    // setIsStreaming(false), leaving a window where activeConversation
+    // is set but the cached list is still the pre-creation snapshot.
+    // Without this guard, the user gets bounced to home in that gap.
+    // Cleared by the effect above once the conv shows up in the list.
+    if (pendingNewConversationId === activeConversation) return;
 
     const stillExists = conversations.some((c) => c.id === activeConversation);
     if (stillExists) return;
@@ -1247,7 +1271,7 @@ export default function Chat() {
     setMessages([]);
     queryClient.removeQueries({ queryKey: ['/api/conversations', activeConversation, 'messages'] });
     queryClient.removeQueries({ queryKey: ['whiteboard', activeConversation] });
-  }, [activeConversation, conversations, conversationsLoading, pendingRoundtableConversationId, isStreaming, queryClient]);
+  }, [activeConversation, conversations, conversationsLoading, pendingRoundtableConversationId, pendingNewConversationId, isStreaming, queryClient]);
 
   // Map the legacy useChatView state (`'chat' | 'board'`) to the new
   // primitive's expected shape (`'chat' | 'whiteboard'`).

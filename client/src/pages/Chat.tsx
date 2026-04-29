@@ -1231,6 +1231,14 @@ export default function Chat() {
     if (conversationsLoading) return;
     if (!activeConversation) return;
     if (pendingRoundtableConversationId === activeConversation) return;
+    // Don't reset activeConversation while a send is in flight. When the
+    // user sends the FIRST message in a new chat, onStart fires with the
+    // server-assigned convId BEFORE the sidebar's conversations query has
+    // had a chance to refetch (that happens later via onSuccess->invalidate).
+    // Without this guard, the freshly-set activeConversation isn't in the
+    // stale conversations list, this effect treats it as "deleted", and
+    // the user gets bounced back to the new-chat home page mid-stream.
+    if (isStreaming) return;
 
     const stillExists = conversations.some((c) => c.id === activeConversation);
     if (stillExists) return;
@@ -1239,7 +1247,7 @@ export default function Chat() {
     setMessages([]);
     queryClient.removeQueries({ queryKey: ['/api/conversations', activeConversation, 'messages'] });
     queryClient.removeQueries({ queryKey: ['whiteboard', activeConversation] });
-  }, [activeConversation, conversations, conversationsLoading, pendingRoundtableConversationId, queryClient]);
+  }, [activeConversation, conversations, conversationsLoading, pendingRoundtableConversationId, isStreaming, queryClient]);
 
   // Map the legacy useChatView state (`'chat' | 'board'`) to the new
   // primitive's expected shape (`'chat' | 'whiteboard'`).

@@ -218,14 +218,6 @@ interface ThreadRuntime {
   consecutiveFailures: number;
   /** Last activity timestamp for GC. */
   lastActivity: number;
-  /**
-   * Rule-based POV store (per agent). After each completed agent turn the
-   * runtime writes a compact "## My Position" block here so other agents'
-   * system prompts can include a structured cue card instead of raw thread
-   * history. Replaced by the LLM synthesizer in a later phase; the Map
-   * interface is identical so the swap is a one-function change.
-   */
-  agentPOVs: Map<string, string>;
 }
 
 const CIRCUIT_BREAKER_THRESHOLD = 3;
@@ -247,7 +239,6 @@ function getRuntime(threadId: string): ThreadRuntime {
       paused: false,
       consecutiveFailures: 0,
       lastActivity: Date.now(),
-      agentPOVs: new Map<string, string>(),
     };
     runtimes.set(threadId, r);
   }
@@ -1305,88 +1296,13 @@ async function gatherKbContext(agentId: string, query: string): Promise<{ snippe
   return { snippets, citations };
 }
 
-// ---------------------------------------------------------------------------
-// Rule-based POV helpers (V1 — no LLM required)
-//
-// After every completed agent turn the runtime stores a compact personal
-// context for that agent in `ThreadRuntime.agentPOVs`. Other agents then
-// receive a structured "cue card" instead of a raw full thread dump.
-//
-// These two functions are the ONLY surface that changes when the LLM
-// synthesizer (Plan Step 1) is introduced:
-//   updateRuleBasedPOV() → becomes updateSynthesizedPOV() (async, calls mini LLM)
-//   buildOtherAgentsCueCard() → reads from the same Map; no change needed
-// ---------------------------------------------------------------------------
-
-/**
- * Write a minimal rule-based POV for `agentId` after they complete a turn.
- * Stores:
- *   ## My Position
- *   <last ≤400 chars of the agent's turn content>
- *
- * This placeholder is immediately useful for the cue card (other agents
- * see what each colleague currently argues) and will be replaced by a
- * richer LLM-generated block in Step 1 of the implementation plan.
- */
-function updateRuleBasedPOV(r: ThreadRuntime, agentId: string, content: string): void {
-  const trimmed = content.trim();
-  if (!trimmed) return; // empty turn — leave the previous POV intact
-  // Take the tail of the content: the last paragraph is usually the
-  // clearest statement of position, not the preamble.
-  const position = trimmed.length > 400 ? '…' + trimmed.slice(-400) : trimmed;
-  if (process.env.ROUNDTABLE_SYNTHESIZER_ENABLED !== 'true') {
-    r.agentPOVs.set(agentId, `## My Position\n${position}`);
-  }
-}
-
-/**
- * Build the "== What your colleagues currently believe ==" cue card
- * that is injected into `buildAgentSystemPrompt()` for the speaking agent.
- *
- * For each other agent that has spoken (i.e. has an entry in agentPOVs),
- * the cue card shows their `## My Position` excerpt (≤200 chars). Agents
- * that haven't spoken yet are omitted — they'll appear once they take a
- * turn.
- *
- * The cue card is intentionally compact: it gives each agent just enough
- * awareness of peers to avoid re-stating what was already said, without
- * exposing the full raw transcript (which causes convergence collapse).
- */
-function buildOtherAgentsCueCard(
-  threadId: string,
-  currentAgentId: string,
-  allAgents: RoundtablePanelAgent[],
-): string {
-  const r = runtimes.get(threadId);
-  if (!r) return '';
-  const others = allAgents.filter((a) => a.id !== currentAgentId);
-  if (others.length === 0) return '';
-
-  const lines: string[] = [];
-  for (const a of others) {
-    const pov = r.agentPOVs.get(a.id);
-    if (!pov) continue; // hasn't spoken yet — omit
-    // Extract the "## My Position" section (everything after the heading,
-    // up to the next ## or end of string).
-    const posMatch = pov.match(/## My Position\n([\s\S]*?)(?=\n##|$)/);
-    const posText = posMatch ? posMatch[1].trim().slice(0, 200) : '';
-    if (!posText) continue;
-    lines.push(`[${a.name}]`);
-    lines.push(`  Current position: ${posText}`);
-  }
-
-  if (lines.length === 0) return ''; // nobody has spoken yet
-
-  return ['== What your colleagues currently believe ==', ...lines].join('\n');
-}
-
 function buildAgentSystemPrompt(
   agent: RoundtablePanelAgent,
   kbSnippets: string,
   allAgents: RoundtablePanelAgent[],
-  /** Cue card from buildOtherAgentsCueCard(). Empty string = nobody else has
-   *  spoken yet so there's nothing useful to show. */
-  otherAgentsCueCard: string,
+  /** Rendered POV doc for this agent from agentPovStore. Empty string = no
+   *  prior POV (first turn for this agent). */
+  cueCard: string,
 ): string {
   const baseGate = agent.useBaseKnowledge
     ? `You may use your training knowledge in addition to any provided context.`
@@ -1409,12 +1325,13 @@ function buildAgentSystemPrompt(
         })
         .join('\n')}\nThe chair (the user) can also be addressed as to_agent_name="chair".\nIMPORTANT: If a question requires a specialty NOT represented above, address the chair — do NOT invent panelists ("Governance Bot", "Legal Counsel") that don't exist.\n=== END ROSTER ===`;
 
-  // Cue card: compact view of what each other agent currently argues.
-  // Injected BEFORE the KB block so it sits near the end of the context
-  // window (most influential position). Empty on the first turn of a
-  // session (nobody has a POV yet) — the section is simply omitted.
-  const cueCardBlock = otherAgentsCueCard
-    ? `\n\n=== COLLEAGUES' CURRENT POSITIONS (synthesized) ===\n${otherAgentsCueCard}\n=== END POSITIONS ===`
+  // Cue card: this agent's rendered POV doc (self position + others_summary +
+  // outgoing/incoming/chair Q&A + open threads + glossary). Maintained by the
+  // synthesizer subworker. Injected BEFORE the KB block so it sits near the
+  // end of the context window (most influential position). Empty on the first
+  // turn for this agent — the section is simply omitted.
+  const cueCardBlock = cueCard
+    ? `\n\n=== COLLEAGUES' CURRENT POSITIONS (synthesized) ===\n${cueCard}\n=== END POSITIONS ===`
     : '';
 
   return [
@@ -1631,18 +1548,11 @@ async function runAgentTurn(
       );
     };
 
-    // Cue card: rule-based in-memory POV (legacy) OR persistent synthesizer POV
-    // (new), depending on ROUNDTABLE_SYNTHESIZER_ENABLED. When ON, the agent
-    // sees a structured per-agent POV doc rendered from agent_pov_documents;
-    // when OFF, the legacy rule-based "## My Position" map keeps working.
-    const synthesizerEnabled = process.env.ROUNDTABLE_SYNTHESIZER_ENABLED === 'true';
-    let cueCard = '';
-    if (synthesizerEnabled) {
-      const povDoc = await agentPovStore.get(threadId, agent.id);
-      cueCard = povDoc ? agentPovStore.renderForPrompt(povDoc) : '';
-    } else {
-      cueCard = buildOtherAgentsCueCard(threadId, agent.id, allAgents);
-    }
+    // Cue card: persistent synthesizer POV doc rendered for this agent.
+    // Empty string on first turn for the agent (no doc yet — synthesizer
+    // hasn't run for them) — `buildAgentSystemPrompt` omits the section.
+    const povDoc = await agentPovStore.get(threadId, agent.id);
+    const cueCard = povDoc ? agentPovStore.renderForPrompt(povDoc) : '';
 
     const systemPrompt = buildAgentSystemPrompt(agent, snippets, allAgents, cueCard);
     const phaseDirective = phaseInstructionFor(owned.thread.phase, agent);
@@ -1976,9 +1886,6 @@ async function runAgentTurn(
     } else {
       // Real productive turn — reset the failure counter.
       r.consecutiveFailures = 0;
-      // Update this agent's rule-based POV so other agents' cue cards
-      // reflect their latest stated position on the next turn.
-      updateRuleBasedPOV(r, agent.id, persistedContent);
       emit(threadId, 'turn-completed', {
         turnId: turn.id,
         agentId: agent.id,
@@ -2037,28 +1944,27 @@ async function runAgentTurn(
       }
     }
 
-    // Continue the relevance loop after the turn (and any side-threads)
-    // finish.
-    // Dispatch synthesizer jobs for ALL panel agents (speaker included),
-    // when the feature flag is on. Non-blocking; the synthesizer's Bull
-    // processor swallows failures so the panel never blocks on synthesis.
-    if (process.env.ROUNDTABLE_SYNTHESIZER_ENABLED === 'true') {
-      try {
-        const { addSynthesizerJob } = await import('../hybridJobQueue');
-        const synthAgents = await loadAgents(owned.panel.id);
-        for (const a of synthAgents) {
-          addSynthesizerJob({
-            threadId,
-            agentId: a.id,
-            agentName: a.name,
-            panelId: owned.panel.id,
-          });
-        }
-      } catch (err) {
-        console.error('[Roundtable] failed to dispatch synthesizer jobs:', err);
+    // Dispatch synthesizer jobs for ALL panel agents (speaker included).
+    // Non-blocking; the synthesizer's Bull processor surfaces failures via
+    // Sentry and Bull retries per queue config — the panel never blocks
+    // on synthesis.
+    try {
+      const { addSynthesizerJob } = await import('../hybridJobQueue');
+      const synthAgents = await loadAgents(owned.panel.id);
+      for (const a of synthAgents) {
+        addSynthesizerJob({
+          threadId,
+          agentId: a.id,
+          agentName: a.name,
+          panelId: owned.panel.id,
+        });
       }
+    } catch (err) {
+      console.error('[Roundtable] failed to dispatch synthesizer jobs:', err);
     }
 
+    // Continue the relevance loop after the turn (and any side-threads)
+    // finish.
     scheduleRelevanceLoop(userId, threadId).catch((err) => {
       console.error('[Boardroom] post-turn loop failed:', err);
     });

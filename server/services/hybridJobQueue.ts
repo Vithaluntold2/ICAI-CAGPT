@@ -280,11 +280,6 @@ export function addSynthesizerJob(data: {
   agentName: string;
   panelId: string;
 }): string {
-  // Feature flag gate. When off, no-op.
-  if (process.env.ROUNDTABLE_SYNTHESIZER_ENABLED !== 'true') {
-    return 'disabled';
-  }
-
   if (useRedis && synthesizerQueue) {
     synthesizerQueue.add(data)
       .catch(err => console.error('[JobQueue] Failed to queue synthesizer:', err));

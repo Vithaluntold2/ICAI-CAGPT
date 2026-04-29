@@ -2,7 +2,7 @@
 
 Date: 2026-04-28
 Owner: Mohammed
-Status: Implemented (flag-gated; see plan 2026-04-28-roundtable-agent-synthesizer.md)
+Status: Implemented and always-on (legacy rule-based POV path removed; see plan 2026-04-28-roundtable-agent-synthesizer.md)
 
 ## Context
 
@@ -20,7 +20,7 @@ The architectural fix (per Sai): give each agent an isolated, narrative POV docu
 - The doc captures: my position, what others have been saying, my outgoing Q&A with other agents, incoming Q&A from other agents, Q&A with the chair (separately tracked), open threads, and a glossary of named entities.
 - Synthesis runs in the background per agent, without blocking the next turn.
 - Agents fall through cleanly when synthesis fails — last-good POV + raw tail keeps the panel running.
-- Behind a feature flag for staged rollout.
+- Always on; the legacy rule-based POV path has been removed.
 
 ## Non-goals (v1)
 
@@ -158,7 +158,7 @@ Rules:
 |---|---|
 | `shared/schema.ts` + new migration `0005_agent_pov_documents.sql` | Define table |
 | `server/services/hybridJobQueue.ts` | Register `roundtable-synthesizer` queue + processor; export `addSynthesizerJob` |
-| `server/services/roundtable/roundtableRuntime.ts` | Two surgical edits: (a) in `runAgentTurn`'s `finally`, dispatch synth jobs for **all** panel agents (speaker included) — guarded by `ROUNDTABLE_SYNTHESIZER_ENABLED`; (b) in `buildAgentSystemPrompt`, fetch POV via `agentPovStore.get` + `renderForPrompt` and inject as a labelled block alongside the existing last-N raw turns |
+| `server/services/roundtable/roundtableRuntime.ts` | Two surgical edits: (a) in `runAgentTurn`'s `finally`, dispatch synth jobs for **all** panel agents (speaker included); (b) in `buildAgentSystemPrompt`, fetch POV via `agentPovStore.get` + `renderForPrompt` and inject as a labelled block alongside the existing last-N raw turns. Legacy `agentPOVs` map + `buildOtherAgentsCueCard` + `updateRuleBasedPOV` removed. |
 
 Total net-new code: ~480 LOC across three files + one migration.
 
@@ -219,7 +219,7 @@ Synthesis failures **must never block panel progress.** The panel runs with stal
 
 - `agentPovStore.test.ts`: lazy init creates v1; upsert version conflict throws; cache consulted before DB; cache invalidated on upsert; renderForPrompt stable format.
 - `agentSynthesizer.test.ts`: prompt assembly with prior POV + new turns + roster; valid JSON → upsert with version bump; invalid JSON → throws (no upsert); recursive compaction triggers when tokenCount > budget; speaker's self_position updates from their own turn; stale version retried once.
-- `synthesizerJob.test.ts`: processor calls synth with correct args; retried 2× then swallowed; feature-flag off → enqueue is no-op.
+- `synthesizerJob.test.ts`: processor calls synth with correct args; rethrows on failure so Bull retries per queue config.
 
 ### Integration (real Postgres, mocked LLM)
 
@@ -228,7 +228,7 @@ Synthesis failures **must never block panel progress.** The panel runs with stal
 - Concurrent synth jobs for same agent: one wins, other retries, no data loss.
 - Synth timeout → POV stays at last-good; agent reads stale POV + raw tail.
 
-### E2E (real model, behind feature flag)
+### E2E (real model)
 
 - NovaPlast impairment scenario; assert each agent's POV has non-empty self_position + others_summary by turn 5; assert no agent invents a phantom specialist.
 
@@ -242,10 +242,10 @@ Synthesis failures **must never block panel progress.** The panel runs with stal
 
 ## Rollout
 
-- Feature flag `ROUNDTABLE_SYNTHESIZER_ENABLED` defaults to `false`.
-- Per-thread enablement via panel metadata for a staged ramp: 10% → 50% → 100%.
-- Sentry tag `synthesizer.failure` for swallowed errors (count without paging).
-- Existing `cost_micros` accounting extended with `synthesizer_cost_micros` for clean spend visibility.
+- Always-on. Legacy rule-based POV path removed; the synthesizer is the only POV mechanism.
+- Bull retries 3× with exponential backoff (5s base) per `roundtable-synthesizer` queue config.
+- Synth failures captured to Sentry via `captureError` with `feature: 'roundtable-synthesizer'` context.
+- Existing `cost_micros` accounting captures synthesizer spend through the standard provider call path.
 
 ## Out of scope / follow-ups
 

@@ -953,6 +953,11 @@ export class AIOrchestrator {
     // Don't generate chart visualizations for Excel requests - they have spreadsheet preview
     if (isExcelModelRequest || spreadsheetPreviewData) {
       console.log('[Orchestrator] Skipping chart visualization - Excel/spreadsheet request uses spreadsheet preview');
+    } else if (chatMode === 'standard') {
+      // Standard mode is plain conversational text — no mindmaps, charts,
+      // workflow diagrams, or other artifacts. The professional modes are
+      // where visualizations belong.
+      console.log('[Orchestrator] Skipping visualization - standard mode produces text-only responses');
     } else {
       try {
         const startVizTime = Date.now();

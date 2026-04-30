@@ -271,6 +271,20 @@ export class PromptBuilder {
         `the stances considered, and the reasoning that produced consensus or noted dissent. Never break framing.`;
     }
 
+    // Standard mode is plain conversational text. Override the earlier
+    // formatting examples that teach the model to emit mermaid / mindmap /
+    // sheet / visualization blocks — none of those should appear here.
+    if (chatMode === 'standard') {
+      systemPrompt +=
+        `\n\nSTANDARD MODE OVERRIDE — TEXT-ONLY OUTPUT:\n` +
+        `This conversation is in standard mode. Reply as plain conversational markdown only. ` +
+        `Do NOT emit \`\`\`mermaid\`\`\` blocks, \`\`\`mindmap\`\`\` blocks, \`\`\`sheet\`\`\` blocks, ` +
+        `\`\`\`visualization\`\`\` blocks, JSON visualization objects, or any "Step N:" workflow ` +
+        `parser format. The earlier examples about diagrams, mindmaps, sheets, and visualizations ` +
+        `do NOT apply in standard mode — ignore them. Standard markdown (headers, bullets, bold, ` +
+        `tables, LaTeX math, inline code) is fine; structured artifacts are not.`;
+    }
+
     // Tier 2: Mode-specific instructions
     const instructionsMessage = this.buildInstructionsMessage(
       classification,
@@ -409,8 +423,9 @@ export class PromptBuilder {
     
     // MINDMAP GENERATION - Optional supplementary visualization. The injected
     // prompt makes clear the mode's native deliverable comes first, and the
-    // mindmap is appended only if useful.
-    if (query && chatMode && MindMapGenerator.shouldGenerateMindmap(query, chatMode)) {
+    // mindmap is appended only if useful. Never injected in standard mode,
+    // which is plain conversational text.
+    if (query && chatMode && chatMode !== 'standard' && MindMapGenerator.shouldGenerateMindmap(query, chatMode)) {
       instructions += MindMapGenerator.getMindMapGenerationPrompt(chatMode, query);
       instructions += `\n\n`;
     }

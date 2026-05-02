@@ -75,6 +75,63 @@ interface ExcelBufferEntry {
 const excelBufferCache = new Map<string, ExcelBufferEntry>();
 const EXCEL_CACHE_TTL = 60 * 60 * 1000; // 1 hour
 
+const PASSWORD_RESET_CODE_TTL_MINUTES = 10;
+
+async function sendPasswordResetCodeEmail(email: string, code: string): Promise<void> {
+  const resendApiKey = process.env.RESEND_API_KEY;
+  const fromEmail = process.env.RESEND_FROM_EMAIL || 'noreply@cagpt.icai.org';
+
+  if (!resendApiKey) {
+    throw new Error('Email service is not configured (RESEND_API_KEY missing)');
+  }
+
+  const response = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${resendApiKey}`,
+    },
+    body: JSON.stringify({
+      from: fromEmail,
+      to: email,
+      subject: 'CA GPT Password Reset Code',
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <h2>Password Reset Request</h2>
+          <p>Your CA GPT password reset code is:</p>
+          <div style="background: #f5f5f5; padding: 15px; border-radius: 5px; text-align: center; margin: 20px 0;">
+            <span style="font-size: 32px; font-weight: bold; letter-spacing: 5px;">${code}</span>
+          </div>
+          <p>This code expires in ${PASSWORD_RESET_CODE_TTL_MINUTES} minutes.</p>
+          <p style="color: #666; font-size: 12px;">If you did not request this password reset, you can safely ignore this email.</p>
+        </div>
+      `,
+      text: `Your CA GPT password reset code is ${code}.\n\nThis code expires in ${PASSWORD_RESET_CODE_TTL_MINUTES} minutes.\n\nIf you did not request this, you can ignore this email.`,
+    }),
+  });
+
+  if (!response.ok) {
+    const details = await response.text().catch(() => 'unknown error');
+    throw new Error(`Resend request failed (${response.status}): ${details}`);
+  }
+}
+
+function validateStrongPassword(password: string): string | null {
+  if (password.length < 8) return 'Password must be at least 8 characters long.';
+  if (!/[A-Z]/.test(password)) return 'Password must include at least one uppercase letter.';
+  if (!/[a-z]/.test(password)) return 'Password must include at least one lowercase letter.';
+  if (!/\d/.test(password)) return 'Password must include at least one number.';
+  return null;
+}
+
+function hashPasswordResetCode(email: string, code: string): string {
+  const secret = process.env.SESSION_SECRET || 'ca-gpt-reset-secret';
+  return crypto
+    .createHash('sha256')
+    .update(`${email.toLowerCase()}:${code}:${secret}`)
+    .digest('hex');
+}
+
 // Cleanup old Excel buffers every 10 minutes
 setInterval(() => {
   const now = Date.now();
@@ -476,6 +533,130 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
         error: "Login failed",
         details: isDev ? { message: errorMessage, code: errorCode } : undefined
       });
+    }
+  });
+
+  app.post('/api/auth/password-reset/request', authRateLimiter, async (req, res) => {
+    try {
+      const parsed = z.object({ email: z.string().email() }).safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: 'Please provide a valid email address.' });
+      }
+
+      const email = parsed.data.email.trim().toLowerCase();
+      const user = await storage.getUserByEmail(email);
+
+      // Always return generic success to prevent user enumeration.
+      if (!user) {
+        return res.json({ success: true, message: 'If an account exists, a confirmation code has been sent to your email.' });
+      }
+
+      const { db } = await import('./db');
+      const { passwordResetCodes } = await import('@shared/schema');
+      const { and, eq, isNull } = await import('drizzle-orm');
+
+      // Invalidate prior outstanding reset codes for this user.
+      await db
+        .update(passwordResetCodes)
+        .set({ usedAt: new Date() })
+        .where(and(eq(passwordResetCodes.userId, user.id), isNull(passwordResetCodes.usedAt)));
+
+      const code = String(crypto.randomInt(100000, 1000000));
+      const codeHash = hashPasswordResetCode(email, code);
+      const expiresAt = new Date(Date.now() + PASSWORD_RESET_CODE_TTL_MINUTES * 60 * 1000);
+
+      await db.insert(passwordResetCodes).values({
+        userId: user.id,
+        email,
+        codeHash,
+        expiresAt,
+      });
+
+      await sendPasswordResetCodeEmail(email, code);
+
+      return res.json({
+        success: true,
+        message: 'If an account exists, a confirmation code has been sent to your email.',
+      });
+    } catch (error: any) {
+      console.error('[Auth] Password reset code request failed:', error?.message || error);
+      return res.status(500).json({ error: 'Unable to send reset code right now. Please try again later.' });
+    }
+  });
+
+  app.post('/api/auth/password-reset/confirm', authRateLimiter, async (req, res) => {
+    try {
+      const parsed = z
+        .object({
+          email: z.string().email(),
+          code: z.string().min(6).max(6),
+          newPassword: z.string().min(8),
+        })
+        .safeParse(req.body);
+
+      if (!parsed.success) {
+        return res.status(400).json({ error: 'Invalid reset payload.' });
+      }
+
+      const email = parsed.data.email.trim().toLowerCase();
+      const code = parsed.data.code.trim();
+      const newPassword = parsed.data.newPassword;
+      const policyError = validateStrongPassword(newPassword);
+      if (policyError) {
+        return res.status(400).json({ error: policyError });
+      }
+
+      const user = await storage.getUserByEmail(email);
+      if (!user) {
+        return res.status(400).json({ error: 'Invalid or expired confirmation code.' });
+      }
+
+      const { db } = await import('./db');
+      const { passwordResetCodes } = await import('@shared/schema');
+      const { and, desc, eq, gt, isNull } = await import('drizzle-orm');
+
+      const rows = await db
+        .select()
+        .from(passwordResetCodes)
+        .where(
+          and(
+            eq(passwordResetCodes.userId, user.id),
+            eq(passwordResetCodes.email, email),
+            isNull(passwordResetCodes.usedAt),
+            gt(passwordResetCodes.expiresAt, new Date()),
+          ),
+        )
+        .orderBy(desc(passwordResetCodes.createdAt))
+        .limit(1);
+
+      const latest = rows[0];
+      if (!latest) {
+        return res.status(400).json({ error: 'Invalid or expired confirmation code.' });
+      }
+
+      const providedHash = hashPasswordResetCode(email, code);
+      const providedBuf = Buffer.from(providedHash, 'utf8');
+      const storedBuf = Buffer.from(latest.codeHash, 'utf8');
+      const isMatch =
+        providedBuf.length === storedBuf.length && crypto.timingSafeEqual(providedBuf, storedBuf);
+
+      if (!isMatch) {
+        return res.status(400).json({ error: 'Invalid or expired confirmation code.' });
+      }
+
+      const hashedPassword = await bcrypt.hash(newPassword, 10);
+      await storage.updateUser(user.id, { password: hashedPassword });
+      await storage.resetFailedLoginAttempts(user.id);
+
+      await db
+        .update(passwordResetCodes)
+        .set({ usedAt: new Date() })
+        .where(eq(passwordResetCodes.id, latest.id));
+
+      return res.json({ success: true, message: 'Password reset successful. You can now sign in.' });
+    } catch (error: any) {
+      console.error('[Auth] Password reset confirm failed:', error?.message || error);
+      return res.status(500).json({ error: 'Unable to reset password right now. Please try again later.' });
     }
   });
 

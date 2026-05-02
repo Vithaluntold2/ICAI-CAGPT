@@ -94,6 +94,7 @@ import {
   Loader2,
   Bot,
   Monitor,
+  Download,
 } from "lucide-react";
 import { ConversationFeedback } from "@/components/ConversationFeedback";
 import MessageFeedback from "@/components/MessageFeedback";
@@ -326,6 +327,7 @@ export default function Chat() {
   const { user, logout, isLoading } = useAuth();
   const [, setLocation] = useLocation();
   const { toast } = useToast();
+  const [isExportingPdf, setIsExportingPdf] = useState(false);
 
   // Feature flag: whiteboard v2 (rich rendering + whiteboard view + PIP).
   const { data: features } = useFeatureFlags();
@@ -887,6 +889,61 @@ export default function Chat() {
     .filter(m => m.role === 'assistant')
     .slice(-1)[0]?.content;
 
+  // Build a markdown transcript of the conversation (user + assistant turns
+  // in order) and POST it to the existing /api/export endpoint, which uses
+  // DocumentExporter under the hood. The returned blob is downloaded as PDF.
+  const handleExportConversationPdf = async () => {
+    if (isExportingPdf) return;
+    if (!messages.length) return;
+    setIsExportingPdf(true);
+    try {
+      const transcript = messages
+        .filter(m => m.role === 'user' || m.role === 'assistant')
+        .map(m => {
+          const speaker = m.role === 'user' ? 'You' : 'CA GPT';
+          return `## ${speaker}\n\n${m.content || ''}`;
+        })
+        .join('\n\n---\n\n');
+
+      const title = activeConversationTitle?.trim() || 'CA GPT Conversation';
+
+      const response = await fetch('/api/export', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          content: transcript,
+          format: 'pdf',
+          title,
+        }),
+      });
+
+      if (!response.ok) throw new Error(`Export failed (${response.status})`);
+
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const safeTitle = title.replace(/[^a-z0-9-_]+/gi, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'conversation';
+      a.download = `${safeTitle}-${Date.now()}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+
+      toast({ title: 'Conversation exported', description: 'PDF download started.' });
+    } catch (error) {
+      console.error('[Chat] PDF export failed:', error);
+      toast({
+        variant: 'destructive',
+        title: 'Export failed',
+        description: error instanceof Error ? error.message : 'Could not export conversation as PDF.',
+      });
+    } finally {
+      setIsExportingPdf(false);
+    }
+  };
+
   const handleSendMessage = (inputText: string = '') => {
     if (!user) return;
     const trimmed = inputText.trim();
@@ -1369,31 +1426,49 @@ export default function Chat() {
           view={breadcrumbView}
           onViewChange={setBreadcrumbView}
           rightSlot={
-            chatMode === 'roundtable' ? (
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-7 px-2 text-xs"
-                onClick={() => setPanelBuilderOpen(true)}
-                data-testid="open-panel-builder"
-              >
-                <UsersIcon className="w-3.5 h-3.5 mr-1" /> Configure panel
-              </Button>
-            ) : chatMode === 'deep-research' && messages.length > 0 ? (
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-7 px-2 text-xs"
-                onClick={() => {
-                  setChatMode('roundtable');
-                  setPanelBuilderOpen(true);
-                }}
-                data-testid="promote-to-roundtable"
-                title="Switch to roundtable mode and start building a panel using the same conversation context."
-              >
-                <UsersIcon className="w-3.5 h-3.5 mr-1" /> Promote to Roundtable
-              </Button>
-            ) : undefined
+            <div className="flex items-center gap-2">
+              {chatMode === 'roundtable' ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 px-2 text-xs"
+                  onClick={() => setPanelBuilderOpen(true)}
+                  data-testid="open-panel-builder"
+                >
+                  <UsersIcon className="w-3.5 h-3.5 mr-1" /> Configure panel
+                </Button>
+              ) : chatMode === 'deep-research' && messages.length > 0 ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 px-2 text-xs"
+                  onClick={() => {
+                    setChatMode('roundtable');
+                    setPanelBuilderOpen(true);
+                  }}
+                  data-testid="promote-to-roundtable"
+                  title="Switch to roundtable mode and start building a panel using the same conversation context."
+                >
+                  <UsersIcon className="w-3.5 h-3.5 mr-1" /> Promote to Roundtable
+                </Button>
+              ) : null}
+              {messages.length > 0 && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={handleExportConversationPdf}
+                  disabled={isExportingPdf}
+                  data-testid="export-conversation-pdf"
+                  title="Export conversation as PDF"
+                  aria-label="Export conversation as PDF"
+                >
+                  {isExportingPdf
+                    ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    : <Download className="w-3.5 h-3.5" />}
+                </Button>
+              )}
+            </div>
           }
         />
         {breadcrumbView === 'chat' ? (

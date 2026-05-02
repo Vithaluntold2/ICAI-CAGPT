@@ -351,6 +351,16 @@ export function buildArtifactsForMessage(input: BuildArtifactsInput): BuildArtif
       } else {
         updatedContent = `${updatedContent.trimEnd()}\n<artifact id="${id}"></artifact>`;
       }
+    } else if (!precomputed.document && updatedContent.trim()) {
+      // Fallback: model produced prose without `- [ ]` lines. Rather than
+      // leaving the whiteboard empty, persist the response as a document
+      // artifact so the user still sees a card on the board.
+      place(
+        "document",
+        "Checklist",
+        summarize("Checklist", "document"),
+        { title: "Checklist", content: updatedContent, mode: "checklist" },
+      );
     }
   }
 

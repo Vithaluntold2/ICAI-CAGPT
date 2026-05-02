@@ -1059,14 +1059,29 @@ export class AIOrchestrator {
       }
     }
 
-    // Deliverable Composer & Calculation: the entire polished response IS the 
-    // deliverable — these modes have no separate reasoning stream by default, 
-    // and we don't force the AI to emit <DELIVERABLE>/<REASONING> tags. 
-    // Promote the full response so it becomes a persisted document artifact 
-    // on the whiteboard. Chat continues to echo the prose (mainResponse 
-    // unchanged) — the extractPipeline skips the inline <artifact /> 
+    // Deliverable Composer & Calculation: the entire polished response IS the
+    // deliverable — these modes have no separate reasoning stream by default,
+    // and we don't force the AI to emit <DELIVERABLE>/<REASONING> tags.
+    // Promote the full response so it becomes a persisted document artifact
+    // on the whiteboard. Chat continues to echo the prose (mainResponse
+    // unchanged) — the extractPipeline skips the inline <artifact />
     // placeholder for documents to avoid duplication.
     if ((chatMode === 'deliverable-composer' || chatMode === 'calculation') && !deliverableContent && finalResponse?.trim()) {
+      deliverableContent = finalResponse;
+    }
+
+    // Same fallback for checklist / workflow / audit-plan: the prompts ask for
+    // <DELIVERABLE>/<REASONING> tags, but the model occasionally drops them and
+    // returns prose only. Without a fallback the OutputPane has nothing to
+    // render and the user sees the empty-state placeholder even though the AI
+    // produced a usable answer. Promote the raw response so the artifact card
+    // still appears (best-effort parsing applies in the renderer).
+    if (
+      chatMode &&
+      ['checklist', 'workflow', 'audit-plan'].includes(chatMode) &&
+      !deliverableContent &&
+      finalResponse?.trim()
+    ) {
       deliverableContent = finalResponse;
     }
 
@@ -1167,11 +1182,22 @@ export class AIOrchestrator {
           }
         }
         // Deliverable Composer & Calculation emit a long-form markdown document.
-        // Promote it to a persisted artifact so it can be selected, referenced, 
-        // and exported like any other artifact.
-        if ((chatMode === 'deliverable-composer' || chatMode === 'calculation') && deliverableContent) {
+        // Promote it to a persisted artifact so it can be selected, referenced,
+        // and exported like any other artifact. Audit-plan is the same shape —
+        // it has no structured extractor of its own, so without this promotion
+        // the whiteboard stays empty for audit-plan responses.
+        if (
+          (chatMode === 'deliverable-composer' ||
+            chatMode === 'calculation' ||
+            chatMode === 'audit-plan') &&
+          deliverableContent
+        ) {
+          const documentTitle =
+            chatMode === 'calculation' ? 'Calculation Report' :
+            chatMode === 'audit-plan' ? 'Audit Plan' :
+            'Deliverable';
           precomputedSlots.document = {
-            title: chatMode === 'calculation' ? 'Calculation Report' : 'Deliverable',
+            title: documentTitle,
             content: deliverableContent,
             mode: chatMode,
           };

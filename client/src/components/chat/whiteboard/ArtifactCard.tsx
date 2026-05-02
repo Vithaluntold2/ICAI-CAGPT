@@ -1,6 +1,6 @@
 import { useRef } from "react";
 import { cn } from "@/lib/utils";
-import { MoreVertical } from "lucide-react";
+import { MoreVertical, Download } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -11,6 +11,7 @@ import type { WhiteboardArtifact } from "../../../../../shared/schema";
 import { ArtifactRenderer } from "../artifacts/ArtifactRenderer";
 import { useSelectionContext } from "./useSelectionContext";
 import { useReportArtifactVisibility } from "./useVisibleArtifacts";
+import { useToast } from "@/hooks/use-toast";
 
 /**
  * Whiteboard artifact card.
@@ -30,7 +31,44 @@ export function ArtifactCard({
 }) {
   const setArtifacts = useSelectionContext(s => s.setArtifacts);
   const rootRef = useRef<HTMLDivElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
   useReportArtifactVisibility(artifact.id, rootRef);
+  const { toast } = useToast();
+
+  // Workflow-only: one-click PNG export from the whiteboard card itself, so
+  // the user doesn't have to open the artifact in fullscreen first. Same
+  // capture approach as InlineArtifactCard (html-to-image with skipFonts).
+  const handleDownloadPng = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const el = bodyRef.current;
+    if (!el) return;
+    try {
+      const htmlToImage = await import('html-to-image');
+      const blob = await htmlToImage.toBlob(el, {
+        pixelRatio: 2,
+        cacheBust: true,
+        skipFonts: true,
+      });
+      if (!blob) throw new Error('Capture returned no image data.');
+      const slug = (artifact.title || artifact.kind)
+        .toString()
+        .replace(/[^a-z0-9_-]+/gi, '_');
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${slug}-${artifact.id}.png`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+    } catch (err: any) {
+      toast({
+        title: 'Download failed',
+        description: err?.message ?? String(err),
+        variant: 'destructive',
+      });
+    }
+  };
 
   return (
     <div
@@ -70,6 +108,18 @@ export function ArtifactCard({
         <span className="font-medium truncate">{artifact.title}</span>
         <div className="flex items-center gap-2 shrink-0 ml-2">
           <span className="text-muted-foreground">{artifact.kind}</span>
+          {artifact.kind === 'workflow' && (
+            <button
+              type="button"
+              className="h-5 w-5 rounded hover:bg-muted flex items-center justify-center"
+              aria-label="Download workflow as PNG"
+              title="Download as PNG"
+              data-testid={`artifact-card-download-${artifact.id}`}
+              onClick={handleDownloadPng}
+            >
+              <Download className="h-3.5 w-3.5" />
+            </button>
+          )}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
@@ -96,7 +146,7 @@ export function ArtifactCard({
           </DropdownMenu>
         </div>
       </div>
-      <div className="p-2 flex-1 overflow-auto">
+      <div ref={bodyRef} className="p-2 flex-1 overflow-auto">
         {/* `embedded` tells the child renderers that this card already shows
             the title + kind + menu in its own header — so they should suppress
             their own redundant title chrome to avoid duplication. */}

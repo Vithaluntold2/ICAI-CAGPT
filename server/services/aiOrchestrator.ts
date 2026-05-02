@@ -1105,11 +1105,15 @@ export class AIOrchestrator {
     // We do this BEFORE building whiteboard artifacts so that the resulting
     // SpreadsheetData can feed `precomputed.spreadsheet` and get a whiteboard
     // artifact (which also drives inline chat rendering via <artifact /> tags).
-    // Failing silently is fine — the SSE route runs the same extraction as a
-    // fallback, so a regression here doesn't break the OutputPane path.
-    // NOTE: Calculation mode is purely textual — skip sheet extraction entirely.
+    // Sheet-block extraction is gated to spreadsheet mode ONLY. Other modes
+    // were leaking spreadsheet artifacts into research / standard / etc.
+    // because the global system prompt taught the model to emit ```sheet```
+    // blocks for any multi-row tabular output. In non-spreadsheet modes we
+    // still strip any leaked ```sheet``` fence from the response text so the
+    // user never sees raw CSV — but we do NOT promote the data to a
+    // spreadsheet artifact.
     let aiAuthoredSpreadsheet: any = null;
-    if (chatMode !== 'calculation') {
+    if (chatMode === 'spreadsheet') {
       try {
         const { extractAndEvaluateSheetBlocks } = await import('./excel/sheetBlockParser');
         const extracted = extractAndEvaluateSheetBlocks(mainResponse);
@@ -1121,6 +1125,10 @@ export class AIOrchestrator {
       } catch (err) {
         console.warn('[Orchestrator] Sheet-block extraction skipped:', (err as Error).message);
       }
+    } else if (/```sheet[\s\S]*?```/.test(mainResponse)) {
+      const stripped = mainResponse.replace(/```sheet[\s\S]*?```/g, '').replace(/\n{3,}/g, '\n\n').trim();
+      console.log(`[Orchestrator] Stripped leaked sheet block(s) from ${chatMode} mode response`);
+      mainResponse = stripped;
     }
 
     // Prefer AI-authored sheet data over the generator's output for downstream

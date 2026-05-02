@@ -5291,9 +5291,13 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
         // renders the sheet on the right. Replaces the raw block in chat text
         // with a compact pointer. Must run BEFORE inline formula evaluation so
         // we don't double-decorate formulas that are also inside sheet blocks.
-        // NOTE: Calculation mode is purely textual — skip sheet extraction entirely.
+        // NOTE: gated to spreadsheet mode ONLY. Other modes were leaking
+        // spreadsheet artifacts because the global prompt taught the model to
+        // emit ```sheet``` for tabular output. Strip any leaked sheet fence
+        // from the response text in non-spreadsheet modes so users don't see
+        // raw CSV, but do not promote it to a spreadsheet artifact.
         let aiSpreadsheetData: any = null;
-        if (chatMode !== 'calculation') {
+        if (chatMode === 'spreadsheet') {
           try {
             const { extractAndEvaluateSheetBlocks } = await import('./services/excel/sheetBlockParser');
             const extracted = extractAndEvaluateSheetBlocks(fullResponse);
@@ -5305,6 +5309,9 @@ app.post("/api/auth/login", authRateLimiter, async (req, res) => {
           } catch (err) {
             console.warn('[SSE] Sheet-block extraction skipped:', (err as Error).message);
           }
+        } else if (/```sheet[\s\S]*?```/.test(fullResponse)) {
+          fullResponse = fullResponse.replace(/```sheet[\s\S]*?```/g, '').replace(/\n{3,}/g, '\n\n').trim();
+          console.log(`[SSE] Stripped leaked sheet block(s) from ${chatMode} mode response`);
         }
 
         // Evaluate any Excel formulas the AI emitted INLINE in prose and inline

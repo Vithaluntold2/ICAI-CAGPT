@@ -280,17 +280,21 @@ export function buildArtifactsForMessage(input: BuildArtifactsInput): BuildArtif
   }
   if (precomputed.document) {
     const title = precomputed.document.title ?? "Document";
-    // Deliberately NOT appending an <artifact /> placeholder for documents —
-    // the document's content is already the chat prose, so inlining the
-    // artifact would render the same text twice. The artifact still exists on
-    // the whiteboard (selectable, referenceable, downloadable) — it's just
-    // not echoed inline in the chat stream.
-    place(
+    // For deliverable-composer / calculation, the document's content IS the
+    // chat prose, so inlining an <artifact /> placeholder would render the
+    // same text twice — skip it. For audit-plan the chat only carries the
+    // short <REASONING> paragraph while the long deliverable lives in the
+    // artifact; without the inline placeholder the user has no entry point
+    // from the chat pane to the audit plan card.
+    const id = place(
       "document",
       title,
       summarize(title, "document"),
       precomputed.document,
     );
+    if (precomputed.document.mode === "audit-plan") {
+      updatedContent = `${updatedContent.trimEnd()}\n<artifact id="${id}"></artifact>`;
+    }
   }
 
   const flowcharts = extractFlowcharts(updatedContent);

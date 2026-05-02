@@ -96,9 +96,14 @@ export function InlineArtifactCard({
           <ActionButton title="Copy as PNG" onClick={handleCopy}>
             <Copy className="w-[13px] h-[13px]" strokeWidth={1.75} />
           </ActionButton>
-          <ActionButton title="Download PNG" onClick={handleDownload}>
-            <Download className="w-[13px] h-[13px]" strokeWidth={1.75} />
-          </ActionButton>
+          {/* Checklists already render their own Export button in-card; a PNG
+              download of a checklist is not a useful artefact, so we hide the
+              header download icon for that kind to remove redundancy. */}
+          {artifact.kind !== 'checklist' && (
+            <ActionButton title="Download PNG" onClick={handleDownload}>
+              <Download className="w-[13px] h-[13px]" strokeWidth={1.75} />
+            </ActionButton>
+          )}
           {onOpenInWhiteboard && (
             <ActionButton
               title="View in output"

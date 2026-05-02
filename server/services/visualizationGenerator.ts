@@ -268,26 +268,39 @@ export class VisualizationGenerator {
     // Detect chart type based on data structure and query
     const chartType = this.detectChartType(table, query);
     
+    // dataKeys must be valid CSS-property suffixes — shadcn's ChartContainer
+    // emits `--color-<dataKey>: hsl(...)`, which Recharts then reads via
+    // `fill={`var(--color-${dataKey})`}`. Raw markdown headers like
+    // "Share (%)" or "Amount (₹)" produce invalid CSS variable names, the
+    // var() resolves to nothing, and bars/lines/areas render solid black.
+    // We map header → safe key and keep the original string as the legend
+    // name. The first column is the category axis ("name").
+    const safeKeys = headers.map((h, i) => {
+      if (i === 0) return 'name';
+      const cleaned = String(h).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+      return cleaned ? `series_${cleaned}` : `series_${i}`;
+    });
+
     // Convert table to data array
     const data: Array<Record<string, any>> = [];
-    
+
     for (const row of rows) {
       const dataPoint: Record<string, any> = {};
-      
+
       for (let i = 0; i < headers.length; i++) {
-        const header = headers[i];
         const cell = row[i] || '';
-        
+
         // Try to parse as number
         const num = this.parseNumber(cell);
-        dataPoint[header] = num !== null ? num : cell;
+        dataPoint[safeKeys[i]] = num !== null ? num : cell;
       }
-      
+
       data.push(dataPoint);
     }
-    
-    // Build visualization config
-    const config = this.buildChartConfig(chartType, headers, query);
+
+    // Build visualization config (passes both raw headers — for legend names —
+    // and the safe keys that match the data row shape).
+    const config = this.buildChartConfig(chartType, headers, query, safeKeys);
     const title = this.generateTitle(query, chartType);
     
     // For pie charts, coerce the header-keyed rows into the {name, value}
@@ -308,18 +321,19 @@ export class VisualizationGenerator {
 
       // Pick label + value columns by scanning headers in order. First
       // header with text values → label column. First header with numeric
-      // values → value column.
-      let labelKey = headers[0];
-      let valueKey = headers[1];
-      for (const h of headers) {
-        if (data.some(r => typeof r[h] === 'number')) {
-          valueKey = h;
+      // values → value column. Lookups happen against the sanitised keys in
+      // the data rows (CSS-safe), not the raw header strings.
+      let labelKey = safeKeys[0];
+      let valueKey = safeKeys[1];
+      for (const k of safeKeys) {
+        if (data.some(r => typeof r[k] === 'number')) {
+          valueKey = k;
           break;
         }
       }
-      for (const h of headers) {
-        if (h !== valueKey && data.some(r => typeof r[h] === 'string' && r[h].length > 0)) {
-          labelKey = h;
+      for (const k of safeKeys) {
+        if (k !== valueKey && data.some(r => typeof r[k] === 'string' && r[k].length > 0)) {
+          labelKey = k;
           break;
         }
       }
@@ -420,7 +434,8 @@ export class VisualizationGenerator {
   private buildChartConfig(
     chartType: 'line' | 'bar' | 'pie' | 'area',
     headers: string[],
-    query: string
+    query: string,
+    safeKeys?: string[],
   ): any {
     const colors = [
       'hsl(var(--chart-1))',
@@ -429,21 +444,23 @@ export class VisualizationGenerator {
       'hsl(var(--chart-4))',
       'hsl(var(--chart-5))'
     ];
-    
+
     const config: any = {
       xAxisLabel: headers[0]
     };
-    
+
     // For pie charts, no need to build series arrays
     if (chartType === 'pie') {
       config.showPercentage = true;
       return config;
     }
-    
-    // Build series arrays for line, bar, and area charts
+
+    // Build series arrays for line, bar, and area charts. dataKey must match
+    // the sanitised key in the data rows (CSS-safe); name keeps the original
+    // header text for the legend / tooltip.
     const numericHeaders = headers.slice(1); // Skip first column (category)
     const series = numericHeaders.map((header, index) => ({
-      dataKey: header,
+      dataKey: safeKeys ? safeKeys[index + 1] : header,
       name: header,
       color: colors[index % colors.length]
     }));
